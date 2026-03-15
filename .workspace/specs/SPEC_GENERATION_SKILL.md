@@ -49,6 +49,9 @@ scaffold advance --fixed "Added Observability section"             # REFINE: rec
 scaffold advance                                                   # REVIEW: accept
 scaffold advance --verdict FAIL                                    # REVIEW: grant extra round
 
+# Add a commit to a completed spec
+scaffold add-commit --id 5 --hash "7cede10"
+
 # Full session overview
 scaffold status
 ```
@@ -252,6 +255,136 @@ Do not rewrite the spec. Your job is to evaluate, not to author.
 - **Prompt:** The formatted prompt above, with file paths filled in.
 
 The sub-agent reads the reference files itself. Do not paste file contents into the prompt — use file paths so the sub-agent works with the current state on disk.
+
+---
+
+## Reconciliation Eval Sub-Agent Protocol
+
+When the scaffold reaches RECONCILE_EVAL, the architect tells the sub-agent to evaluate cross-spec consistency. Unlike per-spec evals, this eval works from `git diff --staged` to see all reconciliation changes holistically.
+
+### Reconciliation Sub-Agent Prompt Format
+
+```markdown
+# Reconciliation Evaluation
+
+You are an adversarial reviewer evaluating cross-reference consistency
+across a set of specifications. Your job is to find inconsistencies
+between specs, not to evaluate individual spec quality.
+
+## Instructions
+
+1. Run `git diff --staged` to see all reconciliation changes.
+2. Read every spec file listed below.
+3. Evaluate the cross-reference consistency.
+
+## Spec Files
+
+- `<path-to-spec-1>`
+- `<path-to-spec-2>`
+- ...
+
+## Evaluation Criteria
+
+| Dimension | What to check |
+|-----------|---------------|
+| **Dependency completeness** | Every `Depends On` entry references a spec that exists. No dangling references. |
+| **Dependency symmetry** | If spec A lists spec B in Integration Points, spec B lists spec A. |
+| **Naming consistency** | Spec names match exactly across all Depends On and Integration Points references. No aliases or abbreviations. |
+| **No circular dependencies** | The dependency graph is a DAG. No spec depends on itself through any chain. |
+| **Integration point accuracy** | Each Integration Points entry correctly describes the relationship (what flows, in which direction). |
+| **Scope boundary respect** | No spec defines behavior that another spec claims to own. |
+
+## Output Format
+
+### Verdict: [PASS | FAIL]
+
+### Summary
+2-3 sentences on overall consistency.
+
+### Findings
+
+For each issue found:
+- **Specs involved:** Which specs have the inconsistency.
+- **Issue:** What is wrong.
+- **Fix:** What the architect should do.
+
+If no issues found, state what was checked and why it passes.
+```
+
+---
+
+## Eval Output Convention
+
+Evaluation sub-agents write their output to a structured directory:
+
+```
+<project>/specs/.eval/
+├── <spec-name>-r1.md
+├── <spec-name>-r2.md
+├── reconciliation-r1.md
+└── ...
+```
+
+- File name: spec name (kebab-case) + round number.
+- Reconciliation evals use `reconciliation-rN.md`.
+- The scaffold does not read these files — they are for the architect's reference.
+- Add `.eval/` to `.gitignore` if eval output should not be committed.
+
+---
+
+## Scoping Multi-Responsibility Plans
+
+When a planning document bundles multiple responsibilities (e.g., the idea generation module plan covers the generator, judge, reference examples, and trainset), the architect must:
+
+1. **Identify the distinct topics.** Each responsibility that passes the one-sentence test becomes a separate spec.
+2. **Write explicit scope exclusion notes.** In each spec's Context section, state what is excluded and why (e.g., "LLM judge scoring is specified separately in the LLM Judge Scoring spec").
+3. **Use "Out of scope" in completeness checklists.** The eval sub-agent's completeness checklist has an "Out of scope" status for items that belong to another spec's topic.
+4. **Cross-reference via Integration Points.** Each spec references the others it was split from, so readers can trace the full picture.
+
+---
+
+## Common Eval Findings (Lessons Learned)
+
+These patterns were found repeatedly during evaluation. Avoid them during drafting:
+
+### Phantom Observability Entries
+**Pattern:** The Observability/Logging section references a behavior (e.g., "parsing retry") that no Behavior section defines.
+**Fix:** Every log entry must correspond to a defined behavior step or error handling path. If the behavior doesn't include a retry, the log entry shouldn't mention one.
+
+### Unverifiable Invariants
+**Pattern:** An invariant describes LLM behavior intent (e.g., "prior ideas are context, not constraints") rather than a verifiable system property.
+**Fix:** Invariants must be testable by a test suite at any point. If you can't write a Given/When/Then for it, demote it to an edge case or design note.
+
+### Missing Observability Section
+**Pattern:** The spec has no Observability section, even though the behavior involves state transitions, external calls, or error conditions that warrant logging.
+**Fix:** Every spec with behaviors that can fail or that report progress needs at minimum INFO for success, ERROR for failures, and DEBUG for diagnostic details.
+
+### Untested Invariants
+**Pattern:** Invariants are listed but have no corresponding testing criteria.
+**Fix:** Every invariant needs a Given/When/Then test. If you can't test it, it's either not an invariant or it's too vague.
+
+### Internal Architecture as Invariants
+**Pattern:** Invariants prescribe concurrency strategy, internal data structures, or threading models (e.g., "WS handler is async, worker is blocking").
+**Fix:** Per SPEC_FORMAT Principle 5, these are implementation details. Reformulate as externally observable properties (e.g., "command processing is decoupled from execution").
+
+### Silent Omissions from Planning Sources
+**Pattern:** A planning document defines a behavior that the spec neither covers nor explicitly excludes.
+**Fix:** Every item from the planning source must appear in the spec (covered), in a scope exclusion note (excluded with rationale), or in the eval checklist as "out of scope" (belongs to another spec).
+
+---
+
+## Reconciliation Checklist
+
+During the RECONCILE phase, verify:
+
+- [ ] Every `Depends On` reference points to a spec that exists in `<project>/specs/`
+- [ ] Every `Depends On` entry has a corresponding `Integration Points` row in the referenced spec
+- [ ] Integration Points are symmetric: if A mentions B, B mentions A
+- [ ] Spec names are consistent across all references (no aliases, abbreviations, or stale names)
+- [ ] No circular dependencies in the `Depends On` graph
+- [ ] Each Integration Points relationship description accurately reflects what flows between specs
+- [ ] Leaf dependencies (specs with no Depends On) are correctly identified
+- [ ] The `Implements` section in each spec names the correct planning topics
 
 ---
 
