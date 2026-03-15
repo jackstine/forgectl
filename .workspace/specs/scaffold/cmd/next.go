@@ -33,8 +33,14 @@ func runNext(cmd *cobra.Command, args []string) error {
 		fmt.Fprintf(out, "Spec:    %s\n", s.CurrentSpec.Name)
 		fmt.Fprintf(out, "Domain:  %s\n", s.CurrentSpec.Domain)
 		fmt.Fprintf(out, "File:    %s\n", s.CurrentSpec.File)
-		if s.State == state.PhaseEvaluate || s.State == state.PhaseRefine {
-			fmt.Fprintf(out, "Round:   %d/%d\n", s.CurrentSpec.Round, s.EvaluationRounds)
+		if s.State == state.PhaseEvaluate || s.State == state.PhaseRefine || s.State == state.PhaseReview {
+			fmt.Fprintf(out, "Round:   %d/%d\n", s.CurrentSpec.Round, s.MaxRounds)
+		}
+		if len(s.CurrentSpec.Evals) > 0 && (s.State == state.PhaseRefine || s.State == state.PhaseReview) {
+			last := s.CurrentSpec.Evals[len(s.CurrentSpec.Evals)-1]
+			if len(last.Deficiencies) > 0 {
+				fmt.Fprintf(out, "Deficiencies: %v\n", last.Deficiencies)
+			}
 		}
 	}
 

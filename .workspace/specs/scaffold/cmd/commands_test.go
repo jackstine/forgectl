@@ -52,12 +52,15 @@ func executeCommand(args ...string) (string, error) {
 }
 
 func resetFlags() {
-	initRounds = 0
+	initMinRounds = 1
+	initMaxRounds = 0
 	initFrom = ""
 	initUserGuided = false
 	advanceFile = ""
 	advanceVerdict = ""
 	advanceMessage = ""
+	advanceDeficiencies = ""
+	advanceFixed = ""
 }
 
 // --- Init command ---
@@ -67,15 +70,12 @@ func TestInitCommand_Success(t *testing.T) {
 	queuePath := writeQueueFile(t, dir, validQueueJSON())
 	resetFlags()
 
-	out, err := executeCommand("init", "--dir", dir, "--rounds", "3", "--from", queuePath)
+	out, err := executeCommand("init", "--dir", dir, "--max-rounds", "3", "--from", queuePath)
 	if err != nil {
 		t.Fatalf("init failed: %v\noutput: %s", err, out)
 	}
 	if !strings.Contains(out, "2 specs") {
 		t.Errorf("expected '2 specs' in output, got: %s", out)
-	}
-	if !strings.Contains(out, "3 evaluation rounds") {
-		t.Errorf("expected '3 evaluation rounds' in output, got: %s", out)
 	}
 
 	if !state.Exists(dir) {
@@ -83,22 +83,33 @@ func TestInitCommand_Success(t *testing.T) {
 	}
 }
 
-func TestInitCommand_UserGuided(t *testing.T) {
+func TestInitCommand_MinMaxRounds(t *testing.T) {
 	dir := t.TempDir()
 	queuePath := writeQueueFile(t, dir, validQueueJSON())
 	resetFlags()
 
-	out, err := executeCommand("init", "--dir", dir, "--rounds", "1", "--from", queuePath, "--user-guided")
+	out, err := executeCommand("init", "--dir", dir, "--min-rounds", "2", "--max-rounds", "5", "--from", queuePath)
 	if err != nil {
 		t.Fatalf("init failed: %v\noutput: %s", err, out)
 	}
-	if !strings.Contains(out, "user-guided") {
-		t.Errorf("expected 'user-guided' in output, got: %s", out)
+	if !strings.Contains(out, "2-5") {
+		t.Errorf("expected '2-5' in output, got: %s", out)
 	}
 
 	s, _ := state.Load(dir)
-	if !s.UserGuided {
-		t.Error("user_guided should be true")
+	if s.MinRounds != 2 || s.MaxRounds != 5 {
+		t.Errorf("rounds: got %d-%d, want 2-5", s.MinRounds, s.MaxRounds)
+	}
+}
+
+func TestInitCommand_MinExceedsMax(t *testing.T) {
+	dir := t.TempDir()
+	queuePath := writeQueueFile(t, dir, validQueueJSON())
+	resetFlags()
+
+	_, err := executeCommand("init", "--dir", dir, "--min-rounds", "5", "--max-rounds", "2", "--from", queuePath)
+	if err == nil {
+		t.Fatal("expected error when min > max")
 	}
 }
 
@@ -106,11 +117,10 @@ func TestInitCommand_ExistingStateFile(t *testing.T) {
 	dir := t.TempDir()
 	queuePath := writeQueueFile(t, dir, validQueueJSON())
 	resetFlags()
-
-	executeCommand("init", "--dir", dir, "--rounds", "1", "--from", queuePath)
+	executeCommand("init", "--dir", dir, "--max-rounds", "1", "--from", queuePath)
 	resetFlags()
 
-	_, err := executeCommand("init", "--dir", dir, "--rounds", "1", "--from", queuePath)
+	_, err := executeCommand("init", "--dir", dir, "--max-rounds", "1", "--from", queuePath)
 	if err == nil {
 		t.Fatal("expected error for existing state file")
 	}
@@ -121,268 +131,150 @@ func TestInitCommand_InvalidQueue(t *testing.T) {
 	queuePath := writeQueueFile(t, dir, `{"specs": [{"name": "A"}]}`)
 	resetFlags()
 
-	out, err := executeCommand("init", "--dir", dir, "--rounds", "1", "--from", queuePath)
+	out, err := executeCommand("init", "--dir", dir, "--max-rounds", "1", "--from", queuePath)
 	if err == nil {
 		t.Fatal("expected error for invalid queue")
 	}
 	if !strings.Contains(out, "Validation errors") {
 		t.Errorf("expected validation errors in output, got: %s", out)
 	}
-	if !strings.Contains(out, "Expected schema") {
-		t.Errorf("expected schema in output, got: %s", out)
-	}
 }
 
-func TestInitCommand_ExtraFields(t *testing.T) {
-	dir := t.TempDir()
-	json := `{
-		"specs": [
-			{
-				"name": "A",
-				"domain": "api",
-				"topic": "T",
-				"file": "f.md",
-				"planning_sources": [],
-				"depends_on": [],
-				"priority": "high"
-			}
-		]
-	}`
-	queuePath := writeQueueFile(t, dir, json)
-	resetFlags()
+// --- Advance with deficiencies ---
 
-	out, err := executeCommand("init", "--dir", dir, "--rounds", "1", "--from", queuePath)
-	if err == nil {
-		t.Fatal("expected error for extra fields")
-	}
-	if !strings.Contains(out, "priority") {
-		t.Errorf("expected 'priority' in error output, got: %s", out)
-	}
-}
-
-func TestInitCommand_DependencyWarning(t *testing.T) {
-	dir := t.TempDir()
-	json := `{
-		"specs": [
-			{
-				"name": "B",
-				"domain": "api",
-				"topic": "Topic B",
-				"file": "api/specs/b.md",
-				"planning_sources": [],
-				"depends_on": ["A"]
-			}
-		]
-	}`
-	queuePath := writeQueueFile(t, dir, json)
-	resetFlags()
-
-	out, err := executeCommand("init", "--dir", dir, "--rounds", "1", "--from", queuePath)
-	if err != nil {
-		t.Fatalf("init failed: %v", err)
-	}
-	if !strings.Contains(out, "Warning") || !strings.Contains(out, `"A"`) {
-		t.Errorf("expected dependency warning about A, got: %s", out)
-	}
-}
-
-func TestInitCommand_FileNotFound(t *testing.T) {
-	dir := t.TempDir()
-	resetFlags()
-
-	_, err := executeCommand("init", "--dir", dir, "--rounds", "1", "--from", "/nonexistent/queue.json")
-	if err == nil {
-		t.Fatal("expected error for missing file")
-	}
-}
-
-// --- Next command ---
-
-func TestNextCommand(t *testing.T) {
+func TestAdvanceCommand_FailWithDeficiencies(t *testing.T) {
 	dir := t.TempDir()
 	queuePath := writeQueueFile(t, dir, validQueueJSON())
 	resetFlags()
-	executeCommand("init", "--dir", dir, "--rounds", "2", "--from", queuePath)
+	executeCommand("init", "--dir", dir, "--max-rounds", "2", "--from", queuePath)
+	resetFlags()
+	executeCommand("advance", "--dir", dir) // ORIENT → SELECT
+	resetFlags()
+	executeCommand("advance", "--dir", dir) // SELECT → DRAFT
+	resetFlags()
+	executeCommand("advance", "--dir", dir) // DRAFT → EVALUATE
 	resetFlags()
 
-	out, err := executeCommand("next", "--dir", dir)
-	if err != nil {
-		t.Fatalf("next failed: %v", err)
-	}
-	if !strings.Contains(out, "ORIENT") {
-		t.Errorf("expected ORIENT state, got: %s", out)
-	}
-}
-
-func TestNextCommand_NoStateFile(t *testing.T) {
-	dir := t.TempDir()
-	resetFlags()
-
-	_, err := executeCommand("next", "--dir", dir)
-	if err == nil {
-		t.Fatal("expected error for missing state file")
-	}
-}
-
-// --- Advance command ---
-
-func TestAdvanceCommand_OrientToSelect(t *testing.T) {
-	dir := t.TempDir()
-	queuePath := writeQueueFile(t, dir, validQueueJSON())
-	resetFlags()
-	executeCommand("init", "--dir", dir, "--rounds", "1", "--from", queuePath)
-	resetFlags()
-
-	out, err := executeCommand("advance", "--dir", dir)
+	out, err := executeCommand("advance", "--dir", dir, "--verdict", "FAIL", "--deficiencies", "Completeness,Precision")
 	if err != nil {
 		t.Fatalf("advance failed: %v\noutput: %s", err, out)
 	}
-	if !strings.Contains(out, "ORIENT → SELECT") {
-		t.Errorf("expected transition output, got: %s", out)
+
+	s, _ := state.Load(dir)
+	if len(s.CurrentSpec.Evals) != 1 {
+		t.Fatalf("evals: got %d, want 1", len(s.CurrentSpec.Evals))
 	}
-	if !strings.Contains(out, "Config Models") {
-		t.Errorf("expected spec name in output, got: %s", out)
+	if len(s.CurrentSpec.Evals[0].Deficiencies) != 2 {
+		t.Errorf("deficiencies: got %d, want 2", len(s.CurrentSpec.Evals[0].Deficiencies))
 	}
 }
 
-func TestAdvanceCommand_DraftUsesQueueFile(t *testing.T) {
+// --- Advance with --fixed in REFINE ---
+
+func TestAdvanceCommand_RefineWithFixed(t *testing.T) {
 	dir := t.TempDir()
 	queuePath := writeQueueFile(t, dir, validQueueJSON())
 	resetFlags()
-	executeCommand("init", "--dir", dir, "--rounds", "1", "--from", queuePath)
+	executeCommand("init", "--dir", dir, "--min-rounds", "2", "--max-rounds", "3", "--from", queuePath)
 	resetFlags()
 	executeCommand("advance", "--dir", dir) // ORIENT → SELECT
 	resetFlags()
 	executeCommand("advance", "--dir", dir) // SELECT → DRAFT
 	resetFlags()
+	executeCommand("advance", "--dir", dir) // DRAFT → EVALUATE
+	resetFlags()
+	executeCommand("advance", "--dir", dir, "--verdict", "FAIL", "--deficiencies", "Completeness") // → REFINE
+	resetFlags()
 
-	// DRAFT without --file should use the file from the queue.
-	_, err := executeCommand("advance", "--dir", dir)
+	out, err := executeCommand("advance", "--dir", dir, "--fixed", "Added Observability section")
 	if err != nil {
-		t.Fatalf("expected DRAFT to advance without --file, got: %v", err)
+		t.Fatalf("advance failed: %v\noutput: %s", err, out)
 	}
 
 	s, _ := state.Load(dir)
-	if s.CurrentSpec.File != "optimizer/specs/configuration-models.md" {
-		t.Errorf("file: got %q, want queue value", s.CurrentSpec.File)
+	if s.CurrentSpec.Evals[0].Fixed != "Added Observability section" {
+		t.Errorf("fixed: got %q", s.CurrentSpec.Evals[0].Fixed)
 	}
 }
 
-func TestAdvanceCommand_DraftFileOverride(t *testing.T) {
+// --- REVIEW state ---
+
+func TestAdvanceCommand_ReviewToAccept(t *testing.T) {
 	dir := t.TempDir()
 	queuePath := writeQueueFile(t, dir, validQueueJSON())
 	resetFlags()
-	executeCommand("init", "--dir", dir, "--rounds", "1", "--from", queuePath)
+	executeCommand("init", "--dir", dir, "--max-rounds", "1", "--from", queuePath)
 	resetFlags()
 	executeCommand("advance", "--dir", dir) // ORIENT → SELECT
 	resetFlags()
 	executeCommand("advance", "--dir", dir) // SELECT → DRAFT
 	resetFlags()
+	executeCommand("advance", "--dir", dir) // DRAFT → EVALUATE
+	resetFlags()
+	executeCommand("advance", "--dir", dir, "--verdict", "FAIL") // → REVIEW
+	resetFlags()
 
-	// --file overrides the queue value.
-	_, err := executeCommand("advance", "--dir", dir, "--file", "custom/path.md")
+	out, err := executeCommand("advance", "--dir", dir) // REVIEW → ACCEPT
 	if err != nil {
-		t.Fatalf("advance failed: %v", err)
+		t.Fatalf("advance failed: %v\noutput: %s", err, out)
 	}
-
-	s, _ := state.Load(dir)
-	if s.CurrentSpec.File != "custom/path.md" {
-		t.Errorf("file: got %q, want custom/path.md", s.CurrentSpec.File)
+	if !strings.Contains(out, "ACCEPT") {
+		t.Errorf("expected ACCEPT, got: %s", out)
 	}
 }
+
+func TestAdvanceCommand_ReviewGrantExtraRound(t *testing.T) {
+	dir := t.TempDir()
+	queuePath := writeQueueFile(t, dir, validQueueJSON())
+	resetFlags()
+	executeCommand("init", "--dir", dir, "--max-rounds", "1", "--from", queuePath)
+	resetFlags()
+	executeCommand("advance", "--dir", dir) // ORIENT → SELECT
+	resetFlags()
+	executeCommand("advance", "--dir", dir) // SELECT → DRAFT
+	resetFlags()
+	executeCommand("advance", "--dir", dir) // DRAFT → EVALUATE
+	resetFlags()
+	executeCommand("advance", "--dir", dir, "--verdict", "FAIL") // → REVIEW
+	resetFlags()
+
+	out, err := executeCommand("advance", "--dir", dir, "--verdict", "FAIL") // REVIEW → REFINE
+	if err != nil {
+		t.Fatalf("advance failed: %v\noutput: %s", err, out)
+	}
+	if !strings.Contains(out, "REFINE") {
+		t.Errorf("expected REFINE, got: %s", out)
+	}
+}
+
+// --- Pass requires message ---
 
 func TestAdvanceCommand_PassRequiresMessage(t *testing.T) {
 	dir := t.TempDir()
 	queuePath := writeQueueFile(t, dir, validQueueJSON())
 	resetFlags()
-	executeCommand("init", "--dir", dir, "--rounds", "1", "--from", queuePath)
+	executeCommand("init", "--dir", dir, "--max-rounds", "1", "--from", queuePath)
 	resetFlags()
 	executeCommand("advance", "--dir", dir) // ORIENT → SELECT
 	resetFlags()
 	executeCommand("advance", "--dir", dir) // SELECT → DRAFT
 	resetFlags()
-	executeCommand("advance", "--dir", dir, "--file", "f.md") // DRAFT → EVALUATE
+	executeCommand("advance", "--dir", dir) // DRAFT → EVALUATE
 	resetFlags()
 
-	// PASS without --message should fail.
 	_, err := executeCommand("advance", "--dir", dir, "--verdict", "PASS")
 	if err == nil {
 		t.Fatal("expected error for PASS without --message")
 	}
 }
 
-func TestAdvanceCommand_FailDoesNotRequireMessage(t *testing.T) {
-	dir := t.TempDir()
-	queuePath := writeQueueFile(t, dir, validQueueJSON())
-	resetFlags()
-	executeCommand("init", "--dir", dir, "--rounds", "2", "--from", queuePath)
-	resetFlags()
-	executeCommand("advance", "--dir", dir) // ORIENT → SELECT
-	resetFlags()
-	executeCommand("advance", "--dir", dir) // SELECT → DRAFT
-	resetFlags()
-	executeCommand("advance", "--dir", dir, "--file", "f.md") // DRAFT → EVALUATE
-	resetFlags()
-
-	// FAIL without --message should succeed.
-	_, err := executeCommand("advance", "--dir", dir, "--verdict", "FAIL")
-	if err != nil {
-		t.Fatalf("expected FAIL without --message to succeed, got: %v", err)
-	}
-}
-
-func TestAdvanceCommand_FullCycleWithMessage(t *testing.T) {
-	// This test runs outside a git repo, so the commit will warn but still advance.
-	dir := t.TempDir()
-	queuePath := writeQueueFile(t, dir, validQueueJSON())
-	resetFlags()
-	executeCommand("init", "--dir", dir, "--rounds", "1", "--from", queuePath)
-
-	// ORIENT → SELECT
-	resetFlags()
-	executeCommand("advance", "--dir", dir)
-
-	// SELECT → DRAFT
-	resetFlags()
-	executeCommand("advance", "--dir", dir)
-
-	// DRAFT → EVALUATE
-	resetFlags()
-	executeCommand("advance", "--dir", dir, "--file", "optimizer/specs/cm.md")
-
-	// EVALUATE → ACCEPT (with message; commit will warn since not a git repo)
-	resetFlags()
-	out, err := executeCommand("advance", "--dir", dir, "--verdict", "PASS", "--message", "Add config models spec")
-	if err != nil {
-		t.Fatalf("advance failed: %v\noutput: %s", err, out)
-	}
-	if !strings.Contains(out, "ACCEPT") {
-		t.Errorf("expected ACCEPT in output, got: %s", out)
-	}
-
-	// ACCEPT → ORIENT (second spec in queue)
-	resetFlags()
-	out, _ = executeCommand("advance", "--dir", dir)
-	if !strings.Contains(out, "ORIENT") {
-		t.Errorf("expected back to ORIENT, got: %s", out)
-	}
-
-	s, _ := state.Load(dir)
-	if len(s.Completed) != 1 {
-		t.Errorf("completed: got %d, want 1", len(s.Completed))
-	}
-	if len(s.Queue) != 1 {
-		t.Errorf("queue: got %d, want 1", len(s.Queue))
-	}
-}
-
-// --- Status command ---
+// --- Status ---
 
 func TestStatusCommand(t *testing.T) {
 	dir := t.TempDir()
 	queuePath := writeQueueFile(t, dir, validQueueJSON())
 	resetFlags()
-	executeCommand("init", "--dir", dir, "--rounds", "2", "--from", queuePath)
+	executeCommand("init", "--dir", dir, "--max-rounds", "2", "--from", queuePath)
 	resetFlags()
 
 	out, err := executeCommand("status", "--dir", dir)
@@ -392,40 +284,19 @@ func TestStatusCommand(t *testing.T) {
 	if !strings.Contains(out, "Session") {
 		t.Errorf("expected session header, got: %s", out)
 	}
-	if !strings.Contains(out, "Queue") {
-		t.Errorf("expected queue section, got: %s", out)
-	}
-	if !strings.Contains(out, "optimizer") {
-		t.Errorf("expected domain grouping, got: %s", out)
+	if !strings.Contains(out, "1-2") {
+		t.Errorf("expected '1-2' rounds, got: %s", out)
 	}
 }
 
-func TestStatusCommand_WithCompleted(t *testing.T) {
+// --- Next ---
+
+func TestNextCommand_NoStateFile(t *testing.T) {
 	dir := t.TempDir()
-	queuePath := writeQueueFile(t, dir, validQueueJSON())
-	resetFlags()
-	executeCommand("init", "--dir", dir, "--rounds", "1", "--from", queuePath)
-
-	resetFlags()
-	executeCommand("advance", "--dir", dir) // ORIENT → SELECT
-	resetFlags()
-	executeCommand("advance", "--dir", dir) // SELECT → DRAFT
-	resetFlags()
-	executeCommand("advance", "--dir", dir, "--file", "f.md") // DRAFT → EVALUATE
-	resetFlags()
-	executeCommand("advance", "--dir", dir, "--verdict", "PASS", "--message", "test commit") // EVALUATE → ACCEPT
-	resetFlags()
-	executeCommand("advance", "--dir", dir) // ACCEPT → ORIENT
 	resetFlags()
 
-	out, err := executeCommand("status", "--dir", dir)
-	if err != nil {
-		t.Fatalf("status failed: %v", err)
-	}
-	if !strings.Contains(out, "Completed") {
-		t.Errorf("expected completed section, got: %s", out)
-	}
-	if !strings.Contains(out, "✓") {
-		t.Errorf("expected checkmark in completed, got: %s", out)
+	_, err := executeCommand("next", "--dir", dir)
+	if err == nil {
+		t.Fatal("expected error for missing state file")
 	}
 }

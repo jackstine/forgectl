@@ -35,16 +35,19 @@ The spec generation process is managed by a CLI tool that tracks state in a JSON
 
 ```bash
 # Initialize session — validate queue, set rounds
-scaffold init --rounds 3 --from queue.json --user-guided
+scaffold init --min-rounds 1 --max-rounds 3 --from queue.json --user-guided
 
 # What do I do now?
 scaffold next
 
 # I'm done with this state — advance
 scaffold advance
-scaffold advance --file optimizer/specs/repository-loading.md   # DRAFT only
-scaffold advance --verdict PASS                                  # EVALUATE only
-scaffold advance --verdict FAIL                                  # EVALUATE only
+scaffold advance --file optimizer/specs/repository-loading.md   # DRAFT only (override)
+scaffold advance --verdict PASS --message "Add repo loading spec"  # EVALUATE: accept + commit
+scaffold advance --verdict FAIL --deficiencies "Completeness,Precision"  # EVALUATE: fail
+scaffold advance --fixed "Added Observability section"             # REFINE: record fix
+scaffold advance                                                   # REVIEW: accept
+scaffold advance --verdict FAIL                                    # REVIEW: grant extra round
 
 # Full session overview
 scaffold status
@@ -53,15 +56,18 @@ scaffold status
 ### State Flow
 
 ```
-INIT → ORIENT → SELECT → DRAFT → EVALUATE ⇄ REFINE → ACCEPT → (next spec or DONE)
+INIT → ORIENT → SELECT → DRAFT → EVALUATE ⇄ REFINE → REVIEW → ACCEPT → (next spec or DONE)
+                                                         ↑         │
+                                                         └─────────┘ (grant extra round)
 ```
 
-- **INIT**: Create state file from validated queue. Set `--rounds` and `--user-guided`.
+- **INIT**: Create state file from validated queue. Set `--min-rounds`, `--max-rounds`, `--user-guided`.
 - **ORIENT**: Architect reads plans and existing specs. Builds mental model.
 - **SELECT**: Pull next topic from queue. If `--user-guided`, discuss with user.
-- **DRAFT**: Write the spec file. Record path with `--file`.
-- **EVALUATE**: Spawn Opus sub-agent evaluator. Record `--verdict`.
-- **REFINE**: Fix deficiencies from evaluation. Advance back to EVALUATE.
+- **DRAFT**: Write the spec file. Optionally override path with `--file`.
+- **EVALUATE**: Spawn Opus sub-agent evaluator. Record `--verdict` and `--deficiencies`.
+- **REFINE**: Fix deficiencies. Record what was fixed with `--fixed`. Advance back to EVALUATE.
+- **REVIEW**: Max rounds reached (or past min rounds). Human decides: accept or `--verdict FAIL` for extra round.
 - **ACCEPT**: Spec finalized. Next spec loops to ORIENT. Empty queue ends session.
 
 ### Queue Input File

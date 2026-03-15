@@ -11,8 +11,9 @@ import (
 )
 
 var (
-	initRounds    int
-	initFrom      string
+	initMinRounds  int
+	initMaxRounds  int
+	initFrom       string
 	initUserGuided bool
 )
 
@@ -24,17 +25,24 @@ var initCmd = &cobra.Command{
 }
 
 func init() {
-	initCmd.Flags().IntVar(&initRounds, "rounds", 0, "Number of evaluation rounds per spec (required)")
+	initCmd.Flags().IntVar(&initMinRounds, "min-rounds", 1, "Minimum evaluation rounds before review (default 1)")
+	initCmd.Flags().IntVar(&initMaxRounds, "max-rounds", 0, "Maximum evaluation rounds per spec (required)")
 	initCmd.Flags().StringVar(&initFrom, "from", "", "Path to queue input JSON file (required)")
 	initCmd.Flags().BoolVar(&initUserGuided, "user-guided", false, "Enable user discussion during SELECT phase")
-	_ = initCmd.MarkFlagRequired("rounds")
+	_ = initCmd.MarkFlagRequired("max-rounds")
 	_ = initCmd.MarkFlagRequired("from")
 	rootCmd.AddCommand(initCmd)
 }
 
 func runInit(cmd *cobra.Command, args []string) error {
-	if initRounds < 1 {
-		return fmt.Errorf("--rounds must be a positive integer, got %d", initRounds)
+	if initMaxRounds < 1 {
+		return fmt.Errorf("--max-rounds must be a positive integer, got %d", initMaxRounds)
+	}
+	if initMinRounds < 1 {
+		return fmt.Errorf("--min-rounds must be a positive integer, got %d", initMinRounds)
+	}
+	if initMinRounds > initMaxRounds {
+		return fmt.Errorf("--min-rounds (%d) cannot exceed --max-rounds (%d)", initMinRounds, initMaxRounds)
 	}
 
 	if state.Exists(stateDir) {
@@ -49,7 +57,6 @@ func runInit(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("reading file: %w", err)
 	}
 
-	// Validate against schema.
 	validationErrs := state.ValidateQueueInput(data)
 	if len(validationErrs) > 0 {
 		fmt.Fprintln(cmd.OutOrStderr(), "Validation errors:")
@@ -62,25 +69,23 @@ func runInit(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("queue file validation failed")
 	}
 
-	// Parse the validated input.
 	var input state.QueueInput
 	if err := json.Unmarshal(data, &input); err != nil {
 		return fmt.Errorf("parsing queue file: %w", err)
 	}
 
-	// Check dependency warnings.
 	warnings := state.CheckDependencies(input.Specs)
 	for _, w := range warnings {
 		fmt.Fprintln(cmd.OutOrStdout(), w)
 	}
 
-	// Create and save state.
-	s := state.NewState(initRounds, initUserGuided, input.Specs)
+	s := state.NewState(initMinRounds, initMaxRounds, initUserGuided, input.Specs)
 	if err := state.Save(stateDir, s); err != nil {
 		return fmt.Errorf("saving state: %w", err)
 	}
 
-	fmt.Fprintf(cmd.OutOrStdout(), "Initialized with %d specs, %d evaluation rounds per spec", len(input.Specs), initRounds)
+	fmt.Fprintf(cmd.OutOrStdout(), "Initialized with %d specs, %d-%d evaluation rounds per spec",
+		len(input.Specs), initMinRounds, initMaxRounds)
 	if initUserGuided {
 		fmt.Fprint(cmd.OutOrStdout(), ", user-guided mode")
 	}

@@ -36,7 +36,7 @@ func Load(dir string) (*ScaffoldState, error) {
 	}
 
 	if !s.State.IsValid() {
-		return nil, fmt.Errorf("invalid state in state file: %q. Valid states: ORIENT, SELECT, DRAFT, EVALUATE, REFINE, ACCEPT, DONE", s.State)
+		return nil, fmt.Errorf("invalid state in state file: %q. Valid states: ORIENT, SELECT, DRAFT, EVALUATE, REFINE, REVIEW, ACCEPT, DONE", s.State)
 	}
 
 	return &s, nil
@@ -54,34 +54,38 @@ func Save(dir string, s *ScaffoldState) error {
 
 // NewState creates an initial scaffold state from validated input.
 // Assigns sequential IDs (1-indexed) to each spec.
-func NewState(rounds int, userGuided bool, specs []QueueSpec) *ScaffoldState {
+func NewState(minRounds, maxRounds int, userGuided bool, specs []QueueSpec) *ScaffoldState {
 	for i := range specs {
 		specs[i].ID = i + 1
 	}
 	return &ScaffoldState{
-		EvaluationRounds: rounds,
-		UserGuided:       userGuided,
-		State:            PhaseOrient,
-		CurrentSpec:      nil,
-		Queue:            specs,
-		Completed:        []CompletedSpec{},
+		MinRounds:  minRounds,
+		MaxRounds:  maxRounds,
+		UserGuided: userGuided,
+		State:      PhaseOrient,
+		Queue:      specs,
+		Completed:  []CompletedSpec{},
 	}
 }
 
+// AdvanceInput holds all parameters for a state transition.
+type AdvanceInput struct {
+	File         string
+	Verdict      string
+	Deficiencies []string
+	Fixed        string
+}
+
 // Advance transitions the state machine. Returns an error if the transition is invalid.
-func Advance(s *ScaffoldState, file string, verdict string) error {
+func Advance(s *ScaffoldState, in AdvanceInput) error {
 	switch s.State {
 	case PhaseOrient:
-		if file != "" {
-			return fmt.Errorf("--file is only valid in DRAFT state. Current state: %s", s.State)
-		}
-		if verdict != "" {
-			return fmt.Errorf("--verdict is only valid in EVALUATE state. Current state: %s", s.State)
+		if err := rejectFlags(s.State, in); err != nil {
+			return err
 		}
 		if len(s.Queue) == 0 && s.CurrentSpec == nil {
 			return fmt.Errorf("no specs in queue")
 		}
-		// Pull next from queue into current_spec.
 		next := s.Queue[0]
 		s.Queue = s.Queue[1:]
 		s.CurrentSpec = &ActiveSpec{
@@ -97,66 +101,94 @@ func Advance(s *ScaffoldState, file string, verdict string) error {
 		s.State = PhaseSelect
 
 	case PhaseSelect:
-		if file != "" {
-			return fmt.Errorf("--file is only valid in DRAFT state. Current state: %s", s.State)
-		}
-		if verdict != "" {
-			return fmt.Errorf("--verdict is only valid in EVALUATE state. Current state: %s", s.State)
+		if err := rejectFlags(s.State, in); err != nil {
+			return err
 		}
 		s.State = PhaseDraft
 
 	case PhaseDraft:
-		if verdict != "" {
+		if in.Verdict != "" {
 			return fmt.Errorf("--verdict is only valid in EVALUATE state. Current state: %s", s.State)
 		}
-		if file != "" {
-			// Allow overriding the file path from the queue if needed.
-			s.CurrentSpec.File = file
+		if in.File != "" {
+			s.CurrentSpec.File = file(in)
 		}
 		s.CurrentSpec.Round = 1
 		s.State = PhaseEvaluate
 
 	case PhaseEvaluate:
-		if file != "" {
+		if in.File != "" {
 			return fmt.Errorf("--file is only valid in DRAFT state. Current state: %s", s.State)
 		}
-		if verdict == "" {
+		if in.Verdict == "" {
 			return fmt.Errorf("EVALUATE state requires --verdict PASS or --verdict FAIL")
 		}
-		if verdict != "PASS" && verdict != "FAIL" {
-			return fmt.Errorf("invalid verdict: %q. Use PASS or FAIL", verdict)
+		if in.Verdict != "PASS" && in.Verdict != "FAIL" {
+			return fmt.Errorf("invalid verdict: %q. Use PASS or FAIL", in.Verdict)
 		}
-		if verdict == "PASS" {
+
+		// Record eval result.
+		eval := EvalRecord{
+			Round:        s.CurrentSpec.Round,
+			Verdict:      in.Verdict,
+			Deficiencies: in.Deficiencies,
+		}
+		s.CurrentSpec.Evals = append(s.CurrentSpec.Evals, eval)
+
+		if in.Verdict == "PASS" {
 			s.State = PhaseAccept
 		} else {
-			if s.CurrentSpec.Round >= s.EvaluationRounds {
-				s.State = PhaseAccept
+			if s.CurrentSpec.Round >= s.MaxRounds {
+				// Max rounds reached — go to REVIEW for human decision.
+				s.State = PhaseReview
+			} else if s.CurrentSpec.Round >= s.MinRounds {
+				// Past min rounds — go to REVIEW.
+				s.State = PhaseReview
 			} else {
+				// Under min rounds — auto-refine.
 				s.State = PhaseRefine
 			}
 		}
 
 	case PhaseRefine:
-		if file != "" {
+		if in.File != "" {
 			return fmt.Errorf("--file is only valid in DRAFT state. Current state: %s", s.State)
 		}
-		if verdict != "" {
+		if in.Verdict != "" {
 			return fmt.Errorf("--verdict is only valid in EVALUATE state. Current state: %s", s.State)
 		}
+
+		// Record what was fixed on the last eval.
+		if in.Fixed != "" && len(s.CurrentSpec.Evals) > 0 {
+			s.CurrentSpec.Evals[len(s.CurrentSpec.Evals)-1].Fixed = in.Fixed
+		}
+
 		s.CurrentSpec.Round++
 		s.State = PhaseEvaluate
 
-	case PhaseAccept:
-		if file != "" {
+	case PhaseReview:
+		if in.File != "" {
 			return fmt.Errorf("--file is only valid in DRAFT state. Current state: %s", s.State)
 		}
-		if verdict != "" {
-			return fmt.Errorf("--verdict is only valid in EVALUATE state. Current state: %s", s.State)
+		// In REVIEW, the architect can:
+		// --verdict PASS: accept as-is → ACCEPT
+		// --verdict FAIL: request another round → REFINE
+		// (no verdict): just advance → ACCEPT (user accepted)
+		if in.Verdict == "FAIL" {
+			// User grants extra round.
+			s.State = PhaseRefine
+		} else {
+			// PASS or no verdict — accept.
+			s.State = PhaseAccept
+		}
+
+	case PhaseAccept:
+		if err := rejectFlags(s.State, in); err != nil {
+			return err
 		}
 		if s.CurrentSpec == nil {
 			return fmt.Errorf("no active spec. Run 'next' to see queue status")
 		}
-		// Move current to completed.
 		s.Completed = append(s.Completed, CompletedSpec{
 			ID:          s.CurrentSpec.ID,
 			Name:        s.CurrentSpec.Name,
@@ -164,6 +196,7 @@ func Advance(s *ScaffoldState, file string, verdict string) error {
 			File:        s.CurrentSpec.File,
 			RoundsTaken: s.CurrentSpec.Round,
 			CommitHash:  s.LastCommitHash,
+			Evals:       s.CurrentSpec.Evals,
 		})
 		s.LastCommitHash = ""
 		s.CurrentSpec = nil
@@ -183,6 +216,21 @@ func Advance(s *ScaffoldState, file string, verdict string) error {
 	return nil
 }
 
+func file(in AdvanceInput) string {
+	return in.File
+}
+
+// rejectFlags returns an error if file or verdict flags are set in a state that doesn't use them.
+func rejectFlags(phase Phase, in AdvanceInput) error {
+	if in.File != "" {
+		return fmt.Errorf("--file is only valid in DRAFT state. Current state: %s", phase)
+	}
+	if in.Verdict != "" {
+		return fmt.Errorf("--verdict is only valid in EVALUATE state. Current state: %s", phase)
+	}
+	return nil
+}
+
 // ActionDescription returns a human-readable description of what the architect
 // should do in the current state.
 func ActionDescription(s *ScaffoldState) string {
@@ -198,14 +246,32 @@ func ActionDescription(s *ScaffoldState) string {
 		}
 		return "Review topic. Advance when ready to draft."
 	case PhaseDraft:
-		return "Write the spec file following SPEC_FORMAT.md. Advance with --file <path>."
+		return "Write the spec file following SPEC_FORMAT.md. Advance when done."
 	case PhaseEvaluate:
-		if s.CurrentSpec.Round >= s.EvaluationRounds {
-			return "Final evaluation round. Spawn Opus evaluation sub-agent. If FAIL, present to user for final decision."
+		if s.CurrentSpec.Round >= s.MaxRounds {
+			return "Final evaluation round. Spawn Opus evaluation sub-agent."
 		}
 		return "Spawn Opus evaluation sub-agent for this spec."
 	case PhaseRefine:
-		return "Address deficiencies from evaluation. Edit the spec file, then advance."
+		desc := "Address deficiencies from evaluation. Edit the spec file."
+		if len(s.CurrentSpec.Evals) > 0 {
+			last := s.CurrentSpec.Evals[len(s.CurrentSpec.Evals)-1]
+			if len(last.Deficiencies) > 0 {
+				desc += fmt.Sprintf(" Deficiencies: %v.", last.Deficiencies)
+			}
+		}
+		desc += " Advance with --fixed <description>."
+		return desc
+	case PhaseReview:
+		desc := "Max evaluation rounds reached. Review deficiencies and fixes."
+		if len(s.CurrentSpec.Evals) > 0 {
+			last := s.CurrentSpec.Evals[len(s.CurrentSpec.Evals)-1]
+			if len(last.Deficiencies) > 0 {
+				desc += fmt.Sprintf(" Last deficiencies: %v.", last.Deficiencies)
+			}
+		}
+		desc += " Advance to accept, or --verdict FAIL to grant another round."
+		return desc
 	case PhaseAccept:
 		return "Spec finalized. Advance to move to next spec or complete session."
 	case PhaseDone:

@@ -5,7 +5,9 @@
 
 ## Context
 
-The spec generation process involves multiple states (orient, select, draft, evaluate, refine, accept) applied to a queue of specifications. Without persistent state, an architect loses track of progress across sessions. The scaffold is a Go CLI tool (built with Cobra) that reads and writes a single JSON state file, enforcing valid transitions and providing the architect with unambiguous next-step guidance.
+The spec generation process involves multiple states (orient, select, draft, evaluate, refine, review, accept) applied to a queue of specifications. Without persistent state, an architect loses track of progress across sessions. The scaffold is a Go CLI tool (built with Cobra) that reads and writes a single JSON state file, enforcing valid transitions and providing the architect with unambiguous next-step guidance.
+
+The scaffold tracks evaluation history — deficiencies found, fixes applied, and verdicts — creating an audit trail from draft to acceptance.
 
 ## Depends On
 - None. The scaffold is a standalone tool with no runtime dependencies on other project components.
@@ -15,8 +17,9 @@ The spec generation process involves multiple states (orient, select, draft, eva
 | Component | Relationship |
 |-----------|-------------|
 | Spec generation skill | The skill document describes the process; the scaffold enforces the state machine that drives it |
-| Evaluation sub-agent | The EVALUATE state is where the architect spawns a sub-agent; the scaffold tracks round count and verdict but does not invoke the sub-agent itself |
+| Evaluation sub-agent | The EVALUATE state is where the architect spawns a sub-agent; the scaffold tracks round count, verdict, deficiencies, and fixes |
 | Queue input file | The architect generates a JSON file conforming to the queue schema; the scaffold validates and ingests it during init |
+| Eval output directory | The eval sub-agent writes structured output to `<project>/specs/.eval/`; the scaffold does not read these files but the convention is documented |
 
 ---
 
@@ -61,10 +64,10 @@ No additional fields are permitted.
 
 | Command | Flags | Description |
 |---------|-------|-------------|
-| `init` | `--rounds N` (required), `--from <path>` (required), `--user-guided` (optional, default false) | Initialize state file from a validated queue |
+| `init` | `--min-rounds N` (default 1), `--max-rounds N` (required), `--from <path>` (required), `--user-guided` (optional, default false) | Initialize state file from a validated queue |
 | `next` | none | Print the current state and what the architect does now |
-| `advance` | `--file <path>` (optional, DRAFT only — overrides queue value), `--verdict PASS\|FAIL` (EVALUATE only), `--message <text>` (required with `--verdict PASS`) | Transition from current state to next |
-| `status` | none | Print full session state: current spec, round, queue, completed |
+| `advance` | `--file <path>` (optional, DRAFT only), `--verdict PASS\|FAIL` (EVALUATE or REVIEW), `--message <text>` (required with PASS in EVALUATE), `--deficiencies <csv>` (with FAIL in EVALUATE), `--fixed <text>` (in REFINE) | Transition from current state to next |
+| `status` | none | Print full session state: current spec, eval history, queue, completed |
 
 ### Outputs
 
@@ -75,23 +78,25 @@ All output is to stdout. The scaffold writes state changes to `scaffold-state.js
 Prints a structured block:
 
 ```
-State:   EVALUATE
+State:   REFINE
+ID:      3
 Spec:    Repository Loading
 Domain:  optimizer
 File:    optimizer/specs/repository-loading.md
-Round:   2/3
-Action:  Spawn Opus evaluation sub-agent for this spec.
+Round:   1/3
+Deficiencies: [Completeness, Format Compliance]
+Action:  Address deficiencies from evaluation. Edit the spec file. Advance with --fixed <description>.
 ```
 
 #### `status` output
 
-Prints current spec, queue contents grouped by domain, and completed specs with rounds taken.
+Prints session config, current spec with eval history, queue grouped by domain, and completed specs with eval trail.
 
 #### `init` validation output (on failure)
 
 When the input file fails validation, the scaffold prints:
 1. Each validation error (missing field, extra field, wrong type) with the path to the offending location.
-2. The complete valid schema as a reference, so the architect can see the expected structure.
+2. The complete valid schema as a reference.
 
 The scaffold exits with a non-zero code on validation failure.
 
@@ -99,17 +104,14 @@ The scaffold exits with a non-zero code on validation failure.
 
 | Condition | Signal | Rationale |
 |-----------|--------|-----------|
-| `init` called when `scaffold-state.json` already exists | Error message: "State file already exists. Delete it to reinitialize." Exit code 1. | Prevents accidental loss of in-progress session state |
-| `--from` file fails schema validation — missing required field | Error listing each missing field by JSON path. Prints full valid schema. Exit code 1. | Architect needs to see what's wrong and what's right |
-| `--from` file fails schema validation — extra field present | Error listing each extra field by name. Prints full valid schema. Exit code 1. | Extra fields signal a schema misconception; reject rather than silently drop |
-| `--from` file fails schema validation — wrong type | Error listing the field, expected type, and actual type. Prints full valid schema. Exit code 1. | Type mismatches cause downstream failures if not caught at init |
-| `advance` called with `--file` outside of DRAFT state | Error: "--file is only valid in DRAFT state. Current state: <state>." Exit code 1. | Flag is meaningless outside DRAFT |
-| `advance` called with `--verdict` outside of EVALUATE state | Error: "--verdict is only valid in EVALUATE state. Current state: <state>." Exit code 1. | Flag is meaningless outside EVALUATE |
-| `advance` called in EVALUATE without `--verdict` | Error: "EVALUATE state requires --verdict PASS or --verdict FAIL." Exit code 1. | Verdict determines the transition |
-| `advance` called with `--verdict PASS` without `--message` | Error: "--message is required when --verdict is PASS." Exit code 1. | Accepted specs must be committed with a message |
-| `advance` called when no current spec is active | Error: "No active spec. Run 'next' to see queue status." Exit code 1. | Cannot advance without a spec in progress |
-| `next` or `advance` called before `init` | Error: "No state file found. Run 'scaffold init' first." Exit code 1. | State file must exist |
-| Queue is empty and `advance` is called in ACCEPT | Message: "All specs complete." Exit code 0. | Normal termination |
+| `init` called when `scaffold-state.json` already exists | Error: "State file already exists. Delete it to reinitialize." Exit code 1. | Prevents accidental loss of in-progress state |
+| `--from` file fails schema validation | Error listing violations. Prints full valid schema. Exit code 1. | Architect needs to see what's wrong |
+| `--min-rounds` exceeds `--max-rounds` | Error: "--min-rounds cannot exceed --max-rounds." Exit code 1. | Invalid configuration |
+| `advance` called with `--file` outside of DRAFT state | Error naming the current state. Exit code 1. | Flag is meaningless outside DRAFT |
+| `advance` called with `--verdict` outside of EVALUATE or REVIEW | Error naming the current state. Exit code 1. | Verdict is only valid in these states |
+| `advance` called in EVALUATE without `--verdict` | Error. Exit code 1. | Verdict determines the transition |
+| `advance` called with `--verdict PASS` in EVALUATE without `--message` | Error. Exit code 1. | Accepted specs must be committed |
+| `next` or `advance` called before `init` | Error. Exit code 1. | State file must exist |
 
 ---
 
@@ -118,50 +120,21 @@ The scaffold exits with a non-zero code on validation failure.
 ### Initializing a Session
 
 #### Preconditions
-- No `scaffold-state.json` exists in the scaffold directory.
-- A queue file path is provided via `--from`.
-- `--rounds` is provided and is a positive integer.
+- No `scaffold-state.json` exists.
+- `--from`, `--max-rounds` are provided.
+- `--min-rounds` <= `--max-rounds`.
 
 #### Steps
-1. Read the file at `--from`.
-2. Parse as JSON.
-3. Validate against the queue schema:
-   a. Top-level must be an object with exactly one key: `specs`.
-   b. `specs` must be a non-empty array.
-   c. Each element must have exactly the fields: `name`, `domain`, `topic`, `file`, `planning_sources`, `depends_on`.
-   d. No additional fields at any level.
-   e. `name`, `domain`, `topic`, `file` must be non-empty strings.
-   f. `planning_sources` and `depends_on` must be arrays of strings (may be empty).
-4. If validation fails: print all errors, print the full valid schema, exit code 1.
-5. If validation passes: create `scaffold-state.json` with the initialized state.
+1. Read and parse the file at `--from`.
+2. Validate against the queue schema (same rules as before).
+3. If validation fails: print errors and schema, exit code 1.
+4. If validation passes: create `scaffold-state.json` with state ORIENT.
 
 #### Postconditions
-- `scaffold-state.json` exists with state `ORIENT`, `current_spec` set to null, `queue` populated from the input file, `completed` empty, `evaluation_rounds` set, `user_guided` set.
+- State file exists with `min_rounds`, `max_rounds`, `user_guided` set, queue populated, completed empty.
 
 #### Error Handling
-- File not found at `--from` path: "File not found: <path>." Exit code 1.
-- File is not valid JSON: "Invalid JSON in <path>: <parse error>." Exit code 1.
-- Schema validation failure: behavior described in step 4.
-
----
-
-### Querying Next Action
-
-#### Preconditions
-- `scaffold-state.json` exists.
-
-#### Steps
-1. Read `scaffold-state.json`.
-2. If `current_spec` is null and queue is non-empty: display that the architect is in ORIENT and the next spec to pick up.
-3. If `current_spec` is null and queue is empty: display "All specs complete."
-4. If `current_spec` is active: display the current state, spec details, round (if in EVALUATE), and the action the architect takes.
-
-#### Postconditions
-- No state mutation. `next` is read-only.
-
-#### Error Handling
-- State file missing: "No state file found. Run 'scaffold init' first." Exit code 1.
-- State file is corrupt JSON: "State file is corrupt: <parse error>." Exit code 1.
+- File not found, invalid JSON, schema failure: same as before.
 
 ---
 
@@ -169,54 +142,45 @@ The scaffold exits with a non-zero code on validation failure.
 
 #### Preconditions
 - `scaffold-state.json` exists.
-- Current state allows the transition (see transition table).
 
 #### Steps
-
-The transition depends on the current state:
 
 | From State | Condition | To State | Side Effects |
 |------------|-----------|----------|-------------|
-| ORIENT | always | SELECT | Pull next item from queue into `current_spec`, set state to SELECT |
-| SELECT | `user_guided` is false | DRAFT | Set state to DRAFT |
-| SELECT | `user_guided` is true | DRAFT | Set state to DRAFT (architect advances after user discussion) |
-| DRAFT | always | EVALUATE | If `--file` provided, override file path on `current_spec`; otherwise use file from queue. Set round to 1, set state to EVALUATE |
-| EVALUATE | `--verdict PASS` and `--message` provided | ACCEPT | Auto-commit spec file and state file with the provided message. Record commit hash on state. Set state to ACCEPT |
-| EVALUATE | `--verdict FAIL` and round < `evaluation_rounds` | REFINE | Set state to REFINE |
-| EVALUATE | `--verdict FAIL` and round >= `evaluation_rounds` | ACCEPT | Set state to ACCEPT (max rounds reached; architect presents to user) |
-| REFINE | always | EVALUATE | Increment round, set state to EVALUATE |
-| ACCEPT | queue is non-empty | ORIENT | Move `current_spec` to `completed`, set `current_spec` to null, set state to ORIENT |
-| ACCEPT | queue is empty | DONE | Move `current_spec` to `completed`, set `current_spec` to null |
-
-Write the updated state to `scaffold-state.json`.
+| ORIENT | always | SELECT | Pull next from queue into `current_spec` |
+| SELECT | always | DRAFT | — |
+| DRAFT | always | EVALUATE | If `--file` provided, override file path. Set round to 1. |
+| EVALUATE | `--verdict PASS` | ACCEPT | Record eval (PASS). Auto-commit with `--message`. |
+| EVALUATE | `--verdict FAIL`, round < `min_rounds` | REFINE | Record eval (FAIL + deficiencies). Auto-refine. |
+| EVALUATE | `--verdict FAIL`, round >= `min_rounds` | REVIEW | Record eval (FAIL + deficiencies). Human decides. |
+| REFINE | always | EVALUATE | Record `--fixed` on last eval. Increment round. |
+| REVIEW | no verdict or `--verdict PASS` | ACCEPT | User accepts. |
+| REVIEW | `--verdict FAIL` | REFINE | User grants extra round. |
+| ACCEPT | queue non-empty | ORIENT | Move spec to completed (with eval history + commit hash). |
+| ACCEPT | queue empty | DONE | Move spec to completed. |
 
 #### Postconditions
 - State file reflects the new state.
-- If transitioning from ACCEPT: `current_spec` moved to `completed` array.
+- Eval records accumulate on `current_spec.evals` and carry to `completed[].evals`.
 
 #### Error Handling
-- Invalid `--verdict` value (not PASS or FAIL): "Invalid verdict: <value>. Use PASS or FAIL." Exit code 1.
-- Required flag missing for current state: specific error per state (see Rejection table).
+- Invalid flags for state: specific error per state.
+- Invalid verdict value: error.
 
 ---
 
-### Querying Session Status
+### Eval Output Convention
 
-#### Preconditions
-- `scaffold-state.json` exists.
+The evaluation sub-agent writes structured markdown to a known directory:
 
-#### Steps
-1. Read `scaffold-state.json`.
-2. Print session configuration: `evaluation_rounds`, `user_guided`.
-3. Print current spec (if active): name, domain, state, round, file.
-4. Print queue grouped by domain.
-5. Print completed specs with rounds taken.
+```
+<project>/specs/.eval/
+├── <spec-name>-r1.md
+├── <spec-name>-r2.md
+└── ...
+```
 
-#### Postconditions
-- No state mutation. `status` is read-only.
-
-#### Error Handling
-- State file missing: "No state file found. Run 'scaffold init' first." Exit code 1.
+The scaffold does not read or write these files. This is a convention for the architect and sub-agent. The file name includes the spec name (kebab-case) and round number. Each file contains the sub-agent's full evaluation output.
 
 ---
 
@@ -224,7 +188,8 @@ Write the updated state to `scaffold-state.json`.
 
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
-| `--rounds` | integer | none (required) | Number of evaluation rounds per spec |
+| `--min-rounds` | integer | 1 | Minimum evaluation rounds before REVIEW |
+| `--max-rounds` | integer | none (required) | Maximum evaluation rounds per spec |
 | `--user-guided` | boolean | false | When set, SELECT state pauses for user discussion |
 | `--from` | string | none (required on init) | Path to queue input JSON file |
 
@@ -232,13 +197,12 @@ Write the updated state to `scaffold-state.json`.
 
 ## State File Schema
 
-The `scaffold-state.json` file has this structure:
-
 ```json
 {
-  "evaluation_rounds": 3,
+  "min_rounds": 1,
+  "max_rounds": 3,
   "user_guided": true,
-  "state": "EVALUATE",
+  "state": "REFINE",
   "last_commit_hash": "",
   "current_spec": {
     "id": 2,
@@ -248,7 +212,15 @@ The `scaffold-state.json` file has this structure:
     "file": "optimizer/specs/repository-loading.md",
     "planning_sources": [".workspace/planning/optimizer/repo-snapshot-loading.md"],
     "depends_on": [],
-    "round": 2
+    "round": 1,
+    "evals": [
+      {
+        "round": 1,
+        "verdict": "FAIL",
+        "deficiencies": ["Completeness", "Format Compliance"],
+        "fixed": ""
+      }
+    ]
   },
   "queue": [],
   "completed": [
@@ -257,8 +229,12 @@ The `scaffold-state.json` file has this structure:
       "name": "Configuration Models",
       "domain": "optimizer",
       "file": "optimizer/specs/configuration-models.md",
-      "rounds_taken": 1,
-      "commit_hash": "a1b2c3d"
+      "rounds_taken": 2,
+      "commit_hash": "a1b2c3d",
+      "evals": [
+        { "round": 1, "verdict": "FAIL", "deficiencies": ["Precision"], "fixed": "Removed phantom WARN log" },
+        { "round": 2, "verdict": "PASS", "deficiencies": null, "fixed": "" }
+      ]
     }
   ]
 }
@@ -266,124 +242,129 @@ The `scaffold-state.json` file has this structure:
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `evaluation_rounds` | integer | Set at init, immutable after |
-| `user_guided` | boolean | Set at init, immutable after |
-| `state` | string | One of: ORIENT, SELECT, DRAFT, EVALUATE, REFINE, ACCEPT, DONE |
-| `last_commit_hash` | string | Commit hash from the most recent PASS verdict; carried to completed on ACCEPT |
-| `current_spec` | object or null | The spec currently being worked on |
-| `current_spec.id` | integer | Sequential ID assigned at init (1-indexed) |
-| `current_spec.round` | integer | Current evaluation round (starts at 1 in EVALUATE) |
-| `queue` | array | Specs not yet started, in priority order |
-| `queue[].id` | integer | Sequential ID assigned at init |
-| `completed` | array | Finished specs with metadata |
-| `completed[].id` | integer | Original sequential ID |
-| `completed[].rounds_taken` | integer | How many evaluation rounds the spec went through |
-| `completed[].commit_hash` | string | Git commit hash from the auto-commit on PASS |
+| `min_rounds` | integer | Minimum eval rounds before REVIEW |
+| `max_rounds` | integer | Maximum eval rounds per spec |
+| `user_guided` | boolean | Whether SELECT pauses for discussion |
+| `state` | string | ORIENT, SELECT, DRAFT, EVALUATE, REFINE, REVIEW, ACCEPT, DONE |
+| `current_spec.evals` | array | Evaluation history for the current spec |
+| `current_spec.evals[].round` | integer | Which round this eval was |
+| `current_spec.evals[].verdict` | string | PASS or FAIL |
+| `current_spec.evals[].deficiencies` | string[] | Failed dimension names (on FAIL) |
+| `current_spec.evals[].fixed` | string | What was fixed after this eval (populated during REFINE) |
+| `completed[].evals` | array | Full eval history carried from current_spec |
 
 ---
 
 ## Invariants
 
-1. **Single active spec.** At most one spec is in `current_spec` at any time. The queue holds pending specs; completed holds finished specs. There is no parallel processing.
-2. **Round monotonicity.** The round counter on `current_spec` only increments. It starts at 1 when entering EVALUATE and increments on each REFINE → EVALUATE transition.
-3. **Round bound.** The round counter never exceeds `evaluation_rounds`. When round equals `evaluation_rounds` and verdict is FAIL, the transition goes to ACCEPT, not REFINE.
-4. **Queue order preserved.** Specs are pulled from the front of the queue. The order set at init is the order they are processed.
-5. **State file is the only mutable artifact.** The scaffold reads the queue input file once (at init). After init, the state file is the sole source of truth. The queue input file is not referenced again.
-6. **No implicit state.** Every piece of information the scaffold needs to determine the next transition is in `scaffold-state.json`. There is no in-memory state that survives across invocations.
+1. **Single active spec.** At most one spec is in `current_spec` at any time.
+2. **Round monotonicity.** The round counter only increments.
+3. **Min/max round bounds.** FAIL below `min_rounds` auto-refines. FAIL at or above `min_rounds` goes to REVIEW. REVIEW can grant rounds beyond `max_rounds`.
+4. **Queue order preserved.** Specs are pulled from the front of the queue.
+5. **State file is the only mutable artifact.** The queue input file is read once at init.
+6. **No implicit state.** All information for transitions is in the state file.
+7. **Eval history is append-only.** Eval records accumulate and are never deleted or modified (except `fixed` is set during REFINE).
 
 ---
 
 ## Edge Cases
 
-- **Scenario:** Architect calls `init` when `scaffold-state.json` already exists.
-  - **Expected behavior:** Error message and exit code 1. No mutation.
-  - **Rationale:** Accidental reinit would destroy in-progress state. Force explicit deletion.
+- **Scenario:** `advance --verdict FAIL` when round < `min_rounds`.
+  - **Expected behavior:** Transition to REFINE (auto-refine, no REVIEW).
+  - **Rationale:** Below minimum rounds, the architect must try to fix before escalating.
 
-- **Scenario:** Queue input file has zero specs (empty `specs` array).
-  - **Expected behavior:** Validation error: "specs array must be non-empty." Exit code 1.
-  - **Rationale:** An empty queue means there's nothing to do. Catch this at init, not at runtime.
+- **Scenario:** `advance --verdict FAIL` when round >= `min_rounds` and <= `max_rounds`.
+  - **Expected behavior:** Transition to REVIEW.
+  - **Rationale:** Past minimum, the human decides whether to accept or grant another round.
 
-- **Scenario:** A spec in the queue has a `depends_on` entry that names a spec not present in the queue or completed list.
-  - **Expected behavior:** Warning printed during init: "Warning: <spec name> depends on <dep name> which is not in the queue." Init still succeeds.
-  - **Rationale:** Dependencies are advisory signals, not hard blockers. The architect decides whether to reorder.
+- **Scenario:** REVIEW grants extra round beyond `max_rounds`.
+  - **Expected behavior:** REFINE → EVALUATE proceeds. The round counter increments past `max_rounds`.
+  - **Rationale:** `max_rounds` controls auto-behavior. The human can override.
 
-- **Scenario:** Architect calls `advance` in SELECT when `user_guided` is true but hasn't discussed with the user.
-  - **Expected behavior:** The scaffold advances to DRAFT. It does not enforce that discussion happened.
-  - **Rationale:** The scaffold tracks state, it does not enforce process. The architect is responsible for following the process. The scaffold is a tool, not a gatekeeper.
+- **Scenario:** REVIEW with `--verdict PASS`.
+  - **Expected behavior:** Transition to ACCEPT.
+  - **Rationale:** Explicit acceptance from REVIEW.
 
-- **Scenario:** State file contains a state value not in the valid set.
-  - **Expected behavior:** Error: "Invalid state in state file: <value>. Valid states: ORIENT, SELECT, DRAFT, EVALUATE, REFINE, ACCEPT, DONE." Exit code 1.
-  - **Rationale:** Corrupt or hand-edited state files are caught immediately.
+- **Scenario:** REVIEW with no verdict.
+  - **Expected behavior:** Transition to ACCEPT (default accept).
+  - **Rationale:** Advancing from REVIEW without a verdict means the human reviewed and accepted.
 
-- **Scenario:** `advance --verdict FAIL` when round equals `evaluation_rounds`.
-  - **Expected behavior:** Transition to ACCEPT (not REFINE). The `next` command notes: "Max evaluation rounds reached. Present spec to user for final decision."
-  - **Rationale:** Prevents infinite evaluation loops. After N rounds, a human decides.
+- **Scenario:** Eval has no deficiencies recorded.
+  - **Expected behavior:** The `deficiencies` field is an empty array or null. REFINE still works — the architect addresses issues without scaffold-tracked deficiencies.
+  - **Rationale:** The `--deficiencies` flag is optional. Not all evaluations may produce structured deficiency names.
 
 ---
 
 ## Testing Criteria
 
-### Init creates valid state file
-- **Verifies:** Initializing a Session behavior.
-- **Given:** No `scaffold-state.json` exists. A valid queue file with 3 specs.
-- **When:** `scaffold init --rounds 2 --from queue.json`
-- **Then:** `scaffold-state.json` is created with state ORIENT, `current_spec` null, queue containing 3 specs in order, `evaluation_rounds` 2, `user_guided` false.
+### Init with min and max rounds
+- **Verifies:** Initializing a Session behavior
+- **Given:** `--min-rounds 2 --max-rounds 5`
+- **When:** `scaffold init`
+- **Then:** State file has `min_rounds: 2`, `max_rounds: 5`.
 
-### Init rejects invalid queue — missing field
-- **Verifies:** Schema validation rejection.
-- **Given:** A queue file where one spec is missing the `domain` field.
-- **When:** `scaffold init --rounds 2 --from queue.json`
-- **Then:** Exit code 1. Output lists the missing field. Output includes the full valid schema.
+### Min exceeds max rejected
+- **Verifies:** Rejection table
+- **Given:** `--min-rounds 5 --max-rounds 2`
+- **When:** `scaffold init`
+- **Then:** Exit code 1.
 
-### Init rejects invalid queue — extra field
-- **Verifies:** Extra field rejection.
-- **Given:** A queue file where one spec has an extra field `priority`.
-- **When:** `scaffold init --rounds 2 --from queue.json`
-- **Then:** Exit code 1. Output names the extra field `priority`. Output includes the full valid schema.
+### FAIL below min_rounds auto-refines
+- **Verifies:** Invariant 3, Edge case
+- **Given:** `min_rounds: 2`, round 1
+- **When:** `advance --verdict FAIL`
+- **Then:** State is REFINE (not REVIEW).
 
-### Init rejects existing state file
-- **Verifies:** Existing state file edge case.
-- **Given:** `scaffold-state.json` already exists.
-- **When:** `scaffold init --rounds 2 --from queue.json`
-- **Then:** Exit code 1. Error message about existing state file. No mutation to the file.
+### FAIL at min_rounds goes to REVIEW
+- **Verifies:** Invariant 3, Edge case
+- **Given:** `min_rounds: 1`, round 1
+- **When:** `advance --verdict FAIL`
+- **Then:** State is REVIEW.
 
-### Full lifecycle single spec
-- **Verifies:** All state transitions for one spec.
-- **Given:** Init with 1 spec, `--rounds 1`.
-- **When:** `advance` through ORIENT → SELECT → DRAFT (with `--file`) → EVALUATE (with `--verdict PASS`) → ACCEPT.
-- **Then:** State is DONE. `completed` has 1 entry with `rounds_taken` 1. `queue` is empty. `current_spec` is null.
+### REVIEW accept
+- **Verifies:** Edge case: REVIEW with no verdict
+- **Given:** State is REVIEW
+- **When:** `advance` (no verdict)
+- **Then:** State is ACCEPT.
 
-### Evaluate-refine loop respects round limit
-- **Verifies:** Round bound invariant.
-- **Given:** Init with 1 spec, `--rounds 2`. Advance to EVALUATE.
-- **When:** `advance --verdict FAIL` (round 1) → advance (REFINE) → `advance --verdict FAIL` (round 2).
-- **Then:** State is ACCEPT (not REFINE). Round is 2.
+### REVIEW grants extra round
+- **Verifies:** Edge case: REVIEW grants extra round
+- **Given:** State is REVIEW
+- **When:** `advance --verdict FAIL`
+- **Then:** State is REFINE.
 
-### Next is read-only
-- **Verifies:** No state mutation on `next`.
-- **Given:** State file in any state.
-- **When:** `next` is called.
-- **Then:** State file is byte-identical before and after.
+### Deficiencies recorded on FAIL
+- **Verifies:** Eval history, Invariant 7
+- **Given:** State is EVALUATE
+- **When:** `advance --verdict FAIL --deficiencies "Completeness,Precision"`
+- **Then:** `current_spec.evals` has an entry with `deficiencies: ["Completeness", "Precision"]`.
 
-### Status displays grouped output
-- **Verifies:** Querying Session Status behavior.
-- **Given:** Init with specs across 3 domains. 1 completed, 1 active, 2 queued.
-- **When:** `scaffold status`
-- **Then:** Output shows current spec details, queue grouped by domain, completed list with rounds taken.
+### Fixed recorded on REFINE
+- **Verifies:** Eval history
+- **Given:** State is REFINE
+- **When:** `advance --fixed "Added Observability section"`
+- **Then:** Last eval record has `fixed: "Added Observability section"`.
 
-### Dependency warning on init
-- **Verifies:** Dependency edge case.
-- **Given:** Queue file where spec B depends_on spec A, but spec A is not in the queue.
-- **When:** `scaffold init --rounds 1 --from queue.json`
-- **Then:** Init succeeds. Warning printed naming the unresolved dependency.
+### Eval history carried to completed
+- **Verifies:** Invariant 7
+- **Given:** A spec with 2 eval rounds (FAIL then PASS)
+- **When:** The spec reaches ACCEPT and is moved to completed
+- **Then:** `completed[].evals` has both records.
 
-### Advance with wrong flag for state
-- **Verifies:** Flag-state mismatch rejection.
-- **Given:** State is ORIENT.
-- **When:** `scaffold advance --verdict PASS`
-- **Then:** Exit code 1. Error: "--verdict is only valid in EVALUATE state."
+### PASS requires message
+- **Verifies:** Rejection table
+- **Given:** State is EVALUATE
+- **When:** `advance --verdict PASS` without `--message`
+- **Then:** Exit code 1.
+
+### Full lifecycle with REVIEW
+- **Verifies:** All states including REVIEW
+- **Given:** Init with 1 spec, `--min-rounds 1 --max-rounds 1`
+- **When:** ORIENT → SELECT → DRAFT → EVALUATE(FAIL) → REVIEW → ACCEPT → DONE
+- **Then:** Completed has 1 entry. Evals show the FAIL.
 
 ---
 
 ## Implements
 - Scaffold state machine design from spec generation skill process
+- Eval tracking proposals: deficiency recording, fix tracking, REVIEW state, min/max rounds, eval output convention

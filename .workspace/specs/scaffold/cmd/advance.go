@@ -3,6 +3,7 @@ package cmd
 import (
 	"fmt"
 	"path/filepath"
+	"strings"
 
 	"scaffold/state"
 
@@ -10,9 +11,11 @@ import (
 )
 
 var (
-	advanceFile    string
-	advanceVerdict string
-	advanceMessage string
+	advanceFile         string
+	advanceVerdict      string
+	advanceMessage      string
+	advanceDeficiencies string
+	advanceFixed        string
 )
 
 var advanceCmd = &cobra.Command{
@@ -22,9 +25,11 @@ var advanceCmd = &cobra.Command{
 }
 
 func init() {
-	advanceCmd.Flags().StringVar(&advanceFile, "file", "", "Spec file path (required in DRAFT state)")
-	advanceCmd.Flags().StringVar(&advanceVerdict, "verdict", "", "PASS or FAIL (required in EVALUATE state)")
+	advanceCmd.Flags().StringVar(&advanceFile, "file", "", "Spec file path (optional in DRAFT state — overrides queue value)")
+	advanceCmd.Flags().StringVar(&advanceVerdict, "verdict", "", "PASS or FAIL (required in EVALUATE state, optional in REVIEW)")
 	advanceCmd.Flags().StringVar(&advanceMessage, "message", "", "Git commit message (required with --verdict PASS)")
+	advanceCmd.Flags().StringVar(&advanceDeficiencies, "deficiencies", "", "Comma-separated failed dimensions (with --verdict FAIL)")
+	advanceCmd.Flags().StringVar(&advanceFixed, "fixed", "", "Description of what was fixed (in REFINE state)")
 	rootCmd.AddCommand(advanceCmd)
 }
 
@@ -34,8 +39,8 @@ func runAdvance(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	// Validate --message is required when verdict is PASS.
-	if advanceVerdict == "PASS" && advanceMessage == "" {
+	// Validate --message is required when verdict is PASS in EVALUATE.
+	if s.State == state.PhaseEvaluate && advanceVerdict == "PASS" && advanceMessage == "" {
 		return fmt.Errorf("--message is required when --verdict is PASS. Provide a commit message for the accepted spec")
 	}
 
@@ -48,7 +53,25 @@ func runAdvance(cmd *cobra.Command, args []string) error {
 		specFile = s.CurrentSpec.File
 	}
 
-	if err := state.Advance(s, advanceFile, advanceVerdict); err != nil {
+	// Parse deficiencies.
+	var deficiencies []string
+	if advanceDeficiencies != "" {
+		for _, d := range strings.Split(advanceDeficiencies, ",") {
+			d = strings.TrimSpace(d)
+			if d != "" {
+				deficiencies = append(deficiencies, d)
+			}
+		}
+	}
+
+	in := state.AdvanceInput{
+		File:         advanceFile,
+		Verdict:      advanceVerdict,
+		Deficiencies: deficiencies,
+		Fixed:        advanceFixed,
+	}
+
+	if err := state.Advance(s, in); err != nil {
 		return err
 	}
 
@@ -62,7 +85,6 @@ func runAdvance(cmd *cobra.Command, args []string) error {
 			fmt.Fprintf(out, "Warning: cannot find git repo: %v\n", err)
 			fmt.Fprintf(out, "Please commit manually: %s\n", specFile)
 		} else {
-			// Save state before commit so the state file is included.
 			if err := state.Save(stateDir, s); err != nil {
 				return fmt.Errorf("saving state: %w", err)
 			}
@@ -80,7 +102,6 @@ func runAdvance(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	// Save state (or re-save with commit hash).
 	if err := state.Save(stateDir, s); err != nil {
 		return fmt.Errorf("saving state: %w", err)
 	}
