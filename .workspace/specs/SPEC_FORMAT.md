@@ -283,11 +283,46 @@ web-portal/
 ├── src/
 ├── specs/
 └── ...
+
+launcher/
+├── src/
+├── specs/
+└── ...
 ```
 
-Cross-domain specs (e.g., a protocol used by multiple components) live in a shared project's `specs/` directory (e.g., `shared/specs/`).
-
 The workspace (`planning/`, `tabled/`) is for temporary planning documents. Specs are not temporary — they travel with the project they define. If a project is moved, its specs move with it.
+
+### 11. Protocol specs define cross-domain communication layers
+When two domains communicate (e.g., portal ↔ API, API ↔ optimizer), the message contract between them is a **protocol spec**. Protocol specs are bilateral contracts — both sides depend on them, neither side owns them unilaterally.
+
+Protocol specs live in their own project directory, separate from either domain:
+
+```
+protocols/
+├── ws1/
+│   └── specs/         # portal ↔ API message contract
+└── ws2/
+    └── specs/         # API ↔ optimizer message contract
+```
+
+**What a protocol spec defines:**
+- Message types (commands and events) with their schemas
+- Discriminated union definitions
+- Connection model (persistent, reconnection behavior)
+- Message ordering guarantees
+- The direction of each message (who sends, who receives)
+
+**What a protocol spec does NOT define:**
+- How either side handles a message internally (that belongs in the domain's spec)
+- Store mutations, state transitions, or UI behavior triggered by messages
+- Internal data models (the domain that produces the data owns its spec; the protocol references it)
+
+**Why protocols are separate:**
+A protocol is the agreement between two domains. If it lived inside one domain, the other domain would depend on an internal artifact of a project it doesn't own. By placing the protocol at the boundary, both sides have equal visibility and equal responsibility to maintain compatibility.
+
+**Breaking changes:** When a protocol spec changes, both domains that depend on it must update. The `Depends On` and `Integration Points` sections in each domain's specs create a traceable dependency chain — you can see exactly which specs on both sides are affected by a protocol change.
+
+**Data models are not protocols.** Data models (e.g., `Idea`, `Score`, `ScoredIdea`) are defined by the domain that produces them. Protocol specs reference these models in their message schemas but do not define them. The rule: whoever creates the data owns its spec. The protocol is the envelope; the domain defines what's inside.
 
 ---
 
