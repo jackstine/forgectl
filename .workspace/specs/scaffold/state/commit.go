@@ -10,6 +10,12 @@ func AddCommitToSpec(s *ScaffoldState, specID int, hash string) error {
 
 	for i := range s.Completed {
 		if s.Completed[i].ID == specID {
+			// Deduplicate.
+			for _, h := range s.Completed[i].CommitHashes {
+				if h == hash {
+					return fmt.Errorf("commit %s already registered to spec %d (%s)", hash, specID, s.Completed[i].Name)
+				}
+			}
 			s.Completed[i].CommitHashes = append(s.Completed[i].CommitHashes, hash)
 			return nil
 		}

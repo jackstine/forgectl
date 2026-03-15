@@ -35,6 +35,21 @@ func GitCommit(workDir string, files []string, message string) (string, error) {
 	return strings.TrimSpace(string(out)), nil
 }
 
+// GitHashExists checks if a commit hash exists in the repository.
+func GitHashExists(workDir string, hash string) error {
+	cmd := exec.Command("git", "cat-file", "-t", hash)
+	cmd.Dir = workDir
+	out, err := cmd.Output()
+	if err != nil {
+		return fmt.Errorf("commit %q does not exist in the repository", hash)
+	}
+	objType := strings.TrimSpace(string(out))
+	if objType != "commit" {
+		return fmt.Errorf("%q is a %s, not a commit", hash, objType)
+	}
+	return nil
+}
+
 // GitRepoRoot returns the root directory of the git repository containing workDir.
 func GitRepoRoot(workDir string) (string, error) {
 	cmd := exec.Command("git", "rev-parse", "--show-toplevel")

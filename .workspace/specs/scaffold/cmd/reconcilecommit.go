@@ -36,6 +36,11 @@ func runReconcileCommit(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("cannot find git repo: %w", err)
 	}
 
+	// Validate hash exists in git.
+	if err := state.GitHashExists(repoRoot, reconcileCommitHash); err != nil {
+		return err
+	}
+
 	updated, err := state.ReconcileCommit(s, repoRoot, reconcileCommitHash)
 	if err != nil {
 		return err

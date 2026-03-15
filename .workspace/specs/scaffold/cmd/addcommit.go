@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"fmt"
+	"path/filepath"
 
 	"scaffold/state"
 
@@ -31,6 +32,16 @@ func init() {
 func runAddCommit(cmd *cobra.Command, args []string) error {
 	s, err := state.Load(stateDir)
 	if err != nil {
+		return err
+	}
+
+	// Validate hash exists in git.
+	absDir, _ := filepath.Abs(stateDir)
+	repoRoot, err := state.GitRepoRoot(absDir)
+	if err != nil {
+		return fmt.Errorf("cannot find git repo: %w", err)
+	}
+	if err := state.GitHashExists(repoRoot, addCommitHash); err != nil {
 		return err
 	}
 
