@@ -67,10 +67,9 @@ func runAdvance(cmd *cobra.Command, args []string) error {
 				return fmt.Errorf("saving state: %w", err)
 			}
 
-			absStatePath, _ := filepath.Abs(state.StatePath(stateDir))
 			absSpecPath := filepath.Join(repoRoot, specFile)
 
-			hash, err := state.GitCommit(repoRoot, []string{absSpecPath, absStatePath}, advanceMessage)
+			hash, err := state.GitCommit(repoRoot, []string{absSpecPath}, advanceMessage)
 			if err != nil {
 				fmt.Fprintf(out, "Warning: auto-commit failed: %v\n", err)
 				fmt.Fprintf(out, "Please commit manually: %s\n", specFile)
