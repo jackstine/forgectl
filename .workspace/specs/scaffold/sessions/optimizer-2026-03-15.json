@@ -7,6 +7,17 @@
   "queue": [],
   "completed": [
     {
+      "id": 0,
+      "name": "Idea Transport Models",
+      "domain": "optimizer",
+      "file": "optimizer/specs/idea-transport-models.md",
+      "rounds_taken": 0,
+      "commit_hashes": [
+        "6018818",
+        "8743b1d"
+      ]
+    },
+    {
       "id": 1,
       "name": "Optimizer Configuration Models",
       "domain": "optimizer",
