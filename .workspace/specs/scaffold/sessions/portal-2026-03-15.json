@@ -1,0 +1,394 @@
+{
+  "min_rounds": 1,
+  "max_rounds": 3,
+  "user_guided": true,
+  "state": "COMPLETE",
+  "current_spec": null,
+  "queue": [],
+  "completed": [
+    {
+      "id": 1,
+      "name": "WebSocket Connection",
+      "domain": "portal",
+      "file": "portal/specs/websocket-connection.md",
+      "rounds_taken": 2,
+      "commit_hashes": [
+        "6397c48"
+      ],
+      "evals": [
+        {
+          "round": 1,
+          "verdict": "FAIL",
+          "deficiencies": [
+            "Format Compliance",
+            "Invariant Correctness"
+          ],
+          "fixed": "Added Configuration section with reconnect_initial_delay, reconnect_max_delay, reconnect_backoff_multiplier. Replaced Invariant 2 (connection status reflects reality) with Invariant 2 (no operations on closed socket) which is always-true. Updated Reconnection steps to reference config parameters. Fixed reconnection postcondition to stay within connection scope."
+        },
+        {
+          "round": 2,
+          "verdict": "PASS"
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "name": "Portal State Store",
+      "domain": "portal",
+      "file": "portal/specs/state-store.md",
+      "rounds_taken": 2,
+      "commit_hashes": [
+        "873f0ad"
+      ],
+      "evals": [
+        {
+          "round": 1,
+          "verdict": "FAIL",
+          "deficiencies": [
+            "Completeness",
+            "Testability",
+            "Error Exhaustiveness",
+            "Edge Case Coverage",
+            "Invariant Correctness"
+          ],
+          "fixed": "1. Added error_recoverable to run slice and error_run behavior. 2. Added testing criteria for invariants 1, 3, and 4. 3. Added error handling for ideas_ready malformed payloads. 4. Added edge cases: duplicate idea IDs, log growth, recoverable flag. 5. Rewrote invariant 4 as always-true (review context always present)."
+        },
+        {
+          "round": 2,
+          "verdict": "PASS"
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "name": "Screen Derivation from Run State",
+      "domain": "portal",
+      "file": "portal/specs/screen-derivation.md",
+      "rounds_taken": 2,
+      "commit_hashes": [
+        "235e7f7"
+      ],
+      "evals": [
+        {
+          "round": 1,
+          "verdict": "FAIL",
+          "deficiencies": [
+            "Completeness",
+            "Precision",
+            "Edge Case Coverage"
+          ],
+          "fixed": "1. Added terminal-state-to-new-run behavior. 2. Fixed state_code range to 0-4999 with explicit fallthrough rows and default row. 3. Made Browser Back/Forward precise (guard compares URL screen to ui.screen). 4. Added edge cases: disconnection, 4101-4999 gap. 5. Added testing criteria: sub-view reset on refresh, terminal-to-new-run, state code 4500."
+        },
+        {
+          "round": 2,
+          "verdict": "PASS"
+        }
+      ]
+    },
+    {
+      "id": 4,
+      "name": "Action Gating by Allowed Commands",
+      "domain": "portal",
+      "file": "portal/specs/action-gating.md",
+      "rounds_taken": 2,
+      "commit_hashes": [
+        "313b896"
+      ],
+      "evals": [
+        {
+          "round": 1,
+          "verdict": "FAIL",
+          "deficiencies": [
+            "Completeness",
+            "Format Compliance",
+            "Invariant Correctness"
+          ],
+          "fixed": "1. Added Connection-Driven Disabling behavior with connection.status check. 2. Moved Command-to-Control Mapping out of Behavior into standalone reference section. 3. Rewrote Invariant 1 to acknowledge race window (gating precedes dispatch, API hard lock is safety net). 4. Added disconnection edge case and testing criteria."
+        },
+        {
+          "round": 2,
+          "verdict": "PASS"
+        }
+      ]
+    },
+    {
+      "id": 5,
+      "name": "Review Commands with Optimistic Updates",
+      "domain": "portal",
+      "file": "portal/specs/review-commands.md",
+      "rounds_taken": 2,
+      "commit_hashes": [
+        "9e28c5d"
+      ],
+      "evals": [
+        {
+          "round": 1,
+          "verdict": "FAIL",
+          "deficiencies": [
+            "Completeness",
+            "Error Exhaustiveness",
+            "Format Compliance",
+            "Edge Case Coverage",
+            "Invariant Correctness"
+          ],
+          "fixed": "1. Added scope exclusion for tabled override_score/rescore_idea. 2. Added Warning Event behavior and error handling for Server Reconciliation and Auto-Advance. 3. Rewrote invariants as always-true properties. 4. Added 4 edge cases: unchanged edit, double-action, create_run during active run, regenerate on non-rejected. 5. Clarified create_run config is pass-through (no Configuration section needed)."
+        },
+        {
+          "round": 2,
+          "verdict": "PASS"
+        }
+      ]
+    },
+    {
+      "id": 6,
+      "name": "Score Color Semantics",
+      "domain": "portal",
+      "file": "portal/specs/score-color-semantics.md",
+      "rounds_taken": 2,
+      "commit_hashes": [
+        "c39ee01"
+      ],
+      "evals": [
+        {
+          "round": 1,
+          "verdict": "FAIL",
+          "deficiencies": [
+            "Format Compliance",
+            "Edge Case Coverage"
+          ],
+          "fixed": "1. Moved Color Palette into Interface Outputs. Moved Score Dimension Colors into a Behavior subsection. 2. Added NaN handling in Rejection and as edge case with testing criterion. 3. Added floating-point precision edge case. 4. Tightened Invariant 2 to 'every finite numeric value'."
+        },
+        {
+          "round": 2,
+          "verdict": "PASS"
+        }
+      ]
+    },
+    {
+      "id": 7,
+      "name": "Rich Text Rendering",
+      "domain": "portal",
+      "file": "portal/specs/rich-text-rendering.md",
+      "rounds_taken": 3,
+      "commit_hashes": [
+        "bc81411"
+      ],
+      "evals": [
+        {
+          "round": 1,
+          "verdict": "FAIL",
+          "deficiencies": [
+            "Precision"
+          ],
+          "fixed": "1. Fixed triple-asterisks edge case to commit to a single definitive parse result. 2. Removed vague DOM insertion reference — parser returns element sequence, caller inserts."
+        },
+        {
+          "round": 2,
+          "verdict": "FAIL",
+          "deficiencies": [
+            "Testability",
+            "Precision"
+          ],
+          "fixed": "Updated step 8 and bold-precedence test criterion to match corrected triple-asterisks edge case: strong element contains '*text', trailing '*' is literal."
+        },
+        {
+          "round": 3,
+          "verdict": "PASS"
+        }
+      ]
+    },
+    {
+      "id": 8,
+      "name": "Setup View",
+      "domain": "portal",
+      "file": "portal/specs/setup-view.md",
+      "rounds_taken": 2,
+      "commit_hashes": [
+        "4e9b7b7"
+      ],
+      "evals": [
+        {
+          "round": 1,
+          "verdict": "FAIL",
+          "deficiencies": [
+            "Completeness"
+          ],
+          "fixed": "1. Added explicit note that form fields are the decomposition of YAML config (no raw YAML editing). 2. Defined create_run payload schema with field-to-payload mapping."
+        },
+        {
+          "round": 2,
+          "verdict": "PASS"
+        }
+      ]
+    },
+    {
+      "id": 9,
+      "name": "Progress View",
+      "domain": "portal",
+      "file": "portal/specs/progress-view.md",
+      "rounds_taken": 3,
+      "commit_hashes": [
+        "3a24292"
+      ],
+      "evals": [
+        {
+          "round": 1,
+          "verdict": "FAIL",
+          "deficiencies": [
+            "Completeness"
+          ],
+          "fixed": "1. Added Phase Roadmap with full 11-phase definition. 2. Added Header Area behavior with run ID, state badge, elapsed time. 3. Fixed 'no phases yet' edge case to show full dimmed roadmap. 4. Added future phase status to visual treatment table. 5. Added connection.status and run.id to Inputs. 6. Updated Invariant 1 to mention roadmap."
+        },
+        {
+          "round": 2,
+          "verdict": "FAIL",
+          "deficiencies": [
+            "Completeness",
+            "Testability"
+          ],
+          "fixed": "1. Fixed Phase Group Colors ranges to match roadmap (Repo 300-1000, Optimize 3000-3600, Generate 4000-4100). 2. Updated empty phases test to match edge case (full dimmed roadmap, Phase 0/11). 3. Added future phases rendering test criterion."
+        },
+        {
+          "round": 3,
+          "verdict": "PASS"
+        }
+      ]
+    },
+    {
+      "id": 10,
+      "name": "Kanban Review Board",
+      "domain": "portal",
+      "file": "portal/specs/kanban-review-board.md",
+      "rounds_taken": 2,
+      "commit_hashes": [
+        "4e0f343"
+      ],
+      "evals": [
+        {
+          "round": 1,
+          "verdict": "FAIL",
+          "deficiencies": [
+            "Precision",
+            "Error Exhaustiveness",
+            "Format Compliance"
+          ],
+          "fixed": "1. Precision: Fixed Proceed button placement (header area, not e.g.), added loading state after dispatch, made status chip rule explicit. 2. Error Exhaustiveness: Added error handling for Card Rendering (empty VP, NaN score) and Proceed Button (WS send failure). 3. Format Compliance: Added Configuration section for card_title_max_length. Fixed test to reference Score Color Semantics mapping rather than hard-coding thresholds."
+        },
+        {
+          "round": 2,
+          "verdict": "PASS"
+        }
+      ]
+    },
+    {
+      "id": 11,
+      "name": "Idea Detail View",
+      "domain": "portal",
+      "file": "portal/specs/idea-detail-view.md",
+      "rounds_taken": 2,
+      "commit_hashes": [
+        "01f7702"
+      ],
+      "evals": [
+        {
+          "round": 1,
+          "verdict": "FAIL",
+          "deficiencies": [
+            "Completeness",
+            "Precision",
+            "Error Exhaustiveness",
+            "Edge Case Coverage"
+          ],
+          "fixed": "1. Added regenerating status handling (content panel indicator, lane buttons include regenerating in pending). 2. Committed to specific designs: inline text input for rejection, toggle button for original content (all 3 fields), strikethrough+label for override score. 3. Added error handling for content panel (empty fields), score sidebar (NaN scores), lane sidebar (empty lane). 4. Added edge cases: regenerating idea, empty content, store empty while in detail view."
+        },
+        {
+          "round": 2,
+          "verdict": "PASS"
+        }
+      ]
+    },
+    {
+      "id": 12,
+      "name": "Completion View",
+      "domain": "portal",
+      "file": "portal/specs/completion-view.md",
+      "rounds_taken": 2,
+      "commit_hashes": [
+        "9f59b80"
+      ],
+      "evals": [
+        {
+          "round": 1,
+          "verdict": "FAIL",
+          "deficiencies": [
+            "Completeness",
+            "Precision",
+            "Edge Case Coverage"
+          ],
+          "fixed": "1. Added optimizer strategy to hero section. 2. Committed to run.idea_count as authoritative (removed Object.values alternative). 3. Added concrete field path for idea_memory.enabled. 4. Added edge cases: null score object, corpus_size 0, partially present config_snapshot. 5. Clarified New Run postcondition (store replaced via state_of_the_world)."
+        },
+        {
+          "round": 2,
+          "verdict": "PASS"
+        }
+      ]
+    },
+    {
+      "id": 13,
+      "name": "Error and Cancellation Views",
+      "domain": "portal",
+      "file": "portal/specs/error-cancellation-views.md",
+      "rounds_taken": 2,
+      "commit_hashes": [
+        "18ccf70"
+      ],
+      "evals": [
+        {
+          "round": 1,
+          "verdict": "FAIL",
+          "deficiencies": [
+            "Format Compliance"
+          ],
+          "fixed": "Added ERROR and DEBUG log entries to Observability section. Fixed diagnostic panel postcondition from 'prominently displayed' to concrete position."
+        },
+        {
+          "round": 2,
+          "verdict": "PASS"
+        }
+      ]
+    },
+    {
+      "id": 14,
+      "name": "Warning Toast Display",
+      "domain": "portal",
+      "file": "portal/specs/warning-toast-display.md",
+      "rounds_taken": 2,
+      "commit_hashes": [
+        "22f336f"
+      ],
+      "evals": [
+        {
+          "round": 1,
+          "verdict": "FAIL",
+          "deficiencies": [
+            "Error Exhaustiveness"
+          ],
+          "fixed": "Added Error Handling sections to all 4 behaviors: Toast Display and Toast Stacking are infallible (framework-level only), Console Logging is infallible (console.warn doesn't throw), Toast Toggle is infallible. Updated hardcoded values to reference config parameters."
+        },
+        {
+          "round": 2,
+          "verdict": "PASS"
+        }
+      ]
+    }
+  ],
+  "reconcile": {
+    "round": 1,
+    "evals": [
+      {
+        "round": 1,
+        "verdict": "PASS"
+      }
+    ]
+  }
+}
