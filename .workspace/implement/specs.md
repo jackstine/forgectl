@@ -35,10 +35,6 @@ A JSON file conforming to this schema:
   "items": [
     {
       "name": "WebSocket Client",
-      "domain": "protocols",
-      "topic": "Implement WS2 client connection and message handling",
-      "file": "protocols/ws2/client.go",
-      "specs": ["protocols/ws2/specs/ws2-message-contract.md"],
       "steps": [
         "Create WS2 client struct with connection config",
         "Implement Connect() method with retry logic",
@@ -57,10 +53,6 @@ A JSON file conforming to this schema:
 |-------|------|----------|-------------|
 | `items` | array | yes | Ordered list of implementation items |
 | `items[].name` | string | yes | Display name for the item (used in status output) |
-| `items[].domain` | string | yes | Domain grouping (e.g., "protocols", "api", "optimizer") |
-| `items[].topic` | string | yes | One-sentence description of what is being implemented |
-| `items[].file` | string | yes | Primary file being implemented (for reference) |
-| `items[].specs` | string[] | yes | Spec file paths this implementation is derived from; may be empty array |
 | `items[].steps` | string[] | yes | Ordered list of implementation steps; must not be empty |
 
 No additional fields are permitted.
@@ -85,14 +77,12 @@ Every `advance` call prints a structured state block after transitioning:
 State:   READ_STEPS
 ID:      1
 Item:    WebSocket Client
-Domain:  protocols
-File:    protocols/ws2/client.go
 Batch:   2/4
 Steps:
   1. Implement Send() with type-safe message envelope
   2. Add connection health check and reconnect
   3. Write unit tests for message serialization
-Action:  Implement the steps above. When complete, advance with --confirm to proceed.
+Action:  Implement the steps above. When complete, run: advance
 ```
 
 When advancing to CONFIRM (first call, no `--confirm`):
@@ -101,8 +91,6 @@ When advancing to CONFIRM (first call, no `--confirm`):
 State:   CONFIRM
 ID:      1
 Item:    WebSocket Client
-Domain:  protocols
-File:    protocols/ws2/client.go
 Batch:   2/4
 Review:
   1. Implement Send() with type-safe message envelope
@@ -119,8 +107,6 @@ When advancing to EVALUATE:
 State:   EVALUATE
 ID:      1
 Item:    WebSocket Client
-Domain:  protocols
-File:    protocols/ws2/client.go
 Batches: 4/4 completed
 Action:  Ask the evaluation sub-agent to verify the implementation against all steps. Advance with --verdict PASS or --verdict FAIL --deficiencies <csv>.
 ```
@@ -138,10 +124,10 @@ The scaffold exits with a non-zero code on validation failure.
 | Condition | Signal | Rationale |
 |-----------|--------|-----------|
 | `init` called when `implement-state.json` already exists | Error: "State file already exists. Delete it to reinitialize." Exit code 1. | Prevents accidental loss of in-progress state |
-| `--from` file fails schema validation | Error listing violations. Prints full valid schema. Exit code 1. | Engineer needs to see what's wrong |
+| `--from` file fails schema validation (missing name, empty steps, extra fields) | Error listing violations. Prints full valid schema. Exit code 1. | Engineer needs to see what's wrong |
 | `--batch-size` < 1 | Error: "--batch-size must be at least 1." Exit code 1. | Invalid configuration |
 | `--batches` < 1 | Error: "--batches must be at least 1." Exit code 1. | Invalid configuration |
-| Item has fewer steps than `--batch-size` | Not an error. A single batch contains all steps. | Small items are valid |
+| Item has fewer steps than a single batch | Not an error. A single batch contains all steps. | Small items are valid |
 | `advance --confirm` outside of CONFIRM state | Error naming the current state. Exit code 1. | Confirm is only valid in CONFIRM |
 | `advance --verdict` outside of EVALUATE state | Error naming the current state. Exit code 1. | Verdict is only valid in EVALUATE |
 | `advance` in CONFIRM without `--confirm` | Prints the batch steps and reminds the engineer to run `advance --confirm`. Does not transition. Exit code 0. | Two-step confirmation: first review, then confirm |
@@ -253,10 +239,6 @@ If PASS: the scaffold transitions to ACCEPT.
   "current_item": {
     "id": 1,
     "name": "WebSocket Client",
-    "domain": "protocols",
-    "topic": "Implement WS2 client connection and message handling",
-    "file": "protocols/ws2/client.go",
-    "specs": ["protocols/ws2/specs/ws2-message-contract.md"],
     "all_steps": [
       "Create WS2 client struct with connection config",
       "Implement Connect() method with retry logic",
@@ -291,8 +273,6 @@ If PASS: the scaffold transitions to ACCEPT.
     {
       "id": 0,
       "name": "Config Models",
-      "domain": "optimizer",
-      "file": "optimizer/config.go",
       "batches_taken": 3,
       "eval_rounds": 1,
       "evals": [
