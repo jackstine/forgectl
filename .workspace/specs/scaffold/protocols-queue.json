@@ -1,0 +1,28 @@
+{
+  "specs": [
+    {
+      "name": "WS1 Message Contract",
+      "domain": "protocols/ws1",
+      "topic": "Portal and API exchange typed JSON messages over a persistent WebSocket connection",
+      "file": "protocols/ws1/specs/ws1-message-contract.md",
+      "planning_sources": [
+        ".workspace/planning/shared/websocket-message-protocol.md",
+        ".workspace/planning/shared/schemas.md",
+        ".workspace/planning/shared/diagrams/ws1-portal-api.md"
+      ],
+      "depends_on": []
+    },
+    {
+      "name": "WS2 Message Contract",
+      "domain": "protocols/ws2",
+      "topic": "API and optimizer exchange typed JSON messages over a persistent WebSocket connection",
+      "file": "protocols/ws2/specs/ws2-message-contract.md",
+      "planning_sources": [
+        ".workspace/planning/shared/websocket-message-protocol.md",
+        ".workspace/planning/shared/schemas.md",
+        ".workspace/planning/shared/diagrams/ws2-api-optimizer.md"
+      ],
+      "depends_on": []
+    }
+  ]
+}
