@@ -1,0 +1,107 @@
+{
+  "min_rounds": 1,
+  "max_rounds": 3,
+  "user_guided": true,
+  "state": "COMPLETE",
+  "current_spec": null,
+  "queue": [],
+  "completed": [
+    {
+      "id": 1,
+      "name": "Service Configuration",
+      "domain": "launcher",
+      "file": "launcher/specs/service-configuration.md",
+      "rounds_taken": 3,
+      "commit_hashes": [
+        "b365a67"
+      ],
+      "evals": [
+        {
+          "round": 1,
+          "verdict": "FAIL",
+          "deficiencies": [
+            "Precision",
+            "Voice"
+          ],
+          "fixed": "Changed port field from required to optional (matches default behavior in step 4c). Fixed 'would' to 'requires' in duplicate-ports edge case rationale."
+        },
+        {
+          "round": 2,
+          "verdict": "FAIL",
+          "deficiencies": [
+            "Voice"
+          ],
+          "fixed": "Fixed second 'would' to 'masks' in no-services-key edge case rationale. Scanned for remaining voice violations — none found."
+        },
+        {
+          "round": 3,
+          "verdict": "PASS"
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "name": "Launching System Processes",
+      "domain": "launcher",
+      "file": "launcher/specs/launching-system-processes.md",
+      "rounds_taken": 2,
+      "commit_hashes": [
+        "408a267"
+      ],
+      "evals": [
+        {
+          "round": 1,
+          "verdict": "FAIL",
+          "deficiencies": [
+            "Precision",
+            "Edge Case Coverage",
+            "Invariant Correctness"
+          ],
+          "fixed": "Precision: defined binary names, PATH resolution, and --config flag invocation interface. Invariant 1: reformulated from postcondition to always-true lifecycle property. Edge cases: added port-already-in-use, SIGTERM cleanup failure (best-effort), and concurrent launch (exclusive file creation). Added WARN log level for cleanup failures. Clarified health checks run concurrently."
+        },
+        {
+          "round": 2,
+          "verdict": "PASS"
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "name": "Stopping System Processes",
+      "domain": "launcher",
+      "file": "launcher/specs/stopping-system-processes.md",
+      "rounds_taken": 2,
+      "commit_hashes": [
+        "850efe6",
+        "69c7373"
+      ],
+      "evals": [
+        {
+          "round": 1,
+          "verdict": "FAIL",
+          "deficiencies": [
+            "Precision",
+            "Edge Case Coverage"
+          ],
+          "fixed": "Precision: clarified shutdown timeout as aggregate wall-clock deadline, not per-process. Made signal-all-then-wait pattern explicit in steps. Edge cases: added concurrent stop invocations (harmless, no locking needed), process exit code irrelevant (stop cares about process absence, not exit status). Clarified termination order is not significant."
+        },
+        {
+          "round": 2,
+          "verdict": "PASS"
+        }
+      ]
+    }
+  ],
+  "reconcile": {
+    "round": 1,
+    "evals": [
+      {
+        "round": 1,
+        "verdict": "PASS"
+      }
+    ],
+    "commit_hashes": [
+      "69c7373"
+    ]
+  }
+}
