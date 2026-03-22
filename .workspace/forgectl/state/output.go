@@ -714,6 +714,17 @@ func PrintStatus(w io.Writer, s *ForgeState, dir string) {
 
 // --- Eval command ---
 
+// evaluatorDir returns the directory containing the forgectl binary, which is
+// where the evaluators/ subdirectory lives. Falls back to the current working
+// directory if the executable path cannot be resolved.
+func evaluatorDir() string {
+	exe, err := os.Executable()
+	if err != nil {
+		return "."
+	}
+	return filepath.Dir(exe)
+}
+
 // PrintEvalOutput prints the evaluation context for the sub-agent.
 func PrintEvalOutput(w io.Writer, s *ForgeState, dir string) error {
 	switch s.Phase {
@@ -739,7 +750,7 @@ func printPlanningEval(w io.Writer, s *ForgeState, dir string) error {
 	fmt.Fprintf(w, "File:   %s\n", plan.CurrentPlan.File)
 
 	// Evaluator instructions.
-	evalPromptPath := filepath.Join(dir, "evaluators", "plan-eval.md")
+	evalPromptPath := filepath.Join(evaluatorDir(), "evaluators", "plan-eval.md")
 	evalPrompt, err := os.ReadFile(evalPromptPath)
 	if err != nil {
 		fmt.Fprintf(w, "\n--- EVALUATOR INSTRUCTIONS ---\n\n")
@@ -801,7 +812,7 @@ func printImplementingEval(w io.Writer, s *ForgeState, dir string) error {
 	fmt.Fprintf(w, "Batch: %d/%d\n", impl.BatchNumber, totalBatches)
 
 	// Evaluator instructions.
-	evalPromptPath := filepath.Join(dir, "evaluators", "impl-eval.md")
+	evalPromptPath := filepath.Join(evaluatorDir(), "evaluators", "impl-eval.md")
 	evalPrompt, err := os.ReadFile(evalPromptPath)
 	if err != nil {
 		fmt.Fprintf(w, "\n--- EVALUATOR INSTRUCTIONS ---\n\n")
