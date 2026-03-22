@@ -162,9 +162,12 @@ func runInit(cmd *cobra.Command, args []string) error {
 
 		s.Implementing = state.NewImplementingState()
 		// We need a Planning reference for the plan file path.
+		// Populate name and domain from plan.json context.
 		s.Planning = &state.PlanningState{
 			CurrentPlan: &state.ActivePlan{
-				File: initFrom,
+				Name:   plan.Context.Module,
+				Domain: plan.Context.Domain,
+				File:   initFrom,
 			},
 		}
 	}

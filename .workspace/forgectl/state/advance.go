@@ -76,6 +76,9 @@ func advanceSpecifying(s *ForgeState, in AdvanceInput) error {
 		if in.Verdict != "PASS" && in.Verdict != "FAIL" {
 			return fmt.Errorf("--verdict must be PASS or FAIL")
 		}
+		if err := checkEvalReportExists(in.EvalReport); err != nil {
+			return err
+		}
 
 		eval := EvalRecord{
 			Round:      spec.CurrentSpec.Round,
@@ -134,6 +137,9 @@ func advanceSpecifying(s *ForgeState, in AdvanceInput) error {
 	case StateReconcileEval:
 		if in.Verdict == "" {
 			return fmt.Errorf("--verdict is required in RECONCILE_EVAL state")
+		}
+		if in.Verdict != "PASS" && in.Verdict != "FAIL" {
+			return fmt.Errorf("--verdict must be PASS or FAIL")
 		}
 
 		eval := EvalRecord{
@@ -202,6 +208,9 @@ func advancePlanning(s *ForgeState, in AdvanceInput, dir string) error {
 		if in.EvalReport == "" {
 			return fmt.Errorf("--eval-report is required in EVALUATE state")
 		}
+		if in.Verdict != "PASS" && in.Verdict != "FAIL" {
+			return fmt.Errorf("--verdict must be PASS or FAIL")
+		}
 		if err := checkEvalReportExists(in.EvalReport); err != nil {
 			return err
 		}
@@ -246,12 +255,17 @@ func advancePlanning(s *ForgeState, in AdvanceInput, dir string) error {
 }
 
 func advancePlanningFromDraftOrRefine(s *ForgeState, dir string) error {
+	fromDraft := s.State == StateDraft
+
 	planPath := s.Planning.CurrentPlan.File
 	fullPath := filepath.Join(dir, planPath)
 
 	data, err := os.ReadFile(fullPath)
 	if err != nil {
 		s.State = StateValidate
+		if fromDraft {
+			s.Planning.Round = 1
+		}
 		return fmt.Errorf("cannot read plan file %q: %w", planPath, err)
 	}
 
@@ -259,10 +273,13 @@ func advancePlanningFromDraftOrRefine(s *ForgeState, dir string) error {
 	validationErrs := ValidatePlanJSON(data, baseDir)
 	if len(validationErrs) > 0 {
 		s.State = StateValidate
+		if fromDraft {
+			s.Planning.Round = 1
+		}
 		return &ValidationError{Errors: validationErrs}
 	}
 
-	if s.State == StateDraft {
+	if fromDraft {
 		s.Planning.Round = 1
 	}
 	s.State = StateEvaluate
@@ -322,7 +339,7 @@ func advanceImplementing(s *ForgeState, in AdvanceInput, dir string) error {
 		}
 
 	case StateDone:
-		return fmt.Errorf("session complete. Cannot advance from DONE")
+		return fmt.Errorf("session complete")
 
 	default:
 		return fmt.Errorf("cannot advance from state %q in implementing phase", s.State)
@@ -432,6 +449,9 @@ func advanceImplFromEvaluate(s *ForgeState, in AdvanceInput, dir string) error {
 	}
 	if in.EvalReport == "" {
 		return fmt.Errorf("--eval-report is required in EVALUATE state")
+	}
+	if in.Verdict != "PASS" && in.Verdict != "FAIL" {
+		return fmt.Errorf("--verdict must be PASS or FAIL")
 	}
 	if err := checkEvalReportExists(in.EvalReport); err != nil {
 		return err

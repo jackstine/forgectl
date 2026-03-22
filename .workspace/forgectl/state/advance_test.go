@@ -422,6 +422,87 @@ func TestPlanningDraftWithInvalidPlanEntersValidate(t *testing.T) {
 	}
 }
 
+func TestPlanningValidateStaysOnReFailure(t *testing.T) {
+	dir := t.TempDir()
+	s := newPlanningStateWithDir(dir)
+
+	advancePlanningToDraft(t, s, "")
+
+	// Create invalid plan.
+	planPath := filepath.Join(dir, s.Planning.CurrentPlan.File)
+	os.MkdirAll(filepath.Dir(planPath), 0755)
+	os.WriteFile(planPath, []byte(`{"items": []}`), 0644)
+
+	// DRAFT → VALIDATE
+	Advance(s, AdvanceInput{}, dir)
+	if s.State != StateValidate {
+		t.Fatalf("expected VALIDATE, got %s", s.State)
+	}
+
+	// Re-advance with still-invalid plan: should stay VALIDATE.
+	err := Advance(s, AdvanceInput{}, dir)
+	if err == nil {
+		t.Fatal("expected validation error")
+	}
+	if s.State != StateValidate {
+		t.Errorf("expected VALIDATE on re-failure, got %s", s.State)
+	}
+}
+
+func TestPlanningValidateSucceedsToEvaluate(t *testing.T) {
+	dir := t.TempDir()
+	s := newPlanningStateWithDir(dir)
+
+	advancePlanningToDraft(t, s, "")
+
+	// Create invalid plan.
+	planPath := filepath.Join(dir, s.Planning.CurrentPlan.File)
+	os.MkdirAll(filepath.Dir(planPath), 0755)
+	os.WriteFile(planPath, []byte(`{"items": []}`), 0644)
+
+	// DRAFT → VALIDATE
+	Advance(s, AdvanceInput{}, dir)
+
+	// Fix the plan.
+	createValidPlan(t, dir, s.Planning.CurrentPlan.File)
+
+	// VALIDATE → EVALUATE
+	err := Advance(s, AdvanceInput{}, dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if s.State != StateEvaluate {
+		t.Errorf("expected EVALUATE, got %s", s.State)
+	}
+}
+
+func TestSpecifyingEvalReportMustExist(t *testing.T) {
+	s := newSpecifyingState(1)
+	advanceToEvaluate(t, s)
+
+	err := Advance(s, AdvanceInput{Verdict: "FAIL", EvalReport: "/nonexistent/path.md"}, "")
+	if err == nil {
+		t.Error("expected error for non-existent eval report")
+	}
+}
+
+func TestPlanningDraftSetsRoundTo1OnValidationFailure(t *testing.T) {
+	dir := t.TempDir()
+	s := newPlanningStateWithDir(dir)
+
+	advancePlanningToDraft(t, s, "")
+
+	// Create invalid plan.
+	planPath := filepath.Join(dir, s.Planning.CurrentPlan.File)
+	os.MkdirAll(filepath.Dir(planPath), 0755)
+	os.WriteFile(planPath, []byte(`{"items": []}`), 0644)
+
+	Advance(s, AdvanceInput{}, dir)
+	if s.Planning.Round != 1 {
+		t.Errorf("expected round 1 after DRAFT→VALIDATE, got %d", s.Planning.Round)
+	}
+}
+
 func TestPlanningEvaluatePassAtMinRoundsAccept(t *testing.T) {
 	dir := t.TempDir()
 	s := newPlanningStateWithDir(dir)

@@ -115,6 +115,9 @@ func printSpecifyingOutput(w io.Writer, s *ForgeState) {
 	case StateReconcile:
 		fmt.Fprintf(w, "State:   RECONCILE\n")
 		fmt.Fprintf(w, "Phase:   specifying\n")
+		if len(spec.Completed) > 0 {
+			fmt.Fprintf(w, "Domain:  %s\n", spec.Completed[0].Domain)
+		}
 		fmt.Fprintf(w, "Specs:   %d completed\n", len(spec.Completed))
 		fmt.Fprintf(w, "Action:  Cross-validate all specs: verify Depends On entries, Integration Points\n")
 		fmt.Fprintf(w, "         symmetry, naming consistency. Stage changes with git add.\n")
@@ -316,19 +319,47 @@ func printImplementingOutput(w io.Writer, s *ForgeState, dir string) {
 			fmt.Fprintf(w, "Phase:    implementing\n")
 			fmt.Fprintf(w, "Layer:    %s %s\n", impl.CurrentLayer.ID, impl.CurrentLayer.Name)
 
-			// Count progress.
+			// Check for force-accepted (failed) items in current layer.
 			layer := findLayer(plan, impl.CurrentLayer.ID)
 			if layer != nil {
+				var failedItems []*PlanItem
+				for _, id := range layer.Items {
+					item := findItem(plan, id)
+					if item != nil && item.Passes == "failed" {
+						failedItems = append(failedItems, item)
+					}
+				}
+				if len(failedItems) > 0 {
+					fmt.Fprintf(w, "          FORCE ACCEPT: %d items marked failed (max rounds %d/%d reached)\n", len(failedItems), s.MaxRounds, s.MaxRounds)
+					for _, item := range failedItems {
+						fmt.Fprintf(w, "          - [%s] %s\n", item.ID, item.Name)
+					}
+				}
+
+				// Count progress.
+				terminal := 0
 				passed := 0
+				failed := 0
 				total := len(layer.Items)
 				for _, id := range layer.Items {
 					item := findItem(plan, id)
-					if item != nil && (item.Passes == "passed" || item.Passes == "failed") {
-						passed++
+					if item != nil {
+						if item.Passes == "passed" {
+							terminal++
+							passed++
+						} else if item.Passes == "failed" {
+							terminal++
+							failed++
+						}
 					}
 				}
-				fmt.Fprintf(w, "Progress: %d/%d items passed", passed, total)
-				if passed == total {
+				if failed > 0 {
+					fmt.Fprintf(w, "Progress: %d/%d items terminal (%d passed, %d failed)", terminal, total, passed, failed)
+				} else {
+					fmt.Fprintf(w, "Progress: %d/%d items passed", terminal, total)
+				}
+				layerComplete := terminal == total
+				if layerComplete {
 					fmt.Fprintf(w, " — layer complete")
 				}
 				fmt.Fprintln(w)
@@ -338,7 +369,17 @@ func printImplementingOutput(w io.Writer, s *ForgeState, dir string) {
 		if s.UserGuided {
 			fmt.Fprintf(w, "Action:   Stop and review and discuss with user before continuing.\n")
 		}
-		fmt.Fprintf(w, "          Selecting next batch. Run: forgectl advance\n")
+		// Determine action text based on layer state.
+		if impl.CurrentLayer != nil {
+			layerDef := findLayer(plan, impl.CurrentLayer.ID)
+			if layerDef != nil && allLayerItemsTerminal(plan, *layerDef) {
+				fmt.Fprintf(w, "          Advancing to next layer. Run: forgectl advance\n")
+			} else {
+				fmt.Fprintf(w, "          Selecting next batch. Run: forgectl advance\n")
+			}
+		} else {
+			fmt.Fprintf(w, "          Selecting first batch. Run: forgectl advance\n")
+		}
 
 	case StateImplement:
 		batch := impl.CurrentBatch
@@ -426,14 +467,18 @@ func printImplementingOutput(w io.Writer, s *ForgeState, dir string) {
 
 	case StateEvaluate:
 		batch := impl.CurrentBatch
+		plan, _ := loadPlan(s, dir)
+		totalBatches := 0
+		if plan != nil {
+			totalBatches = countTotalBatches(plan, s.BatchSize)
+		}
 		fmt.Fprintf(w, "State:    EVALUATE\n")
 		fmt.Fprintf(w, "Phase:    implementing\n")
 		fmt.Fprintf(w, "Layer:    %s %s\n", impl.CurrentLayer.ID, impl.CurrentLayer.Name)
-		fmt.Fprintf(w, "Batch:    %d\n", impl.BatchNumber)
+		fmt.Fprintf(w, "Batch:    %d/%d\n", impl.BatchNumber, totalBatches)
 		fmt.Fprintf(w, "Round:    %d/%d\n", batch.EvalRound+1, s.MaxRounds)
 		fmt.Fprintf(w, "Items:\n")
 
-		plan, _ := loadPlan(s, dir)
 		if plan != nil {
 			for _, id := range batch.Items {
 				item := findItem(plan, id)
@@ -451,18 +496,26 @@ func printImplementingOutput(w io.Writer, s *ForgeState, dir string) {
 
 	case StateCommit:
 		batch := impl.CurrentBatch
+		plan, _ := loadPlan(s, dir)
+		totalBatches := 0
+		if plan != nil {
+			totalBatches = countTotalBatches(plan, s.BatchSize)
+		}
 		fmt.Fprintf(w, "State:   COMMIT\n")
 		fmt.Fprintf(w, "Phase:   implementing\n")
 		fmt.Fprintf(w, "Layer:   %s %s\n", impl.CurrentLayer.ID, impl.CurrentLayer.Name)
-		fmt.Fprintf(w, "Batch:   %d\n", impl.BatchNumber)
+		fmt.Fprintf(w, "Batch:   %d/%d\n", impl.BatchNumber, totalBatches)
 		fmt.Fprintf(w, "Items:\n")
 
-		plan, _ := loadPlan(s, dir)
 		if plan != nil && batch != nil {
 			for _, id := range batch.Items {
 				item := findItem(plan, id)
 				if item != nil {
-					fmt.Fprintf(w, "  - [%s] %s\n", item.ID, item.Passes)
+					status := item.Passes
+					if item.Passes == "failed" {
+						status = fmt.Sprintf("failed (force-accept, %d/%d rounds)", item.Rounds, s.MaxRounds)
+					}
+					fmt.Fprintf(w, "  - [%s] %s\n", item.ID, status)
 				}
 			}
 		}
@@ -539,7 +592,9 @@ func printPhaseShiftOutput(w io.Writer, s *ForgeState) {
 func PrintStatus(w io.Writer, s *ForgeState, dir string) {
 	fmt.Fprintf(w, "Session: forgectl-state.json\n")
 	fmt.Fprintf(w, "Phase:   %s", s.Phase)
-	if s.StartedAtPhase != s.Phase && s.StartedAtPhase != "" {
+	if s.StartedAtPhase != "" && s.StartedAtPhase == s.Phase && s.StartedAtPhase != PhaseSpecifying {
+		fmt.Fprintf(w, " (started here)")
+	} else if s.StartedAtPhase != s.Phase && s.StartedAtPhase != "" {
 		fmt.Fprintf(w, " (started at %s)", s.StartedAtPhase)
 	}
 	fmt.Fprintln(w)
@@ -574,7 +629,9 @@ func PrintStatus(w io.Writer, s *ForgeState, dir string) {
 			fmt.Fprintf(w, "\n--- Completed ---\n\n")
 			for _, c := range spec.Completed {
 				fmt.Fprintf(w, "  [%d] %s (%s)  — %d rounds", c.ID, c.Name, c.Domain, c.RoundsTaken)
-				if c.CommitHash != "" {
+				if len(c.CommitHashes) > 0 {
+					fmt.Fprintf(w, ", commit %s", strings.Join(c.CommitHashes, ", "))
+				} else if c.CommitHash != "" {
 					fmt.Fprintf(w, ", commit %s", c.CommitHash)
 				}
 				fmt.Fprintln(w)
@@ -723,7 +780,13 @@ func printImplementingEval(w io.Writer, s *ForgeState, dir string) error {
 
 	fmt.Fprintf(w, "=== IMPLEMENTATION EVALUATION ROUND %d/%d ===\n", evalRound, s.MaxRounds)
 	fmt.Fprintf(w, "Layer: %s %s\n", impl.CurrentLayer.ID, impl.CurrentLayer.Name)
-	fmt.Fprintf(w, "Batch: %d\n", impl.BatchNumber)
+
+	plan, planErr := loadPlan(s, dir)
+	totalBatches := 0
+	if planErr == nil && plan != nil {
+		totalBatches = countTotalBatches(plan, s.BatchSize)
+	}
+	fmt.Fprintf(w, "Batch: %d/%d\n", impl.BatchNumber, totalBatches)
 
 	// Evaluator instructions.
 	evalPromptPath := filepath.Join(dir, "evaluators", "impl-eval.md")
@@ -738,9 +801,8 @@ func printImplementingEval(w io.Writer, s *ForgeState, dir string) error {
 
 	// Items to evaluate.
 	fmt.Fprintf(w, "\n--- ITEMS TO EVALUATE ---\n\n")
-	plan, err := loadPlan(s, dir)
-	if err != nil {
-		return err
+	if planErr != nil {
+		return planErr
 	}
 
 	for i, id := range batch.Items {
