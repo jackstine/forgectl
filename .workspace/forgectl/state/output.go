@@ -79,11 +79,7 @@ func printSpecifyingOutput(w io.Writer, s *ForgeState) {
 	case StateRefine:
 		evalDir := filepath.Dir(cs.File)
 		specBase := strings.TrimSuffix(filepath.Base(cs.File), filepath.Ext(cs.File))
-		lastRound := cs.Round - 1
-		if lastRound < 1 {
-			lastRound = cs.Round
-		}
-		evalFile := filepath.Join(evalDir, ".eval", fmt.Sprintf("%s-r%d.md", specBase, lastRound))
+		evalFile := filepath.Join(evalDir, ".eval", fmt.Sprintf("%s-r%d.md", specBase, cs.Round))
 
 		fmt.Fprintf(w, "State:   REFINE\n")
 		fmt.Fprintf(w, "Phase:   specifying\n")
@@ -241,11 +237,7 @@ func printPlanningOutput(w io.Writer, s *ForgeState, dir string) {
 
 	case StateRefine:
 		evalDir := filepath.Join(filepath.Dir(cp.File), "evals")
-		lastRound := plan.Round - 1
-		if lastRound < 1 {
-			lastRound = plan.Round
-		}
-		evalFile := filepath.Join(evalDir, fmt.Sprintf("round-%d.md", lastRound))
+		evalFile := filepath.Join(evalDir, fmt.Sprintf("round-%d.md", plan.Round))
 
 		lastEval := plan.Evals[len(plan.Evals)-1]
 		fmt.Fprintf(w, "State:   REFINE\n")
@@ -253,7 +245,7 @@ func printPlanningOutput(w io.Writer, s *ForgeState, dir string) {
 		fmt.Fprintf(w, "Plan:    %s\n", cp.Name)
 		fmt.Fprintf(w, "Domain:  %s\n", cp.Domain)
 		fmt.Fprintf(w, "File:    %s\n", cp.File)
-		fmt.Fprintf(w, "Round:   %d/%d\n", lastRound, s.MaxRounds)
+		fmt.Fprintf(w, "Round:   %d/%d\n", plan.Round, s.MaxRounds)
 		if lastEval.Verdict == "FAIL" {
 			fmt.Fprintf(w, "Action:  Evaluation found deficiencies. Spawn a sub-agent to update the plan and notes.\n")
 		} else {
@@ -366,19 +358,27 @@ func printImplementingOutput(w io.Writer, s *ForgeState, dir string) {
 			}
 		}
 
-		if s.UserGuided {
-			fmt.Fprintf(w, "Action:   Stop and review and discuss with user before continuing.\n")
-		}
-		// Determine action text based on layer state.
-		if impl.CurrentLayer != nil {
-			layerDef := findLayer(plan, impl.CurrentLayer.ID)
-			if layerDef != nil && allLayerItemsTerminal(plan, *layerDef) {
-				fmt.Fprintf(w, "          Advancing to next layer. Run: forgectl advance\n")
+		if impl.CurrentLayer == nil {
+			// Initial orient uses narrower alignment (matching State:   ).
+			if s.UserGuided {
+				fmt.Fprintf(w, "Action:  Stop and review and discuss with user before continuing.\n")
+				fmt.Fprintf(w, "         Selecting first batch. Run: forgectl advance\n")
 			} else {
-				fmt.Fprintf(w, "          Selecting next batch. Run: forgectl advance\n")
+				fmt.Fprintf(w, "Action:  Selecting first batch. Run: forgectl advance\n")
 			}
 		} else {
-			fmt.Fprintf(w, "          Selecting first batch. Run: forgectl advance\n")
+			// Non-initial orient uses wider alignment (matching State:    ).
+			actionText := "Selecting next batch. Run: forgectl advance"
+			layerDef := findLayer(plan, impl.CurrentLayer.ID)
+			if layerDef != nil && allLayerItemsTerminal(plan, *layerDef) {
+				actionText = "Advancing to next layer. Run: forgectl advance"
+			}
+			if s.UserGuided {
+				fmt.Fprintf(w, "Action:   Stop and review and discuss with user before continuing.\n")
+				fmt.Fprintf(w, "          %s\n", actionText)
+			} else {
+				fmt.Fprintf(w, "Action:   %s\n", actionText)
+			}
 		}
 
 	case StateImplement:
@@ -594,8 +594,6 @@ func PrintStatus(w io.Writer, s *ForgeState, dir string) {
 	fmt.Fprintf(w, "Phase:   %s", s.Phase)
 	if s.StartedAtPhase != "" && s.StartedAtPhase == s.Phase && s.StartedAtPhase != PhaseSpecifying {
 		fmt.Fprintf(w, " (started here)")
-	} else if s.StartedAtPhase != s.Phase && s.StartedAtPhase != "" {
-		fmt.Fprintf(w, " (started at %s)", s.StartedAtPhase)
 	}
 	fmt.Fprintln(w)
 	fmt.Fprintf(w, "Config:  batch_size=%d, rounds=%d-%d, guided=%v\n", s.BatchSize, s.MinRounds, s.MaxRounds, s.UserGuided)
@@ -628,7 +626,11 @@ func PrintStatus(w io.Writer, s *ForgeState, dir string) {
 		if len(spec.Completed) > 0 {
 			fmt.Fprintf(w, "\n--- Completed ---\n\n")
 			for _, c := range spec.Completed {
-				fmt.Fprintf(w, "  [%d] %s (%s)  — %d rounds", c.ID, c.Name, c.Domain, c.RoundsTaken)
+				roundLabel := "rounds"
+				if c.RoundsTaken == 1 {
+					roundLabel = "round"
+				}
+				fmt.Fprintf(w, "  [%d] %s (%s)  — %d %s", c.ID, c.Name, c.Domain, c.RoundsTaken, roundLabel)
 				if len(c.CommitHashes) > 0 {
 					fmt.Fprintf(w, ", commit %s", strings.Join(c.CommitHashes, ", "))
 				} else if c.CommitHash != "" {
@@ -654,7 +656,11 @@ func PrintStatus(w io.Writer, s *ForgeState, dir string) {
 		if len(plan.Evals) > 0 {
 			lastEval := plan.Evals[len(plan.Evals)-1]
 			if lastEval.Verdict == "PASS" && plan.Round >= s.MinRounds {
-				fmt.Fprintf(w, "  Accepted (%d rounds)\n", plan.Round)
+				acceptLabel := "rounds"
+				if plan.Round == 1 {
+					acceptLabel = "round"
+				}
+				fmt.Fprintf(w, "  Accepted (%d %s)\n", plan.Round, acceptLabel)
 			}
 			for _, e := range plan.Evals {
 				fmt.Fprintf(w, "    Round %d: %s", e.Round, e.Verdict)
@@ -667,11 +673,13 @@ func PrintStatus(w io.Writer, s *ForgeState, dir string) {
 			fmt.Fprintf(w, "  Evals: (none yet)\n")
 		}
 
+		fmt.Fprintf(w, "\n--- Queue ---\n\n")
 		if len(plan.Queue) > 0 {
-			fmt.Fprintf(w, "\n--- Queue ---\n\n")
 			for _, q := range plan.Queue {
 				fmt.Fprintf(w, "  %s (%s)\n", q.Name, q.Domain)
 			}
+		} else {
+			fmt.Fprintf(w, "  empty\n")
 		}
 		fmt.Fprintln(w)
 	}
@@ -691,7 +699,11 @@ func PrintStatus(w io.Writer, s *ForgeState, dir string) {
 				for _, id := range layer.Items {
 					item := findItem(plan, id)
 					if item != nil {
-						fmt.Fprintf(w, "    [%s]  %s  (%d rounds)\n", id, item.Passes, item.Rounds)
+						roundLabel := "rounds"
+						if item.Rounds == 1 {
+							roundLabel = "round"
+						}
+						fmt.Fprintf(w, "    [%s]  %s  (%d %s)\n", id, item.Passes, item.Rounds, roundLabel)
 					}
 				}
 			}

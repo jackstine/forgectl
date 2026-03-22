@@ -6,6 +6,22 @@ Log of implementation updates across sessions.
 
 ## Entries
 
+### 2026-03-22 (final review pass)
+- **Errors:** None
+- **All Tests Pass:** Yes
+- **Changes:**
+  - **output.go**: Fixed planning REFINE `Round:` display and eval file path. Was using `plan.Round - 1` (incorrectly offsetting the round number on rounds >= 2). Now uses `plan.Round` directly, matching specifying REFINE behavior and spec output format.
+  - **output.go**: Fixed specifying REFINE eval file path. Was using `cs.Round - 1` for the eval report filename. Now uses `cs.Round` directly. The round number at REFINE time equals the eval that just occurred (increment happens on REFINE advance, not before).
+  - **output.go**: Fixed implementing ORIENT action output alignment. Initial ORIENT (no current layer) now uses `Action:  ` (2-space padding) matching spec's narrower alignment. Non-initial ORIENT keeps `Action:   ` (3-space padding) matching spec's wider alignment for `Progress:` etc.
+  - **output.go**: Fixed guided/non-guided action text for implementing ORIENT. When `user_guided` is false, the "Stop and review" line is omitted and the batch selection text becomes the `Action:` line directly.
+  - **output.go**: Added singular/plural for "round" vs "rounds" in: implementing status item display, specifying status completed specs, planning status accepted display.
+  - **output.go**: Planning status now always shows `--- Queue ---` section, printing `empty` when queue is empty (matching spec mid-planning example).
+  - **output.go**: Removed `(started at <phase>)` annotation from status phase line. Spec only shows `(started here)` for direct-start phases, never shows `(started at ...)` for normal progression.
+  - **advance.go**: Implementing DONE error message now includes trailing period: `"session complete."` (matching spec's quoted error string).
+- **Known Gaps:**
+  - Specifying ACCEPT output does not include `Commit:` line shown in spec. The spec implies auto-commit via git during EVALUATE->ACCEPT transition, but the implementation uses separate `add-commit`/`reconcile-commit` commands for commit tracking. Adding auto-commit would require git commit execution, which is a feature addition beyond the current scope.
+  - Session archiving to `sessions/` directory is documented in spec but not automated by the scaffold. Archiving is a manual step.
+
 ### 2026-03-22 (review pass)
 - **Errors:** None
 - **All Tests Pass:** Yes

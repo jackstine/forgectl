@@ -339,7 +339,7 @@ func advanceImplementing(s *ForgeState, in AdvanceInput, dir string) error {
 		}
 
 	case StateDone:
-		return fmt.Errorf("session complete")
+		return fmt.Errorf("session complete.")
 
 	default:
 		return fmt.Errorf("cannot advance from state %q in implementing phase", s.State)
