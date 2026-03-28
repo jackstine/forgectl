@@ -4,6 +4,13 @@ Forgectl is a spec driven development harness. Takes plan to implementation comp
 Specs are the source of truth, the new form of code.   Agents take diffs in the specs and generate code from it, just like compilers take C or Golang code and generate assembly.
 Forgectl is a compiler of specs into executable code, built for Agents.
 
+## Use with Claude Code
+- install Golang
+- run `make build`
+- install using `scripts/install-claude.sh <path>` for now.  Plugin coming soon!
+  - this creates a `.claude` folder with symlinks, it will not delete an existing `.claude` folder.
+  - you will need to remove your `.claude` or move it, to use for now.
+
 
 ## Workflow
 
