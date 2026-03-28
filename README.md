@@ -23,6 +23,14 @@ The agent will then
 - Currently Eval agents are general_purpose, so create  multiple eval agents for their specific tasks
 
 
+## Skills
+### Planner
+
+Use the Planner Skill to plan, this allows you to currently create plans that will shape your specs.
+It will help you tailor plans that have less defects and more accurate and solid logic.
+- used to table ideas in the `tabled` section of the workspace
+
+
 ## Thanks and References
 - Clayton Farr and Geoffery Huntley for implementation of a spec driven development workflow https://github.com/ClaytonFarr/ralph-playbook for the ralph playbook, and helping me harness AI potential.  https://github.com/ghuntley/how-to-ralph-wiggum .
 - Jack Clark at Anthropic for helping me understand Anthropics work on scaffolding in late December that started this search for AI improvements. https://jack-clark.net/ .
