@@ -9,10 +9,13 @@ import (
 
 var stateDir string
 
+var version = "v0.0.1"
+
 var rootCmd = &cobra.Command{
-	Use:   "forgectl",
-	Short: "Software development lifecycle scaffold",
-	Long:  "Manages the full software development lifecycle — specifying, planning, implementing — through a JSON-backed state machine.",
+	Use:     "forgectl",
+	Short:   "Software development lifecycle scaffold",
+	Long:    "Manages the full software development lifecycle — specifying, planning, implementing — through a JSON-backed state machine.",
+	Version: version,
 }
 
 func Execute() {

@@ -6,7 +6,8 @@ Forgectl is a compiler of specs into executable code, built for Agents.
 
 ## Use with Claude Code
 - install Golang
-- run `make build`
+- run `make install-global`
+- run `forgectl --version` to confirm it works
 - install using `scripts/install-claude.sh <path>` for now.  Plugin coming soon!
   - this creates a `.claude` folder with symlinks, it will not delete an existing `.claude` folder.
   - you will need to remove your `.claude` or move it, to use for now.
