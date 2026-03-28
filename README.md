@@ -23,7 +23,9 @@ The agent will then
 - Currently Eval agents are general_purpose, so create  multiple eval agents for their specific tasks
 
 
-
+## Thanks and References
+- Clayton Farr and Geoffery Huntley for implementation of a spec driven development workflow https://github.com/ClaytonFarr/ralph-playbook for the ralph playbook, and helping me harness AI potential.  https://github.com/ghuntley/how-to-ralph-wiggum .
+- Jack Clark at Anthropic for helping me understand Anthropics work on scaffolding in late December that started this search for AI improvements. https://jack-clark.net/ .
 
 
 
