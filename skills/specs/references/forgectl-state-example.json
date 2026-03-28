@@ -1,0 +1,43 @@
+{
+  "phase": "specifying",
+  "state": "EVALUATE",
+  "batch_size": 1,
+  "min_rounds": 1,
+  "max_rounds": 3,
+  "user_guided": true,
+  "started_at_phase": "specifying",
+  "phase_shift": null,
+  "specifying": {
+    "current_spec": {
+      "id": 1,
+      "name": "Reservation Booking",
+      "domain": "accounting",
+      "topic": "The accounting service records reservation bookings and tracks ledger entries",
+      "file": "accounting/specs/reservation-booking.md",
+      "planning_sources": [".workspace/planning/accounting/reservation-lifecycle.md"],
+      "depends_on": [],
+      "round": 2,
+      "evals": [
+        {
+          "round": 1,
+          "verdict": "FAIL",
+          "eval_report": "accounting/specs/.eval/reservation-booking-r1.md"
+        }
+      ]
+    },
+    "queue": [
+      {
+        "name": "Ledger Reconciliation",
+        "domain": "accounting",
+        "topic": "The accounting service reconciles ledger entries against completed bookings",
+        "file": "accounting/specs/ledger-reconciliation.md",
+        "planning_sources": [".workspace/planning/accounting/ledger-management.md"],
+        "depends_on": ["Reservation Booking"]
+      }
+    ],
+    "completed": [],
+    "reconcile": null
+  },
+  "planning": null,
+  "implementing": null
+}
