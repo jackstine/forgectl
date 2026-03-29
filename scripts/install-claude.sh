@@ -15,7 +15,7 @@ if [ $# -ne 1 ]; then
   usage
 fi
 
-TARGET="$(cd "$1" && pwd)"
+TARGET="$(mkdir -p "$1" && cd "$1" && pwd)"
 CLAUDE_DIR="$TARGET/.claude"
 
 if [ -e "$CLAUDE_DIR" ]; then
