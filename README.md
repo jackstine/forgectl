@@ -71,6 +71,14 @@ This pipeline of the process is involved with generating a plan to implement.
 Take a implementation plan, and implement it. Simple as that.  This is where your agent is on auto pilot, and reinforces the spec generation into the codebase.
 
 
+## Examples
+
+### Spec Planning Session
+
+Here is full conversation showing how I iteratively review, discuss, and update specifications (on forgectl) and cross-spec consistency. This is what a real planning session looks like using the specs skill.
+
+See: [`docs/examples/example_of_working_and_planning_in_specs.txt`](docs/examples/example_of_working_and_planning_in_specs.txt)
+
 ## Diagrams
 
 Detailed ASCII art diagrams of the full workflow, state machines, CLI commands, and data flow are in [`docs/diagrams/`](docs/diagrams/).

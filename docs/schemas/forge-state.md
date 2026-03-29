@@ -10,6 +10,7 @@
 
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
+| `session_id` | string | **yes** | UUID v4, generated at init, never changes for the session lifetime |
 | `phase` | string | **yes** | Current phase: `"specifying"`, `"planning"`, or `"implementing"` |
 | `state` | string | **yes** | Current state within the phase (see State Values below) |
 | `started_at_phase` | string | **yes** | Phase selected at `forgectl init` time |
@@ -42,6 +43,15 @@
 | `planning` | PhaseConfig | Planning-phase config |
 | `implementing` | PhaseConfig | Implementing-phase config |
 | `general` | GeneralConfig | Global config (enable_commits, user_guided) |
+| `logs` | LogsConfig | Logging configuration |
+
+### LogsConfig
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `enabled` | bool | Enable logging |
+| `retention_days` | int | Number of days to retain log files |
+| `max_files` | int | Maximum number of log files to keep |
 
 ### PhaseConfig
 
@@ -88,9 +98,18 @@
 | Field | Type | Description |
 |-------|------|-------------|
 | `current_spec` | ActiveSpec | Spec being drafted/evaluated. Null between specs. |
+| `domains` | object | Per-domain metadata. Each key is a domain name. |
 | `queue` | SpecQueueEntry[] | Remaining specs to process. |
 | `completed` | CompletedSpec[] | Specs that have been accepted. |
 | `reconcile` | ReconcileState | Reconciliation state. Populated when state = DONE. |
+
+### Domains Object
+
+Each key in `domains` is a domain name, value is:
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `code_search_roots` | string[] | Root directories for code search, set via `set-roots` command |
 
 ### ActiveSpec
 
@@ -144,9 +163,21 @@
 | `id` | int | Unique ID, increments from 1 |
 | `name` | string | Plan name |
 | `domain` | string | Domain |
-| `topic` | string | Topic description |
 | `file` | string | Path to plan.json |
 | `specs` | string[] | Spec file paths |
+| `spec_commits` | string[] | Git commit hashes from spec phase |
+| `code_search_roots` | string[] | Directories for code exploration |
+
+### PlanQueueEntry
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `id` | int | Unique ID, increments from 1 |
+| `name` | string | Plan name |
+| `domain` | string | Domain |
+| `file` | string | Path to plan.json |
+| `specs` | string[] | Spec file paths |
+| `spec_commits` | string[] | Git commit hashes from spec phase |
 | `code_search_roots` | string[] | Directories for code exploration |
 
 ---

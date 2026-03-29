@@ -16,15 +16,11 @@
 
 
 ### Specs
-- need a SKILL.md file
-
-
-
 How do multiple skills work with each other?
    — probably set it up to select what we do, and there is a workflow that one must follow.
 
 
-
+#### Unanswered at this time,  need to weave into the workflow
 - We generate them from plans
 - We update them from talking to the agent
 - We can reverse engineer the code base to get these.
@@ -46,6 +42,7 @@ How do multiple skills work with each other?
 - no The reconciliation eval prompt template
 
 
-
+### Logging
+- we need to not delete active sessions on logging.
 
 

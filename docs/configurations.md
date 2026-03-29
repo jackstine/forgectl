@@ -238,6 +238,13 @@ Sub-agent type for reconciliation evaluation at RECONCILE_EVAL state.
 
 Number of sub-agents to spawn for reconciliation evaluation.
 
+#### `specifying.reconciliation.user_review`
+
+- **Type:** boolean
+- **Default:** false
+
+When true, RECONCILE_REVIEW action includes "STOP please review and discuss with user before continuing." When false, it says "Reconciliation review complete." The RECONCILE_REVIEW state is entered either way — this only controls the output message.
+
 ### Planning Phase
 
 #### `planning.batch`
@@ -389,6 +396,33 @@ When `false` (default): COMMIT states remain as pause points but `--message` is 
 
 When `true`: `--message` is required and validated at COMMIT states and first-round IMPLEMENT advances. TODO: automatic `git commit` execution is not yet implemented — the flag is validated and stored but no git operation occurs.
 
+### Logs
+
+#### `logs.enabled`
+
+- **Type:** boolean
+- **Default:** true
+
+Enable or disable activity logging.
+
+#### `logs.retention_days`
+
+- **Type:** integer
+- **Default:** 90
+- **Constraint:** >= 0
+
+Delete log files older than N days. When set to 0, log files are kept forever.
+
+#### `logs.max_files`
+
+- **Type:** integer
+- **Default:** 50
+- **Constraint:** >= 0
+
+Maximum log files to keep. Oldest files are deleted first. When set to 0, the number of files is unlimited.
+
+**Note:** Log files are stored in `~/.forgectl/logs/` (user home directory, not project directory). The logs directory is created automatically if it does not exist. Retention constraints are validated at init time.
+
 ## State File Config Structure
 
 After `init`, the effective configuration is stored in the state file's `config` object, mirroring the TOML structure:
@@ -407,7 +441,7 @@ After `init`, the effective configuration is stored in the state file's `config`
         "user_review": false,
         "eval": { "agent_type": "opus", "agent_count": 1 }
       },
-      "reconciliation": { "min_rounds": 0, "max_rounds": 3, "agent_type": "opus", "agent_count": 1 }
+      "reconciliation": { "min_rounds": 0, "max_rounds": 3, "agent_type": "opus", "agent_count": 1, "user_review": false }
     },
     "planning": {
       "batch": 1,
@@ -426,6 +460,11 @@ After `init`, the effective configuration is stored in the state file's `config`
     "general": {
       "user_guided": true,
       "enable_commits": false
+    },
+    "logs": {
+      "enabled": true,
+      "retention_days": 90,
+      "max_files": 50
     }
   },
   "phase": "specifying",

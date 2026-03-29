@@ -22,9 +22,9 @@ All 6 fields are required on every entry. No extra fields allowed.
 |-------|------|----------|-------------|
 | `name` | string | **yes** | Display name for the plan. Shown in `forgectl status` output. |
 | `domain` | string | **yes** | Domain this plan covers (typically a directory name). |
-| `topic` | string | **yes** | One-sentence description of what this plan addresses. |
-| `file` | string | **yes** | Target path for the output `plan.json`, relative to project root. Convention: `<domain>/.workspace/implementation_plan/plan.json` |
+| `file` | string | **yes** | Target path for the output `plan.json`, relative to project root. Convention: `<domain>/.forge_workspace/implementation_plan/plan.json` |
 | `specs` | string[] | **yes** | Spec file paths to study during planning, relative to project root. Can be empty `[]`. |
+| `spec_commits` | string[] | **yes** | Git commit hashes associated with the specs. Used to view spec diffs during planning. Can be empty `[]`. |
 | `code_search_roots` | string[] | **yes** | Directory roots for codebase exploration during STUDY_CODE. Can be empty `[]`. |
 
 ---
@@ -33,7 +33,7 @@ All 6 fields are required on every entry. No extra fields allowed.
 
 - Top-level must have exactly one key: `"plans"`.
 - `plans` array must be non-empty.
-- Each entry must have exactly the 6 fields listed — no more, no fewer.
+- Each entry must have exactly the 6 fields listed — no more, no fewer. (Note: `topic` was removed; `spec_commits` was added.)
 - All field names and values are case-sensitive.
 
 ---
@@ -44,14 +44,14 @@ All 6 fields are required on every entry. No extra fields allowed.
 {
   "plans": [
     {
-      "name": "Service Configuration",
+      "name": "Launcher Implementation Plan",
       "domain": "launcher",
-      "topic": "Implementation plan for service configuration loading and validation",
-      "file": "launcher/.workspace/implementation_plan/plan.json",
+      "file": "launcher/.forge_workspace/implementation_plan/plan.json",
       "specs": [
         "launcher/specs/service-configuration.md",
         "launcher/specs/launching-system-processes.md"
       ],
+      "spec_commits": ["7cede10", "8743b1d"],
       "code_search_roots": ["launcher/", "lib/"]
     }
   ]
@@ -79,3 +79,4 @@ For each entry, the planning phase produces:
 - Type definitions: `forgectl/state/types.go` (`PlanQueueInput`, `PlanQueueEntry`)
 - Validation: `forgectl/state/validate.go` (`ValidatePlanQueue`)
 - Reference docs: `skills/implementation_planning/references/plan-queue-format.md`
+- Auto-generation: At specifying→planning phase shift, forgectl can auto-generate this file from completed specs, commit hashes, and code search roots collected during the specifying phase. See phase-transitions spec.

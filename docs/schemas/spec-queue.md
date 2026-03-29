@@ -39,6 +39,26 @@ All 6 fields are required on every entry. No extra fields allowed.
 
 ---
 
+## Dynamic Queue Management
+
+During the specifying phase, specs can be added to the queue dynamically using the `forgectl add-queue-item` command. This command is valid in the following states:
+
+- **DRAFT** — Domain is inferred from the current domain
+- **CROSS_REFERENCE_REVIEW** — Domain is inferred from the current domain
+- **DONE** — `--domain` flag is required
+
+### add-queue-item Command Flags
+
+| Flag | Type | Required | Description |
+|------|------|----------|-------------|
+| `--name` | string | **yes** | Display name for the spec. Must be unique. |
+| `--domain` | string | **yes** (DONE only) | Domain grouping. Inferred from current domain at DRAFT and CROSS_REFERENCE_REVIEW states. |
+| `--topic` | string | **yes** | One-sentence topic of concern describing the single responsibility this spec addresses. |
+| `--file` | string | **yes** | Target file path relative to project root. Convention: `<domain>/specs/<kebab-name>.md` |
+| `--source` | string[] | optional (repeatable) | Paths to planning documents this spec is derived from, relative to project root. Can be specified multiple times. |
+
+---
+
 ## Example
 
 ```json

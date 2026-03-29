@@ -50,6 +50,10 @@ max_rounds = 3
 agent_type = "opus"
 # Number of sub-agents to spawn for reconciliation evaluation.
 agent_count = 1
+# When true, RECONCILE_REVIEW action includes "STOP please review and discuss
+# with user before continuing." When false, it says "Reconciliation review complete."
+# The state is entered either way — this only controls the output message.
+user_review = false
 
 # --- Planning Phase ---
 # Controls implementation plan generation from specs.
@@ -127,3 +131,21 @@ user_guided = true
 # true:  --message is required and validated at COMMIT states.
 #        TODO: automatic git commit execution is not yet implemented.
 enable_commits = false
+
+# --- Logs ---
+# Activity logging configuration.
+
+[logs]
+# Enable or disable activity logging.
+enabled = true
+
+# Delete log files older than N days.
+# 0 = keep forever.
+# Validated at init time: must be >= 0.
+retention_days = 90
+
+# Maximum log files to keep. Oldest deleted first.
+# 0 = unlimited.
+# Validated at init time: must be >= 0.
+# Log files are stored in ~/.forgectl/logs/ (user home, not project directory).
+max_files = 50
