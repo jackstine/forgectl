@@ -75,6 +75,10 @@ Take a implementation plan, and implement it. Simple as that.  This is where you
 
 Detailed ASCII art diagrams of the full workflow, state machines, CLI commands, and data flow are in [`docs/diagrams/`](docs/diagrams/).
 
+## Schemas
+
+JSON schema documentation for all files forgectl reads, writes, and validates are in [`docs/schemas/`](docs/schemas/).
+
 
 ## Thanks and References
 - Clayton Farr and Geoffery Huntley for implementation of a spec driven development workflow https://github.com/ClaytonFarr/ralph-playbook for the ralph playbook, and helping me harness AI potential.  https://github.com/ghuntley/how-to-ralph-wiggum .
