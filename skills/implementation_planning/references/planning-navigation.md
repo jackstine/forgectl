@@ -77,11 +77,11 @@ forgectl advance
 ### DRAFT
 
 Generate the implementation plan:
-- Write `plan.json` following the format in `forgectl/docs/PLAN_FORMAT.md`
+- Write `plan.json` following the schema in `references/plan-format.json` (the authoritative schema derived from forgectl's Go types)
 - Write `notes/<package>.md` files for implementation guidance
 - Output location: `<domain>/.workspace/implementation_plan/`
 
-When you advance, forgectl automatically validates `plan.json`. If valid, you go straight to EVALUATE. If invalid, you enter VALIDATE.
+When you advance, forgectl automatically validates `plan.json`. If valid, you go straight to EVALUATE. If invalid, you enter VALIDATE. See VALIDATE section below for common failures.
 
 ```bash
 forgectl advance
@@ -90,6 +90,12 @@ forgectl advance
 ### VALIDATE
 
 Only entered when `plan.json` fails structural validation. Forgectl prints specific errors with field descriptions. Fix the issues and advance to re-validate.
+
+**Common validation failures:**
+- `cannot unmarshal string into Go struct field PlanJSON.refs of type state.PlanRef` — `refs` entries must be objects `{"id": "...", "path": "..."}`, not plain strings.
+- `refs: path "..." does not exist` — Paths are resolved relative to `filepath.Dir(plan.json)`, not the project root. Use `../../specs/foo.md` style relative paths.
+- `items[N]: ref "notes/foo.md#section" does not exist` — Remove `#anchor` fragments from `ref` paths. Forgectl runs `os.Stat()` on the raw string including the fragment.
+- `missing required field "tests"` or `"depends_on"` — These fields must be arrays, never null. Use `[]` for empty.
 
 ```bash
 # Fix plan.json, then:

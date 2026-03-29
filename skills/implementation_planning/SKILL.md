@@ -41,10 +41,10 @@ For each plan in the queue, follow the forgectl state machine:
 
 1a. **ORIENT** — Review plan metadata and understand the domain.
 1b. **STUDY_SPECS** — Study every spec listed in the plan's `specs` field. Read full spec files and review git diffs for recent spec commits.
-1c. **STUDY_CODE** — Explore the codebase using sub-agents (3 agents) within the plan's `code_search_roots`. Identify existing implementations, TODOs, placeholders, and patterns.
+1c. **STUDY_CODE** — Explore the codebase using sub-agents (3 agents) within the plan's `code_search_roots`. Partition agents by concern (e.g. agent 1: infrastructure/config/entry points, agent 2: domain models/state, agent 3: transport/IO/tests). Identify existing implementations, TODOs, placeholders, and patterns.
 1d. **STUDY_PACKAGES** — Study the project's technical stack: package manifests, library docs, CLAUDE.md references.
-1e. **REVIEW** — Checkpoint before drafting. Review study findings and the plan format. If guided, discuss with the user.
-1f. **DRAFT** — Generate the implementation plan as `plan.json` + `notes/` at the target path. Forgectl validates automatically on advance.
+1e. **REVIEW** — Checkpoint before drafting. Read the plan format reference BEFORE drafting: [references/plan-format.json](references/plan-format.json). If guided, discuss with the user.
+1f. **DRAFT** — Generate the implementation plan as `plan.json` + `notes/` at the target path. Follow the schema in [references/plan-format.json](references/plan-format.json) exactly. Forgectl validates automatically on advance. See [Schema Gotchas](#schema-gotchas) below.
 1g. **EVALUATE** — Use `forgectl eval` to get evaluation context. Spawn an Opus sub-agent to assess the plan against all 11 dimensions. Record the verdict with `forgectl advance --verdict PASS|FAIL --eval-report <path>`.
 1h. **REFINE** — If evaluation failed or min rounds not met, spawn a sub-agent to update the plan and notes. Advance to re-evaluate.
 1i. **ACCEPT** — Plan finalized. `forgectl advance --message <commit msg>`.
@@ -53,7 +53,7 @@ Use `forgectl status` at any point to see current state and what action is neede
 
 See: [references/planning-navigation.md](references/planning-navigation.md)
 
-The plan output format is defined in `forgectl/docs/PLAN_FORMAT.md`.
+The plan output format is defined in [references/plan-format.json](references/plan-format.json).
 </step_1>
 
 <step_2>
@@ -94,7 +94,19 @@ Plans are written to the path specified in the plan queue's `file` field:
     └── ...
 ```
 
-Format: `forgectl/docs/PLAN_FORMAT.md`
+Format: [references/plan-format.json](references/plan-format.json)
+
+### Schema Gotchas
+
+These are common validation failures. Read [references/plan-format.json](references/plan-format.json) for the full schema.
+
+1. **`refs` must be objects, not strings.** Each entry needs `{"id": "...", "path": "..."}`. Plain strings like `"specs/foo.md"` will fail parsing.
+2. **All paths are relative to plan.json's directory**, not the project root. If plan.json is at `api/.workspace/implementation_plan/plan.json`, then spec paths look like `../../specs/foo.md` and notes paths look like `notes/bar.md`.
+3. **No `#anchor` fragments in paths.** `ref: "notes/foo.md#section"` will fail — forgectl runs `os.Stat()` on the raw string. Use `ref: "notes/foo.md"` instead.
+4. **`spec` is a single string, not an array.** To reference multiple spec sections, use the description or notes file.
+5. **`context` only has `domain` and `module`.** Extra fields like `go_version` or `binary` are silently ignored but add no value.
+6. **`tests` must be an array, never null.** Use `[]` for items with no tests. `null` fails validation.
+7. **`depends_on` must be an array, never null.** Use `[]` for items with no dependencies.
 
 ### Evaluation
 
@@ -112,9 +124,13 @@ The planning evaluator assesses 11 dimensions against the referenced specs:
 10. Testing Criteria
 11. Dependencies & Format
 
-Full evaluator instructions: `forgectl/evaluators/plan-eval.md`
+Full evaluator instructions: `~/.local/bin/evaluators/plan-eval.md` (read by `forgectl eval` automatically)
 
 Eval reports are written to: `<domain>/.workspace/implementation_plan/evals/round-N.md`
+
+### Evaluation Sub-Agent Context
+
+When spawning the evaluation sub-agent, provide clear context about what is NEW work vs ALREADY IMPLEMENTED. Specs often describe full system behavior, but the plan may only cover a subset (e.g. logging migration across existing modules). The evaluator must know the boundary to avoid false negatives on dimensions like Behavior or Testing Criteria for already-implemented functionality.
 
 </contextual_information>
 

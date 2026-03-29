@@ -1,0 +1,102 @@
+{
+  "$comment": [
+    "Authoritative schema for plan.json consumed by forgectl.",
+    "Derived from forgectl/state/types.go and forgectl/state/validate.go.",
+    "",
+    "PATH RESOLUTION:",
+    "  All paths in 'refs[].path' and 'items[].ref' are resolved relative to",
+    "  the directory containing plan.json (filepath.Dir(plan.json)).",
+    "  Example: if plan.json is at api/.workspace/implementation_plan/plan.json,",
+    "  then ref path '../../specs/foo.md' resolves to api/specs/foo.md.",
+    "",
+    "  Paths MUST NOT contain '#anchor' fragments — forgectl runs os.Stat()",
+    "  on the raw path string. 'notes/foo.md#section' will fail validation.",
+    "",
+    "VALIDATION RULES:",
+    "  - Top-level: only 'context', 'refs', 'layers', 'items' are allowed.",
+    "  - Every item must appear in exactly one layer.",
+    "  - Items may only depend on items in the same or earlier layer.",
+    "  - No dependency cycles.",
+    "  - All depends_on IDs must exist in the items array.",
+    "  - All refs paths must exist on disk.",
+    "  - All item ref paths must exist on disk.",
+    "  - Test categories must be: 'functional', 'rejection', or 'edge_case'.",
+    "",
+    "IMPLEMENTING PHASE:",
+    "  When forgectl transitions from planning to implementing, it adds",
+    "  'passes' (string, default 'pending') and 'rounds' (int, default 0)",
+    "  to every item. Do not include these fields when drafting."
+  ],
+  "context": {
+    "$required": true,
+    "$comment": "Domain and project metadata. Only 'domain' and 'module' are recognized by forgectl.",
+    "domain": "<string, required> Domain name matching the top-level directory",
+    "module": "<string, required> Go module name or package name (e.g. 'spectacular/api')"
+  },
+  "refs": [
+    {
+      "$comment": "Reference file entries. Array of objects, NOT strings. Optional (omitempty).",
+      "id": "<string> Short identifier for this reference (e.g. 'spec-logging', 'notes-config')",
+      "path": "<string> Relative path from plan.json directory. Must exist on disk. No #anchors."
+    }
+  ],
+  "layers": [
+    {
+      "$required": true,
+      "$comment": "Ordered dependency tiers. Layer N items may only depend on layer 0..N items.",
+      "id": "<string, required> Layer identifier (e.g. 'L0', 'L1')",
+      "name": "<string, required> Human-readable layer name",
+      "items": ["<string[]> Item IDs belonging to this layer. Every item must appear in exactly one layer."]
+    }
+  ],
+  "items": [
+    {
+      "$required": true,
+      "id": "<string, required> Unique item identifier. Convention: package.concern (e.g. 'config.load')",
+      "name": "<string, required> Short action-oriented name",
+      "description": "<string, required> One or two sentences explaining what and why",
+      "depends_on": ["<string[], required> Item IDs that must complete first. Use empty array [] for no deps."],
+      "steps": ["<string[], optional (omitempty)> Ordered implementation instructions"],
+      "files": ["<string[], optional (omitempty)> File paths to create or modify, relative to domain root"],
+      "spec": "<string, optional (omitempty)> Spec filename reference. Single string only, not array. No #anchors.",
+      "ref": "<string, optional (omitempty)> Notes file path relative to plan.json directory. Must exist on disk. No #anchors.",
+      "tests": [
+        {
+          "$required": true,
+          "$comment": "Use empty array [] for items with no tests (e.g. dependency bootstrapping).",
+          "category": "<string, required> One of: 'functional', 'rejection', 'edge_case'",
+          "description": "<string, required> What this test verifies — specific enough to evaluate unambiguously"
+        }
+      ]
+    }
+  ],
+
+  "$examples": {
+    "minimal_item": {
+      "id": "config.types",
+      "name": "Service config type definitions",
+      "description": "Go structs for validated service endpoint configuration.",
+      "depends_on": [],
+      "files": ["internal/config/types.go"],
+      "steps": ["Define ServiceEndpoint struct", "Define ServicesConfig struct"],
+      "spec": "service-configuration.md",
+      "ref": "notes/config.md",
+      "tests": [
+        { "category": "functional", "description": "Three named fields, not a map" }
+      ]
+    },
+    "minimal_ref": {
+      "id": "spec-config",
+      "path": "../../specs/service-configuration.md"
+    },
+    "no_deps_no_tests_item": {
+      "id": "deps.add",
+      "name": "Add zap dependency",
+      "description": "Add go.uber.org/zap to go.mod.",
+      "depends_on": [],
+      "files": ["go.mod"],
+      "steps": ["Run go get go.uber.org/zap@latest"],
+      "tests": []
+    }
+  }
+}
