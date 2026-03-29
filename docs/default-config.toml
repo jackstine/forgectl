@@ -1,0 +1,82 @@
+# Forgectl Project Configuration
+# Place this file at .forgectl/config in your project root.
+# All values shown are defaults.
+
+# --- Specifying Phase ---
+# Controls spec generation from planning documents.
+
+[specifying]
+# Number of specs processed per cycle. Grouped by domain — a batch
+# never mixes domains. If a domain has more specs than batch, it
+# produces multiple batches before moving to the next domain.
+batch = 3
+
+[specifying.eval]
+# Minimum eval rounds before PASS can accept a spec batch.
+min_rounds = 1
+# Maximum eval rounds. FAIL at this threshold forces acceptance.
+max_rounds = 3
+
+[specifying.reconciliation]
+# Minimum rounds before PASS can complete reconciliation.
+# 0 means a single PASS completes immediately.
+min_rounds = 0
+# Maximum reconciliation rounds. FAIL at this threshold forces completion.
+max_rounds = 3
+
+# --- Planning Phase ---
+# Controls implementation plan generation from specs.
+
+[planning]
+# Number of plans processed per cycle.
+# TODO: values > 1 are not yet supported. Reserved for future use.
+batch = 1
+
+[planning.eval]
+# Minimum eval rounds before PASS can accept a plan.
+min_rounds = 1
+# Maximum eval rounds. FAIL at this threshold forces acceptance.
+max_rounds = 3
+
+# --- Implementing Phase ---
+# Controls batched implementation of plan items.
+
+[implementing]
+# Maximum unblocked plan items per implementation batch.
+# Items are selected in dependency order from the current layer.
+batch = 2
+
+[implementing.eval]
+# Minimum eval rounds before PASS can accept an implementation batch.
+min_rounds = 1
+# Maximum eval rounds. FAIL at this threshold forces acceptance.
+max_rounds = 3
+
+# --- Paths ---
+# Directory locations for scaffold state and domain artifacts.
+
+[paths]
+# Where session state files are stored.
+# Absolute path: used directly.
+# Relative path: resolved relative to project root.
+state_dir = ".forgectl/state"
+
+# Directory name for domain artifacts (plans, notes, manifests).
+# Created inside each domain as <domain>/<workspace_dir>/
+workspace_dir = ".forge_workspace"
+
+# --- General ---
+# Cross-cutting settings.
+
+[general]
+# When true, the scaffold pauses at SELECT (specifying), REVIEW (planning),
+# and ORIENT (implementing) for user discussion. Can be toggled at runtime
+# with --guided / --no-guided on any advance call.
+user_guided = true
+
+# Controls whether the scaffold requires and executes git commits.
+# false: COMMIT states are pause points but --message is not required.
+#        No git operations. Engineer commits manually.
+# true:  --message is required and validated at COMMIT states.
+#        TODO: automatic git commit execution is not yet implemented.
+enable_commits = false

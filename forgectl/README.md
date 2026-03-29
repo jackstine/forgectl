@@ -14,11 +14,11 @@ Between phases, a **PHASE_SHIFT** checkpoint stops work and prompts a context re
 
 ```bash
 # Build
-cd .workspace/forgectl
+cd forgectl
 go build -o forgectl .
 
 # Initialize a specifying session
-forgectl init --from specs-queue.json --batch-size 2 --max-rounds 3
+forgectl init --from specs-queue.json --phase specifying
 
 # Check current state
 forgectl status
@@ -32,4 +32,4 @@ forgectl eval
 
 ## State File
 
-All state lives in `forgectl-state.json`. Writes are atomic (tmp → backup → rename) with crash recovery on startup. The state file is gitignored; completed sessions are archived to `sessions/`.
+All state lives in `.forgectl/state/forgectl-state.json`. The `.forgectl/` directory serves as the project marker (like `.git/`). Writes are atomic (tmp → backup → rename) with crash recovery on startup. The state file is gitignored; completed sessions are archived to `sessions/`.

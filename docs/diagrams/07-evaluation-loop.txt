@@ -3,7 +3,8 @@
 ================================================================================
 
   Every phase uses the same evaluation loop pattern with configurable
-  min_rounds and max_rounds to balance quality with progress.
+  eval.min_rounds and eval.max_rounds (phase-scoped in .forgectl/config)
+  to balance quality with progress.
 
 
   ═══════════════════════════════════════════════════════════════════════════
@@ -30,7 +31,7 @@
                      │    │                             │        │
                      │    │                             │        │
                      │    ▼                             ▼        │
-                     │  rounds >= min_rounds?     rounds >= max_rounds?
+                     │  rounds >= eval.min_rounds? rounds >= eval.max_rounds?
                      │    │                             │        │
                      │  ┌─┴──┐                       ┌──┴─┐     │
                      │  │    │                       │    │     │
@@ -56,10 +57,10 @@
   ┌───────────┬────────────────────────┬────────────────────────────────────┐
   │ Verdict   │ Round Condition         │ Outcome                           │
   ├───────────┼────────────────────────┼────────────────────────────────────┤
-  │ PASS      │ rounds >= min_rounds   │ ACCEPT  (quality satisfied)       │
-  │ PASS      │ rounds <  min_rounds   │ REFINE  (need more eval cycles)   │
-  │ FAIL      │ rounds <  max_rounds   │ REFINE  (fix and retry)           │
-  │ FAIL      │ rounds >= max_rounds   │ ACCEPT  (forced — cap reached)    │
+  │ PASS      │ rounds >= eval.min     │ ACCEPT  (quality satisfied)       │
+  │ PASS      │ rounds <  eval.min     │ REFINE  (need more eval cycles)   │
+  │ FAIL      │ rounds <  eval.max     │ REFINE  (fix and retry)           │
+  │ FAIL      │ rounds >= eval.max     │ ACCEPT  (forced — cap reached)    │
   └───────────┴────────────────────────┴────────────────────────────────────┘
 
 
@@ -67,8 +68,8 @@
   EXAMPLES BY CONFIGURATION
   ═══════════════════════════════════════════════════════════════════════════
 
-  Example 1: --min-rounds 1 --max-rounds 3  (typical)
-  ─────────────────────────────────────────────────────
+  Example 1: [phase].eval.min_rounds = 1, max_rounds = 3 (typical)
+  ───────────────────────────────────────────────────────────────
 
     Round 1: EVALUATE ──► PASS ──► ACCEPT (done in 1 round)
     Round 1: EVALUATE ──► FAIL ──► REFINE
@@ -77,8 +78,8 @@
     Round 3: EVALUATE ──► FAIL ──► ACCEPT (forced at max)
 
 
-  Example 2: --min-rounds 2 --max-rounds 3  (high quality)
-  ─────────────────────────────────────────────────────────
+  Example 2: [phase].eval.min_rounds = 2, max_rounds = 3 (high quality)
+  ────────────────────────────────────────────────────────────────────
 
     Round 1: EVALUATE ──► PASS ──► REFINE (below min, must continue)
     Round 2: EVALUATE ──► PASS ──► ACCEPT (met minimum)
@@ -87,8 +88,8 @@
     Round 3: EVALUATE ──► FAIL ──► ACCEPT (forced at max)
 
 
-  Example 3: --min-rounds 1 --max-rounds 1  (fast, single pass)
-  ─────────────────────────────────────────────────────────────
+  Example 3: [phase].eval.min_rounds = 1, max_rounds = 1 (fast pass)
+  ───────────────────────────────────────────────────────────────────
 
     Round 1: EVALUATE ──► PASS ──► ACCEPT
     Round 1: EVALUATE ──► FAIL ──► ACCEPT (forced, no retry)
@@ -137,5 +138,5 @@
   ═══════════════════════════════════════════════════════════════════════════
 
   Specifying:    <project>/specs/.eval/<spec-name>-rN.md
-  Planning:      <domain>/.workspace/implementation_plan/evals/round-N.md
-  Implementing:  <domain>/.workspace/implementation_plan/evals/batch-N-round-M.md
+  Planning:      <domain>/.forge_workspace/implementation_plan/evals/round-N.md
+  Implementing:  <domain>/.forge_workspace/implementation_plan/evals/batch-N-round-M.md

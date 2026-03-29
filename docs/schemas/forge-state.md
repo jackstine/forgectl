@@ -1,8 +1,8 @@
-# forge.json Schema (State File)
+# forgectl-state.json Schema (State File)
 
 > Persistent state file created and managed by forgectl.
 > Written atomically (tmpfile → backup → rename) for crash recovery.
-> Located in the directory specified by `--dir` (default: current directory).
+> Located at: `.forgectl/state/forgectl-state.json` (relative to project root).
 
 ---
 
@@ -12,11 +12,8 @@
 |-------|------|----------|-------------|
 | `phase` | string | **yes** | Current phase: `"specifying"`, `"planning"`, or `"implementing"` |
 | `state` | string | **yes** | Current state within the phase (see State Values below) |
-| `batch_size` | int | **yes** | Max items per batch during implementing |
-| `min_rounds` | int | **yes** | Minimum evaluation rounds (>= 1) |
-| `max_rounds` | int | **yes** | Maximum evaluation rounds (>= min_rounds) |
-| `user_guided` | bool | **yes** | Whether session pauses for user discussion at key states |
 | `started_at_phase` | string | **yes** | Phase selected at `forgectl init` time |
+| `config` | ConfigObject | **yes** | Configuration nested from .forgectl/config (TOML) |
 | `phase_shift` | PhaseShiftInfo | no | Present only during PHASE_SHIFT state |
 | `specifying` | SpecifyingState | no | Non-null when phase = `"specifying"` |
 | `planning` | PlanningState | no | Non-null when phase = `"planning"` or `"implementing"` |
@@ -34,6 +31,46 @@
 
 ### Implementing
 `ORIENT` → `IMPLEMENT` → `EVALUATE` ⇄ `IMPLEMENT` → `COMMIT` → `ORIENT` | `DONE`
+
+---
+
+## ConfigObject
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `specifying` | PhaseConfig | Specifying-phase config (batch, eval.min_rounds, eval.max_rounds, reconciliation.*) |
+| `planning` | PhaseConfig | Planning-phase config |
+| `implementing` | PhaseConfig | Implementing-phase config |
+| `general` | GeneralConfig | Global config (enable_commits, user_guided) |
+
+### PhaseConfig
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `batch` | int | Batch size for this phase |
+| `eval` | EvalConfig | Evaluation settings |
+| `reconciliation` | ReconciliationConfig | Reconciliation settings (specifying only) |
+
+### EvalConfig
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `min_rounds` | int | Minimum evaluation rounds (>= 1) |
+| `max_rounds` | int | Maximum evaluation rounds (>= min_rounds) |
+
+### ReconciliationConfig
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `min_rounds` | int | 0 | Min rounds for spec reconciliation |
+| `max_rounds` | int | 3 | Max rounds for spec reconciliation |
+
+### GeneralConfig
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `enable_commits` | bool | If true, --message required at ACCEPT/COMMIT states; auto git commit if enabled. If false, --message optional. |
+| `user_guided` | bool | Runtime user_guided override |
 
 ---
 
@@ -78,8 +115,7 @@
 | `domain` | string | Domain |
 | `file` | string | Path to spec file |
 | `rounds_taken` | int | Total eval rounds before acceptance |
-| `commit_hash` | string | Single commit hash (optional) |
-| `commit_hashes` | string[] | Multiple commit hashes (optional) |
+| `commit_hashes` | string[] | Git commit hashes related to this spec (optional, array only) |
 | `evals` | EvalRecord[] | Evaluation history (optional) |
 
 ### ReconcileState
@@ -172,9 +208,12 @@
 
 1. Only one phase state object is active based on `phase` value.
 2. `planning` remains non-null during implementing (holds `current_plan.file` reference).
-3. Empty arrays and null objects are omitted from JSON (`omitempty`).
-4. File is serialized with 2-space indentation.
-5. Atomic write: tmpfile → backup (`.bak`) → rename. Recovery reads `.bak` if primary is corrupt.
+3. `config` mirrors `.forgectl/config` (TOML) structure at state init time; persisted in state for audit trail.
+4. `commit_hash` (singular) removed; only `commit_hashes` (array) used.
+5. `.workspace` renamed to `.forge_workspace` throughout.
+6. Empty arrays and null objects are omitted from JSON (`omitempty`).
+7. File is serialized with 2-space indentation.
+8. Atomic write: tmpfile → backup (`.bak`) → rename. Recovery reads `.bak` if primary is corrupt.
 
 ---
 
@@ -183,4 +222,5 @@
 - Type definitions: `forgectl/state/types.go`
 - Persistence: `forgectl/state/state.go`
 - Transitions: `forgectl/state/advance.go`
-- Existing docs: `skills/specs/references/forgectl-state-schema.md`
+- Config loading: TODO (not yet implemented)
+- Location: `.forgectl/state/forgectl-state.json`

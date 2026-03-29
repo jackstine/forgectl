@@ -12,10 +12,10 @@
   │                                                                         │
   │  forgectl init \                                                        │
   │    --phase specifying \                                                 │
-  │    --from spec-queue.json \                                             │
-  │    --batch-size 1 \                                                     │
-  │    --max-rounds 3 --min-rounds 1 \                                     │
-  │    --guided                                                             │
+  │    --from spec-queue.json                                               │
+  │                                                                         │
+  │  (Config: batch, eval.max_rounds, eval.min_rounds in .forgectl/config)  │
+  │  (Optional: --guided for user checkpoints)                              │
   └────────────────────────────────┬────────────────────────────────────────┘
                                    │
                                    ▼
@@ -72,7 +72,7 @@
   ║  └──────────────────────┬──────────────────────────┘         ║
   ║                         ▼                                     ║
   ║  ┌ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ┐        ║
-  ║  │  EVALUATION LOOP  (min_rounds..max_rounds)       │        ║
+  ║  │  EVALUATION LOOP (specifying.eval.min..max)      │        ║
   ║  │                                                   │        ║
   ║  │  ┌─────────────────────────────────────────┐     │        ║
   ║  │  │  EVALUATE                                │     │        ║
@@ -118,9 +118,10 @@
   ║  ┌─────────────────────────────────────────────────┐         ║
   ║  │  ACCEPT                                          │         ║
   ║  │                                                  │         ║
-  ║  │  Spec finalized. Auto-commit.                    │         ║
+  ║  │  Spec finalized.                                 │         ║
   ║  │                                                  │         ║
-  ║  │  Action: forgectl advance --message "<msg>"      │         ║
+  ║  │  Action: forgectl advance                        │         ║
+  ║  │  (--message if general.enable_commits = true)    │         ║
   ║  └──────────────────────┬──────────────────────────┘         ║
   ║                         │                                     ║
   ║            ┌────────────┴────────────┐                        ║
@@ -153,12 +154,12 @@
   ║  ┌─────────────────────────────────────────────────┐         ║
   ║  │  RECONCILE_EVAL                                  │         ║
   ║  │                                                  │         ║
-  ║  │  Sub-agent reviews git diff --staged             │         ║
-  ║  │  for cross-spec consistency                      │         ║
+  ║  │  Reconciliation with min/max from config:        │         ║
+  ║  │  specifying.reconciliation.min_rounds (def: 0)   │         ║
+  ║  │  specifying.reconciliation.max_rounds (def: 3)   │         ║
   ║  │                                                  │         ║
-  ║  │  Action: forgectl advance \                      │         ║
-  ║  │    --verdict PASS --message "<msg>"              │         ║
-  ║  │    OR --verdict FAIL                             │         ║
+  ║  │  Action: forgectl advance \                      ║         ║
+  ║  │    --verdict PASS|FAIL --eval-report <path>      │         ║
   ║  └──────────┬───────────────────┬──────────────────┘         ║
   ║             │                   │                             ║
   ║        PASS │              FAIL │                             ║

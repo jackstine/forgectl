@@ -16,12 +16,9 @@
 | Flag | Required | Default | Description |
 |------|----------|---------|-------------|
 | `--from <path>` | yes | — | Path to input file (schema varies by `--phase`) |
-| `--batch-size N` | yes | — | Max items per batch in implementing phase |
-| `--max-rounds N` | yes | — | Maximum evaluation rounds per cycle |
-| `--min-rounds N` | no | 1 | Minimum evaluation rounds per cycle |
 | `--phase` | no | specifying | Starting phase: `specifying`, `planning`, `implementing` |
-| `--guided` | no | true | Enable user-guided pauses |
-| `--no-guided` | no | — | Disable user-guided pauses |
+
+All batch sizes, round limits, and guided settings are configured in `.forgectl/config` (TOML file).
 
 ## `advance` Flags
 
@@ -29,7 +26,7 @@
 |------|-------------|
 | `--verdict PASS\|FAIL` | Evaluation verdict |
 | `--eval-report <path>` | Path to evaluation report file |
-| `--message <text>` | Commit or acceptance message |
+| `--message <text>` | Commit message or acceptance message (required when `enable_commits` is true in config) |
 | `--file <path>` | Override spec file path (specifying DRAFT only) |
 | `--from <path>` | Plan queue input file (specifying→planning phase shift only) |
 | `--guided` / `--no-guided` | Update guided setting (accepted on any advance) |
@@ -58,10 +55,10 @@
 | ORIENT | — | SELECT | Pulls next spec from queue |
 | SELECT | — | DRAFT | Review topic and sources. Guided pause. |
 | DRAFT | `--file` (optional) | EVALUATE | Draft the spec. Round set to 1. |
-| EVALUATE | `--verdict PASS`, `--eval-report`, `--message` | ACCEPT | When round >= min_rounds. Auto-commits. |
-| EVALUATE | `--verdict PASS`, `--eval-report` | REFINE | When round < min_rounds |
-| EVALUATE | `--verdict FAIL`, `--eval-report` | REFINE | When round < max_rounds |
-| EVALUATE | `--verdict FAIL`, `--eval-report` | ACCEPT | When round >= max_rounds (forced) |
+| EVALUATE | `--verdict PASS`, `--eval-report`, `--message` | ACCEPT | When round >= `specifying.eval.min_rounds`. Auto-commits. |
+| EVALUATE | `--verdict PASS`, `--eval-report` | REFINE | When round < `specifying.eval.min_rounds` |
+| EVALUATE | `--verdict FAIL`, `--eval-report` | REFINE | When round < `specifying.eval.max_rounds` |
+| EVALUATE | `--verdict FAIL`, `--eval-report` | ACCEPT | When round >= `specifying.eval.max_rounds` (forced) |
 | REFINE | — | EVALUATE | Increments round |
 | ACCEPT | — | ORIENT | When queue non-empty. Moves spec to completed. |
 | ACCEPT | — | DONE | When queue empty |
@@ -93,10 +90,10 @@
 | DRAFT | — | VALIDATE | If plan.json invalid. Round set to 1. |
 | VALIDATE | — | EVALUATE | If plan.json now valid |
 | VALIDATE | — | VALIDATE | If still invalid (exit code 1) |
-| EVALUATE | `--verdict PASS`, `--eval-report` | ACCEPT | When round >= min_rounds |
-| EVALUATE | `--verdict PASS`, `--eval-report` | REFINE | When round < min_rounds |
-| EVALUATE | `--verdict FAIL`, `--eval-report` | REFINE | When round < max_rounds |
-| EVALUATE | `--verdict FAIL`, `--eval-report` | ACCEPT | When round >= max_rounds (forced) |
+| EVALUATE | `--verdict PASS`, `--eval-report` | ACCEPT | When round >= `planning.eval.min_rounds` |
+| EVALUATE | `--verdict PASS`, `--eval-report` | REFINE | When round < `planning.eval.min_rounds` |
+| EVALUATE | `--verdict FAIL`, `--eval-report` | REFINE | When round < `planning.eval.max_rounds` |
+| EVALUATE | `--verdict FAIL`, `--eval-report` | ACCEPT | When round >= `planning.eval.max_rounds` (forced) |
 | REFINE | — | EVALUATE | If plan.json valid. Increments round. |
 | REFINE | — | VALIDATE | If plan.json invalid. Increments round. |
 | ACCEPT | `--message` | PHASE_SHIFT | Plan accepted |
@@ -112,10 +109,10 @@
 | IMPLEMENT (first round) | `--message` | EVALUATE | Last item in batch. Increments rounds. |
 | IMPLEMENT (round 2+) | — | IMPLEMENT | More items. No commit needed. |
 | IMPLEMENT (round 2+) | — | EVALUATE | Last item. Increments rounds. |
-| EVALUATE | `--verdict PASS`, `--eval-report` | COMMIT | When rounds >= min_rounds. Items `passed`. |
-| EVALUATE | `--verdict PASS`, `--eval-report` | IMPLEMENT | When rounds < min_rounds. Re-present items. |
-| EVALUATE | `--verdict FAIL`, `--eval-report` | IMPLEMENT | When rounds < max_rounds. Re-present items. |
-| EVALUATE | `--verdict FAIL`, `--eval-report` | COMMIT | When rounds >= max_rounds. Items `failed`. |
+| EVALUATE | `--verdict PASS`, `--eval-report` | COMMIT | When rounds >= `implementing.eval.min_rounds`. Items `passed`. |
+| EVALUATE | `--verdict PASS`, `--eval-report` | IMPLEMENT | When rounds < `implementing.eval.min_rounds`. Re-present items. |
+| EVALUATE | `--verdict FAIL`, `--eval-report` | IMPLEMENT | When rounds < `implementing.eval.max_rounds`. Re-present items. |
+| EVALUATE | `--verdict FAIL`, `--eval-report` | COMMIT | When rounds >= `implementing.eval.max_rounds`. Items `failed`. |
 | COMMIT | `--message` | ORIENT | More items or layers remain |
 | COMMIT | `--message` | DONE | All layers complete |
 | DONE | — | Error | Terminal state |

@@ -3,7 +3,7 @@
 ================================================================================
 
   Binary: forgectl (Go, Cobra framework)
-  State:  forge.json (JSON-backed state machine)
+  State:  .forgectl/state/forgectl-state.json (JSON-backed state machine)
 
 
   forgectl
@@ -11,23 +11,32 @@
   ├── init ─────────────── Initialize a new session
   │   │
   │   │  Required flags:
-  │   │    --from <path>       Input file (spec-queue, plan-queue, or plan.json)
-  │   │    --batch-size <int>  Max items per batch (>= 1)
-  │   │    --max-rounds <int>  Maximum evaluation rounds
+  │   │    --from <path>  Input file (spec-queue, plan-queue, or plan.json)
+  │   │    --phase <str>  Phase: specifying | planning | implementing
   │   │
   │   │  Optional flags:
-  │   │    --min-rounds <int>  Minimum eval rounds (default: 1, <= max-rounds)
-  │   │    --phase <string>    Starting phase (default: "specifying")
-  │   │    --guided            Enable guided mode (user checkpoints)
-  │   │    --no-guided         Disable guided mode
-  │   │    --dir <path>        Directory for state file (default: ".")
+  │   │    --guided       Enable guided mode (user checkpoints)
+  │   │    --no-guided    Disable guided mode
+  │   │
+  │   │  Configuration:
+  │   │    All config (batch, eval.min_rounds, eval.max_rounds) read from
+  │   │    .forgectl/config (TOML). Phase-scoped:
+  │   │      [specifying]
+  │   │        batch = 1
+  │   │        [specifying.eval]
+  │   │          min_rounds = 1
+  │   │          max_rounds = 3
+  │   │      [general]
+  │   │        enable_commits = false
   │   │
   │   │  Input by phase:
   │   │    specifying   ──►  spec-queue.json
   │   │    planning     ──►  plan-queue.json
   │   │    implementing ──►  plan.json
   │   │
-  │   └─── Output: forge.json (state = ORIENT)
+  │   │  State file location: .forgectl/state/forgectl-state.json
+  │   │
+  │   └─── Output: state initialized
   │
   │
   ├── advance ──────────── Transition to next state
@@ -42,9 +51,9 @@
   │   │  │ DRAFT            │ --file <path>  (override output, spec only)│
   │   │  │ EVALUATE         │ --verdict PASS|FAIL  --eval-report <path>  │
   │   │  │ REFINE           │ (none required)                            │
-  │   │  │ ACCEPT           │ --message <msg>  (commit message)          │
-  │   │  │ IMPLEMENT        │ --message <msg>  (round 1 only)            │
-  │   │  │ COMMIT           │ --message <msg>  (commit message)          │
+  │   │  │ ACCEPT           │ --message (if general.enable_commits)      │
+  │   │  │ IMPLEMENT        │ --message (if general.enable_commits)      │
+  │   │  │ COMMIT           │ --message (if general.enable_commits)      │
   │   │  │ RECONCILE        │ (none required)                            │
   │   │  │ RECONCILE_EVAL   │ --verdict PASS|FAIL  --eval-report <path>  │
   │   │  │ RECONCILE_REVIEW │ --verdict FAIL  (optional, sends back)     │
@@ -58,7 +67,7 @@
   │   │  Mode toggles (any state):
   │   │    --guided / --no-guided
   │   │
-  │   └─── Output: Updated forge.json + formatted status
+  │   └─── Output: Updated state + formatted status
   │
   │
   ├── status ──────────── Print current state with action guidance
@@ -83,15 +92,18 @@
   │   │    --id <int>      Spec ID
   │   │    --hash <string> Commit hash (must exist in repo)
   │   │
+  │   │  Appends to commit_hashes[] array. Rejects duplicates.
+  │   │
   │   └─── Output: "Added {hash} to spec {id}."
   │
   │
-  ├── reconcile-commit ── Auto-register commit to all touched specs
+  ├── reconcile-commit ── Auto-register commit to touched specs
   │   │
   │   │  Required flags:
   │   │    --hash <string> Commit hash (must exist in repo)
   │   │
   │   │  Analyzes commit diff ──► matches files to specs
+  │   │  Updates commit_hashes[] (array, not commit_hash)
   │   │
   │   └─── Output: List of specs updated with the commit
   │
@@ -128,7 +140,7 @@
              └──────────────┬──────────────────────┘
                             │
                             ▼
-                     ┌──────────────┐
-                     │  forge.json  │
-                     │  (state)     │
-                     └──────────────┘
+                     ┌──────────────────────────────┐
+                     │  .forgectl/state/            │
+                     │  forgectl-state.json (state) │
+                     └──────────────────────────────┘

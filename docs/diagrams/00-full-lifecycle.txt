@@ -126,6 +126,10 @@
   COMMIT         Hard stop; engineer must git commit before continuing
   GUIDED         Optional pause for human discussion (--guided flag)
 
-  Round Enforcement:
-    min_rounds   PASS below minimum forces another REFINE cycle
-    max_rounds   FAIL at maximum forces acceptance (prevents infinite loops)
+  Round Enforcement (from .forgectl/config [phase].eval):
+    eval.min_rounds   PASS below minimum forces another REFINE cycle
+    eval.max_rounds   FAIL at maximum forces acceptance (prevents infinite loops)
+
+  Config & State:
+    .forgectl/config                  TOML config file (phase-scoped)
+    .forgectl/state/forgectl-state.json State file (JSON)

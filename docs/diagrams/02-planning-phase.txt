@@ -12,10 +12,10 @@
   │                                                                         │
   │  forgectl init \                                                        │
   │    --phase planning \                                                   │
-  │    --from plan-queue.json \                                             │
-  │    --batch-size 1 \                                                     │
-  │    --max-rounds 3 --min-rounds 1 \                                     │
-  │    --guided                                                             │
+  │    --from plan-queue.json                                               │
+  │                                                                         │
+  │  (Config: batch, eval.max_rounds, eval.min_rounds in .forgectl/config)  │
+  │  (Optional: --guided for user checkpoints)                              │
   │                                                                         │
   │  OR: PHASE_SHIFT from specifying phase                                  │
   │      forgectl advance --from plan-queue.json                            │
@@ -95,7 +95,7 @@
   │                                                                         │
   │  Generate implementation plan:                                          │
   │                                                                         │
-  │  <domain>/.workspace/implementation_plan/                               │
+  │  <domain>/.forge_workspace/implementation_plan/                         │
   │  ├── plan.json          ◄── Structured manifest                         │
   │  │   ┌──────────────────────────────────────────────┐                  │
   │  │   │  {                                            │                  │
@@ -177,10 +177,10 @@
   │  REFINE               │              │  ACCEPT               │
   │                       │              │                       │
   │  - Spawn sub-agent    │              │  Plan finalized.      │
-  │  - Update plan.json   │              │  Commit work.         │
-  │  - Update notes/*.md  │              │                       │
-  │  - Address eval       │              │  forgectl advance \   │
-  │    deficiencies       │              │    --message "<msg>"  │
+  │  - Update plan.json   │              │                       │
+  │  - Update notes/*.md  │              │  forgectl advance     │
+  │  - Address eval       │              │  (--message if        │
+  │    deficiencies       │              │   enable_commits)     │
   │                       │              └───────────┬───────────┘
   │  forgectl advance     │                          │
   └───────────┬───────────┘                          │

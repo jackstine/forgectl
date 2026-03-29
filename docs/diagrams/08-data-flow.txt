@@ -22,7 +22,7 @@
            ▼
   ┌──────────────────────────────────────────────────────────────────────┐
   │                                                                      │
-  │  .workspace/planning/                                                │
+  │  .forge_workspace/planning/                                          │
   │  ├── <domain>/concepts/*.md       ◄── Architecture concepts          │
   │  ├── <domain>/diagrams/*.md       ◄── System diagrams                │
   │  ├── implementation-planning/                                        │
@@ -49,8 +49,9 @@
   ║  │ }]}                  │          └─────────────────────────────┘   ║
   ║  └─────────────────────┘                                             ║
   ║                                   ┌─────────────────────────────┐   ║
-  ║  Planning docs (read-only)        │ forge.json (state)           │   ║
-  ║  Existing specs (read-only)       └─────────────────────────────┘   ║
+  ║  Planning docs (read-only)        │ .forgectl/state/             │   ║
+  ║  Existing specs (read-only)       │ forgectl-state.json (state)  │   ║
+  ║                                   └─────────────────────────────┘   ║
   ╚════════════════════════╤═════════════════════════════════════════════╝
                            │
                            │  specs flow down
@@ -60,7 +61,7 @@
   ║                                                                      ║
   ║  Inputs:                          Outputs:                           ║
   ║  ┌─────────────────────┐          ┌─────────────────────────────┐   ║
-  ║  │ plan-queue.json      │          │ <domain>/.workspace/         │   ║
+  ║  │ plan-queue.json      │          │ <domain>/.forge_workspace/   │   ║
   ║  │                      │          │   implementation_plan/       │   ║
   ║  │ {plans: [{           │    ──►   │   ├── plan.json              │   ║
   ║  │   name, domain,      │          │   ├── notes/                 │   ║
@@ -72,7 +73,8 @@
   ║                                   └─────────────────────────────┘   ║
   ║  Spec files (read-only)                                              ║
   ║  Source code (read-only)          ┌─────────────────────────────┐   ║
-  ║  Package manifests (read-only)    │ forge.json (state)           │   ║
+  ║  Package manifests (read-only)    │ .forgectl/state/             │   ║
+  ║                                   │ forgectl-state.json (state)  │   ║
   ║                                   └─────────────────────────────┘   ║
   ╚════════════════════════╤═════════════════════════════════════════════╝
                            │
@@ -89,7 +91,7 @@
   ║  │ + passes: "pending"  │    ──►   └─────────────────────────────┘   ║
   ║  │ + rounds: 0          │                                            ║
   ║  │ (on every item)      │          ┌─────────────────────────────┐   ║
-  ║  └─────────────────────┘          │ <domain>/.workspace/         │   ║
+  ║  └─────────────────────┘          │ <domain>/.forge_workspace/   │   ║
   ║                                   │   implementation_plan/       │   ║
   ║  Spec files (read-only)           │   └── evals/                 │   ║
   ║  Notes files (read-only)          │       ├── batch-1-round-1.md │   ║
@@ -97,7 +99,7 @@
   ║                                   └─────────────────────────────┘   ║
   ║                                                                      ║
   ║                                   ┌─────────────────────────────┐   ║
-  ║                                   │ <domain>/.workspace/         │   ║
+  ║                                   │ <domain>/.forge_workspace/   │   ║
   ║                                   │   implementation/            │   ║
   ║                                   │   └── IMPLEMENTATION_LOG.md  │   ║
   ║                                   └─────────────────────────────┘   ║
@@ -109,44 +111,41 @@
   ║                                   └─────────────────────────────┘   ║
   ║                                                                      ║
   ║                                   ┌─────────────────────────────┐   ║
-  ║                                   │ forge.json (state)           │   ║
+  ║                                   │ .forgectl/state/             │   ║
+  ║                                   │ forgectl-state.json (state)  │   ║
   ║                                   └─────────────────────────────┘   ║
   ╚══════════════════════════════════════════════════════════════════════╝
 
 
   ═══════════════════════════════════════════════════════════════════════════
-  STATE FILE: forge.json
+  STATE FILE: .forgectl/state/forgectl-state.json
   ═══════════════════════════════════════════════════════════════════════════
 
   Persistent across all phases. Written atomically (tmpfile → backup → rename).
+  Config nested under "config" object mirroring TOML structure.
 
   ┌──────────────────────────────────────────────────────────────────────┐
-  │  forge.json                                                          │
+  │  .forgectl/state/forgectl-state.json                                 │
   │                                                                      │
   │  {                                                                   │
   │    "phase": "specifying | planning | implementing",                  │
   │    "state": "<current state>",                                       │
-  │    "guided": true | false,                                           │
-  │    "batch_size": N,                                                  │
-  │    "max_rounds": N,                                                  │
-  │    "min_rounds": N,                                                  │
+  │    "started_at_phase": "specifying | planning | implementing",       │
+  │    "config": {                                                       │
+  │      "specifying": { "batch": N, "eval": { ... } },                 │
+  │      "planning": { "batch": N, "eval": { ... } },                   │
+  │      "implementing": { "batch": N, "eval": { ... } },               │
+  │      "general": { "enable_commits": bool, "user_guided": bool }     │
+  │    },                                                                │
   │                                                                      │
   │    // Specifying phase:                                              │
-  │    "spec_queue": [...],                                              │
-  │    "active_spec": {...},                                             │
-  │    "completed_specs": [...],                                         │
-  │    "reconciliation": {...},                                          │
+  │    "specifying": { ... },                                            │
   │                                                                      │
   │    // Planning phase:                                                │
-  │    "plan_queue": [...],                                              │
-  │    "current_plan": {...},                                            │
-  │    "completed_plans": [...],                                         │
+  │    "planning": { ... },                                              │
   │                                                                      │
   │    // Implementing phase:                                            │
-  │    "plan_file": "<path>",                                            │
-  │    "current_batch": [...],                                           │
-  │    "current_item_index": N,                                          │
-  │    "eval_history": [...]                                             │
+  │    "implementing": { ... }                                           │
   │  }                                                                   │
   └──────────────────────────────────────────────────────────────────────┘
 
@@ -156,7 +155,7 @@
   ═══════════════════════════════════════════════════════════════════════════
 
   ┌──────────────────────────────────────────────────────────────────────┐
-  │  plan.json                                                           │
+  │  plan.json (in .forge_workspace/implementation_plan/)               │
   │                                                                      │
   │  context ─────► { domain: "api", module: "github.com/org/api" }     │
   │                                                                      │

@@ -5,7 +5,7 @@ Go CLI for managing the software development lifecycle scaffold.
 ## Commands
 
 ```bash
-cd .workspace/forgectl
+cd forgectl
 go build -o forgectl .    # build
 go test ./...             # run all tests
 go test ./state/ -v       # state package tests

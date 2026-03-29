@@ -11,11 +11,11 @@
   │  INITIALIZATION                                                         │
   │                                                                         │
   │  forgectl init \                                                        │
-  │    --from <domain>/.workspace/implementation_plan/plan.json \           │
-  │    --phase implementing \                                               │
-  │    --batch-size <N> \                                                   │
-  │    --max-rounds <N> --min-rounds 1 \                                    │
-  │    --guided                                                             │
+  │    --from <domain>/.forge_workspace/implementation_plan/plan.json \     │
+  │    --phase implementing                                                 │
+  │                                                                         │
+  │  (Config: batch, eval.max_rounds in .forgectl/config)                   │
+  │  (Optional: --guided for user checkpoints)                              │
   │                                                                         │
   │  OR: PHASE_SHIFT from planning phase (automatic)                        │
   └────────────────────────────────┬────────────────────────────────────────┘
@@ -67,7 +67,7 @@
   ║  ║  │  6. Fix any failures                                    │   ║   ║
   ║  ║  │                                                         │   ║   ║
   ║  ║  │  Action: forgectl advance --message "<what I did>"      │   ║   ║
-  ║  ║  │         (auto-commits on round 1)                       │   ║   ║
+  ║  ║  │         (auto-commit on round 1 if enable_commits)      │   ║   ║
   ║  ║  │                                                         │   ║   ║
   ║  ║  │  Item marked: pending ──► done                          │   ║   ║
   ║  ║  └────────────────────────┬────────────────────────────────┘   ║   ║
@@ -85,7 +85,7 @@
   ║                                           │                            ║
   ║                                           ▼                            ║
   ║  ┌ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─┐  ║
-  ║  │  EVALUATION LOOP  (min_rounds..max_rounds)                      │  ║
+  ║  │  EVALUATION LOOP (implementing.eval.min..max)                  │  ║
   ║  │                                                                  │  ║
   ║  │  ┌────────────────────────────────────────────────────────┐     │  ║
   ║  │  │  EVALUATE                                               │     │  ║
@@ -120,7 +120,7 @@
   ║  │   - Fix deficiencies   │      COMMIT                             │  ║
   ║  │   - Run tests          │     items: failed                        │  ║
   ║  │   - No --message       │                                         │  ║
-  ║  │   - No auto-commit     │                                         │  ║
+  ║  │   - No auto-commit     │                                        │  ║
   ║  │                        │                                         │  ║
   ║  │   forgectl advance     │                                         │  ║
   ║  │       │                │                                         │  ║
@@ -131,8 +131,9 @@
   ║                           ▼                                            ║
   ║  ┌────────────────────────────────────────────────────────────────┐   ║
   ║  │  COMMIT  (hard stop — must commit before continuing)           │   ║
+  ║  │  (--message required only when enable_commits = true)          │   ║
   ║  │                                                                │   ║
-  ║  │  1. git add -A && git commit -m "<message>"                    │   ║
+  ║  │  1. git add -A && git commit (if enable_commits = true)        │   ║
   ║  │  2. Add entry to IMPLEMENTATION_LOG.md:                        │   ║
   ║  │     ┌──────────────────────────────────────────────┐          │   ║
   ║  │     │ ### 2026-03-29 — L1: Config Loading           │          │   ║
@@ -174,7 +175,7 @@
     1. All items in prior layers have terminal passes (passed | failed)
     2. All items in its depends_on[] have terminal passes
 
-  Batch = up to batch_size unblocked items, selected in layer items[] order
+  Batch = up to implementing.batch unblocked items, selected in layer items[] order
 
   Layer Progression:
     Layer 0 (Foundation)  ──►  Layer 1 (Core)  ──►  Layer 2 (Integration)
@@ -185,8 +186,8 @@
     └─────────┘              └─────────────┘          └───────────┘
 
   Item State Progression:
-    pending ──► done ──► passed   (PASS + rounds >= min_rounds)
-                   └──► failed   (FAIL + rounds >= max_rounds)
+    pending ──► done ──► passed   (PASS + rounds >= eval.min_rounds)
+                   └──► failed   (FAIL + rounds >= eval.max_rounds)
 
   ═══════════════════════════════════════════════════════════════════════════
   ITEM PROGRESS TRACKING  (in plan.json)
@@ -200,10 +201,10 @@
   }
 
   Transition table:
-    pending  + advance in IMPLEMENT  ──►  done
-    done     + PASS (>= min_rounds)  ──►  passed
-    done     + FAIL (>= max_rounds)  ──►  failed
-    done     + FAIL (< max_rounds)   ──►  done  (stays, re-implement)
-    done     + PASS (< min_rounds)   ──►  done  (stays, refine more)
+    pending  + advance in IMPLEMENT      ──►  done
+    done     + PASS (>= eval.min_rounds) ──►  passed
+    done     + FAIL (>= eval.max_rounds) ──►  failed
+    done     + FAIL (< eval.max_rounds)  ──►  done  (stays, re-implement)
+    done     + PASS (< eval.min_rounds)  ──►  done  (stays, refine more)
 
   Note: failed items are terminal — they do NOT block dependents.
