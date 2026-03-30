@@ -179,6 +179,346 @@ max_rounds = 2
 	}
 }
 
+// --- add-queue-item tests ---
+
+// setupSpecifyingState saves a specifying state at the given state and returns the state dir.
+func setupSpecifyingState(t *testing.T, dir string, forgeState *state.ForgeState) string {
+	t.Helper()
+	sd := resolvedStateDir(dir)
+	if err := os.MkdirAll(sd, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := state.Save(sd, forgeState); err != nil {
+		t.Fatal(err)
+	}
+	return sd
+}
+
+func newSpecifyingForgeState(st state.StateName) *state.ForgeState {
+	cfg := state.DefaultConfig()
+	spec := state.NewSpecifyingState([]state.SpecQueueEntry{})
+	// Add one completed spec so set-roots can use the domain.
+	spec.Completed = append(spec.Completed, state.CompletedSpec{
+		ID: 1, Name: "Existing Spec", Domain: "test", File: "test/specs/existing.md",
+	})
+	spec.CurrentDomain = "test"
+	// Set up CurrentSpecs for DRAFT.
+	if st == state.StateDraft {
+		spec.CurrentSpecs = []*state.ActiveSpec{
+			{ID: 2, Name: "Current Spec", Domain: "test", File: "test/specs/current.md"},
+		}
+	}
+	return &state.ForgeState{
+		Phase:          state.PhaseSpecifying,
+		State:          st,
+		Config:         cfg,
+		StartedAtPhase: state.PhaseSpecifying,
+		Specifying:     spec,
+	}
+}
+
+func TestAddQueueItemInDraftState(t *testing.T) {
+	dir := setupProjectDir(t)
+	forgeState := newSpecifyingForgeState(state.StateDraft)
+	sd := setupSpecifyingState(t, dir, forgeState)
+
+	// Create the spec file.
+	specFile := filepath.Join(dir, "test", "specs", "new-spec.md")
+	os.MkdirAll(filepath.Dir(specFile), 0755)
+	os.WriteFile(specFile, []byte("# New Spec"), 0644)
+
+	addQueueItemName = "New Spec"
+	addQueueItemDomain = ""
+	addQueueItemTopic = "Some Topic"
+	addQueueItemFile = specFile
+	addQueueItemSources = nil
+
+	var buf bytes.Buffer
+	rootCmd.SetOut(&buf)
+
+	if err := runAddQueueItem(addQueueItemCmd, nil); err != nil {
+		t.Fatalf("add-queue-item: %v", err)
+	}
+
+	s, _ := state.Load(sd)
+	if len(s.Specifying.Queue) != 1 {
+		t.Errorf("expected 1 queue item, got %d", len(s.Specifying.Queue))
+	}
+	if s.Specifying.Queue[0].Name != "New Spec" {
+		t.Errorf("expected queue item name 'New Spec', got %q", s.Specifying.Queue[0].Name)
+	}
+}
+
+func TestAddQueueItemInCrossReferenceReviewState(t *testing.T) {
+	dir := setupProjectDir(t)
+	forgeState := newSpecifyingForgeState(state.StateCrossReferenceReview)
+	sd := setupSpecifyingState(t, dir, forgeState)
+
+	specFile := filepath.Join(dir, "test", "specs", "another.md")
+	os.MkdirAll(filepath.Dir(specFile), 0755)
+	os.WriteFile(specFile, []byte("# Another Spec"), 0644)
+
+	addQueueItemName = "Another Spec"
+	addQueueItemDomain = ""
+	addQueueItemTopic = "Another Topic"
+	addQueueItemFile = specFile
+	addQueueItemSources = nil
+
+	if err := runAddQueueItem(addQueueItemCmd, nil); err != nil {
+		t.Fatalf("add-queue-item: %v", err)
+	}
+
+	s, _ := state.Load(sd)
+	if len(s.Specifying.Queue) != 1 {
+		t.Errorf("expected 1 queue item, got %d", len(s.Specifying.Queue))
+	}
+	if s.Specifying.Queue[0].Domain != "test" {
+		t.Errorf("expected domain 'test', got %q", s.Specifying.Queue[0].Domain)
+	}
+}
+
+func TestSetRootsInCrossReferenceReviewState(t *testing.T) {
+	dir := setupProjectDir(t)
+	forgeState := newSpecifyingForgeState(state.StateCrossReferenceReview)
+	sd := setupSpecifyingState(t, dir, forgeState)
+
+	setRootsDomain = ""
+
+	if err := runSetRoots(setRootsCmd, []string{"test/", "lib/"}); err != nil {
+		t.Fatalf("set-roots: %v", err)
+	}
+
+	s, _ := state.Load(sd)
+	meta, ok := s.Specifying.Domains["test"]
+	if !ok {
+		t.Fatal("expected domain 'test' in Domains map")
+	}
+	if len(meta.CodeSearchRoots) != 2 {
+		t.Errorf("expected 2 roots, got %d", len(meta.CodeSearchRoots))
+	}
+}
+
+func TestSetRootsInDoneState(t *testing.T) {
+	dir := setupProjectDir(t)
+	forgeState := newSpecifyingForgeState(state.StateDone)
+	sd := setupSpecifyingState(t, dir, forgeState)
+
+	setRootsDomain = "test"
+
+	if err := runSetRoots(setRootsCmd, []string{"test/"}); err != nil {
+		t.Fatalf("set-roots: %v", err)
+	}
+
+	s, _ := state.Load(sd)
+	meta, ok := s.Specifying.Domains["test"]
+	if !ok {
+		t.Fatal("expected domain 'test' in Domains map")
+	}
+	if meta.CodeSearchRoots[0] != "test/" {
+		t.Errorf("expected root 'test/', got %q", meta.CodeSearchRoots[0])
+	}
+}
+
+func TestAddQueueItemAtDoneWithDomain(t *testing.T) {
+	dir := setupProjectDir(t)
+	forgeState := newSpecifyingForgeState(state.StateDone)
+	sd := setupSpecifyingState(t, dir, forgeState)
+
+	specFile := filepath.Join(dir, "test", "specs", "done-spec.md")
+	os.MkdirAll(filepath.Dir(specFile), 0755)
+	os.WriteFile(specFile, []byte("# Done Spec"), 0644)
+
+	addQueueItemName = "Done Spec"
+	addQueueItemDomain = "test"
+	addQueueItemTopic = "Some Topic"
+	addQueueItemFile = specFile
+	addQueueItemSources = nil
+
+	if err := runAddQueueItem(addQueueItemCmd, nil); err != nil {
+		t.Fatalf("add-queue-item at DONE: %v", err)
+	}
+
+	s, _ := state.Load(sd)
+	if len(s.Specifying.Queue) != 1 {
+		t.Errorf("expected 1 queue item, got %d", len(s.Specifying.Queue))
+	}
+	if s.Specifying.Queue[0].Domain != "test" {
+		t.Errorf("expected domain 'test', got %q", s.Specifying.Queue[0].Domain)
+	}
+}
+
+// --- add-queue-item rejection tests ---
+
+func TestAddQueueItemRejectsWrongPhase(t *testing.T) {
+	dir := setupProjectDir(t)
+	sd := resolvedStateDir(dir)
+	os.MkdirAll(sd, 0755)
+	s := &state.ForgeState{
+		Phase: state.PhasePlanning, State: state.StateOrient, Config: state.DefaultConfig(),
+		Planning: &state.PlanningState{CurrentPlan: &state.ActivePlan{Name: "p", Domain: "d", File: "plan.json"}},
+	}
+	state.Save(sd, s)
+
+	addQueueItemName = "X"
+	addQueueItemTopic = "t"
+	addQueueItemFile = "x.md"
+
+	err := runAddQueueItem(addQueueItemCmd, nil)
+	if err == nil || err.Error()[:len("add-queue-item is only valid in the specifying phase")] != "add-queue-item is only valid in the specifying phase" {
+		t.Errorf("expected phase error, got %v", err)
+	}
+}
+
+func TestAddQueueItemRejectsWrongState(t *testing.T) {
+	dir := setupProjectDir(t)
+	forgeState := newSpecifyingForgeState(state.StateEvaluate)
+	setupSpecifyingState(t, dir, forgeState)
+
+	addQueueItemName = "X"
+	addQueueItemTopic = "t"
+	addQueueItemFile = "x.md"
+
+	err := runAddQueueItem(addQueueItemCmd, nil)
+	if err == nil {
+		t.Error("expected error for wrong state")
+	}
+}
+
+func TestAddQueueItemRejectsMissingFile(t *testing.T) {
+	dir := setupProjectDir(t)
+	forgeState := newSpecifyingForgeState(state.StateDraft)
+	setupSpecifyingState(t, dir, forgeState)
+
+	addQueueItemName = "X"
+	addQueueItemTopic = "t"
+	addQueueItemFile = filepath.Join(dir, "nonexistent.md")
+
+	err := runAddQueueItem(addQueueItemCmd, nil)
+	if err == nil {
+		t.Error("expected error for missing file")
+	}
+}
+
+func TestAddQueueItemRejectsDuplicateNameInQueue(t *testing.T) {
+	dir := setupProjectDir(t)
+	forgeState := newSpecifyingForgeState(state.StateDraft)
+	// Pre-populate queue with duplicate name.
+	forgeState.Specifying.Queue = append(forgeState.Specifying.Queue, state.SpecQueueEntry{
+		Name: "Duplicate", Domain: "test", Topic: "t", File: "test/specs/dup.md",
+	})
+	setupSpecifyingState(t, dir, forgeState)
+
+	specFile := filepath.Join(dir, "test", "specs", "new.md")
+	os.MkdirAll(filepath.Dir(specFile), 0755)
+	os.WriteFile(specFile, []byte("spec"), 0644)
+
+	addQueueItemName = "Duplicate"
+	addQueueItemTopic = "t"
+	addQueueItemFile = specFile
+
+	err := runAddQueueItem(addQueueItemCmd, nil)
+	if err == nil {
+		t.Error("expected error for duplicate queue name")
+	}
+}
+
+func TestAddQueueItemRejectsDuplicateNameInCompleted(t *testing.T) {
+	dir := setupProjectDir(t)
+	forgeState := newSpecifyingForgeState(state.StateDraft)
+	// Completed already has "Existing Spec" from helper.
+	setupSpecifyingState(t, dir, forgeState)
+
+	specFile := filepath.Join(dir, "test", "specs", "new.md")
+	os.MkdirAll(filepath.Dir(specFile), 0755)
+	os.WriteFile(specFile, []byte("spec"), 0644)
+
+	addQueueItemName = "Existing Spec"
+	addQueueItemTopic = "t"
+	addQueueItemFile = specFile
+
+	err := runAddQueueItem(addQueueItemCmd, nil)
+	if err == nil {
+		t.Error("expected error for name already in completed specs")
+	}
+}
+
+func TestAddQueueItemRequiresDomainAtDone(t *testing.T) {
+	dir := setupProjectDir(t)
+	forgeState := newSpecifyingForgeState(state.StateDone)
+	setupSpecifyingState(t, dir, forgeState)
+
+	specFile := filepath.Join(dir, "test", "specs", "new.md")
+	os.MkdirAll(filepath.Dir(specFile), 0755)
+	os.WriteFile(specFile, []byte("spec"), 0644)
+
+	addQueueItemName = "Brand New"
+	addQueueItemDomain = "" // not set
+	addQueueItemTopic = "t"
+	addQueueItemFile = specFile
+
+	err := runAddQueueItem(addQueueItemCmd, nil)
+	if err == nil {
+		t.Error("expected error for missing --domain at DONE")
+	}
+}
+
+// --- set-roots rejection tests ---
+
+func TestSetRootsRejectsWrongPhase(t *testing.T) {
+	dir := setupProjectDir(t)
+	sd := resolvedStateDir(dir)
+	os.MkdirAll(sd, 0755)
+	s := &state.ForgeState{
+		Phase: state.PhasePlanning, State: state.StateOrient, Config: state.DefaultConfig(),
+		Planning: &state.PlanningState{CurrentPlan: &state.ActivePlan{Name: "p", Domain: "d", File: "plan.json"}},
+	}
+	state.Save(sd, s)
+
+	setRootsDomain = "test"
+	err := runSetRoots(setRootsCmd, []string{"test/"})
+	if err == nil {
+		t.Error("expected error for wrong phase")
+	}
+}
+
+func TestSetRootsRejectsWrongState(t *testing.T) {
+	dir := setupProjectDir(t)
+	forgeState := newSpecifyingForgeState(state.StateDraft)
+	setupSpecifyingState(t, dir, forgeState)
+
+	setRootsDomain = "test"
+	err := runSetRoots(setRootsCmd, []string{"test/"})
+	if err == nil {
+		t.Error("expected error for wrong state")
+	}
+}
+
+func TestSetRootsRejectsNoPaths(t *testing.T) {
+	dir := setupProjectDir(t)
+	forgeState := newSpecifyingForgeState(state.StateCrossReferenceReview)
+	setupSpecifyingState(t, dir, forgeState)
+
+	setRootsDomain = "test"
+	err := runSetRoots(setRootsCmd, []string{}) // no paths
+	if err == nil {
+		t.Error("expected error for no path arguments")
+	}
+}
+
+func TestSetRootsRejectsDomainWithNoCompletedSpecs(t *testing.T) {
+	dir := setupProjectDir(t)
+	forgeState := newSpecifyingForgeState(state.StateCrossReferenceReview)
+	// Override current domain to one that has no completed specs.
+	forgeState.Specifying.CurrentDomain = "unknown-domain"
+	setupSpecifyingState(t, dir, forgeState)
+
+	setRootsDomain = ""
+	err := runSetRoots(setRootsCmd, []string{"unknown-domain/"})
+	if err == nil {
+		t.Error("expected error for domain with no completed specs")
+	}
+}
+
 func TestStatusCommand(t *testing.T) {
 	dir := setupProjectDir(t)
 
