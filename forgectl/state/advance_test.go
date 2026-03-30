@@ -1,9 +1,11 @@
 package state
 
 import (
+	"bytes"
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -457,6 +459,191 @@ func TestCrossReferenceFailBelowMaxGoesBackToRef(t *testing.T) {
 	}
 	if s.State != StateCrossReference {
 		t.Errorf("expected CROSS_REFERENCE after FAIL below max, got %s", s.State)
+	}
+}
+
+func TestCrossReferenceEvalPassAtRound1GoesToReview(t *testing.T) {
+	// CROSS_REFERENCE_EVAL PASS at round 1 with min_rounds=1 transitions to CROSS_REFERENCE_REVIEW.
+	s := newSpecifyingState(1)
+	s.Config.Specifying.CrossReference.MinRounds = 1
+	advanceToAccept(t, s)
+
+	dir := t.TempDir()
+	crEvalFile := filepath.Join(dir, "cr-eval.md")
+	os.WriteFile(crEvalFile, []byte("cross-ref eval"), 0644)
+
+	Advance(s, AdvanceInput{}, "") // ACCEPT → CROSS_REFERENCE
+	Advance(s, AdvanceInput{}, "") // CROSS_REFERENCE → CROSS_REFERENCE_EVAL (round 1)
+
+	if err := Advance(s, AdvanceInput{Verdict: "PASS", EvalReport: crEvalFile}, ""); err != nil {
+		t.Fatal(err)
+	}
+	if s.State != StateCrossReferenceReview {
+		t.Errorf("expected CROSS_REFERENCE_REVIEW, got %s", s.State)
+	}
+}
+
+func TestCrossReferenceEvalPassBelowMinRoundsLoopsBack(t *testing.T) {
+	// CROSS_REFERENCE_EVAL PASS below min_rounds loops back to CROSS_REFERENCE.
+	s := newSpecifyingState(1)
+	s.Config.Specifying.CrossReference.MinRounds = 2
+	advanceToAccept(t, s)
+
+	dir := t.TempDir()
+	crEvalFile := filepath.Join(dir, "cr-eval.md")
+	os.WriteFile(crEvalFile, []byte("cross-ref eval"), 0644)
+
+	Advance(s, AdvanceInput{}, "") // ACCEPT → CROSS_REFERENCE
+	Advance(s, AdvanceInput{}, "") // CROSS_REFERENCE → CROSS_REFERENCE_EVAL (round 1)
+
+	// PASS at round 1 with min_rounds=2 → not enough, loop back.
+	if err := Advance(s, AdvanceInput{Verdict: "PASS", EvalReport: crEvalFile}, ""); err != nil {
+		t.Fatal(err)
+	}
+	if s.State != StateCrossReference {
+		t.Errorf("expected CROSS_REFERENCE (below min rounds), got %s", s.State)
+	}
+}
+
+func TestCrossReferenceEvalPassRound2SkipsReview(t *testing.T) {
+	// CROSS_REFERENCE_EVAL PASS at round>1 with min_rounds met skips CROSS_REFERENCE_REVIEW,
+	// going directly to DONE (queue empty) or ORIENT (queue non-empty).
+	s := newSpecifyingState(1)
+	s.Config.Specifying.CrossReference.MinRounds = 1
+	s.Config.Specifying.CrossReference.MaxRounds = 3
+	advanceToAccept(t, s)
+
+	dir := t.TempDir()
+	crEvalFile := filepath.Join(dir, "cr-eval.md")
+	os.WriteFile(crEvalFile, []byte("cross-ref eval"), 0644)
+
+	Advance(s, AdvanceInput{}, "")                                             // ACCEPT → CROSS_REFERENCE
+	Advance(s, AdvanceInput{}, "")                                             // CROSS_REFERENCE → CROSS_REFERENCE_EVAL (round 1)
+	Advance(s, AdvanceInput{Verdict: "FAIL", EvalReport: crEvalFile}, "")     // FAIL at round 1 → CROSS_REFERENCE
+	Advance(s, AdvanceInput{}, "")                                             // CROSS_REFERENCE → CROSS_REFERENCE_EVAL (round 2)
+
+	// PASS at round 2 (round>1, min_rounds met) → skip review, go to DONE (queue empty).
+	if err := Advance(s, AdvanceInput{Verdict: "PASS", EvalReport: crEvalFile}, ""); err != nil {
+		t.Fatal(err)
+	}
+	if s.State != StateDone {
+		t.Errorf("expected DONE (skipped review at round>1), got %s", s.State)
+	}
+}
+
+func TestCrossReferenceEvalForcedAtRound1GoesToReview(t *testing.T) {
+	// CROSS_REFERENCE_EVAL FAIL at max_rounds (forced) on round 1 enters CROSS_REFERENCE_REVIEW.
+	s := newSpecifyingState(1)
+	s.Config.Specifying.CrossReference.MaxRounds = 1
+	advanceToAccept(t, s)
+
+	dir := t.TempDir()
+	crEvalFile := filepath.Join(dir, "cr-eval.md")
+	os.WriteFile(crEvalFile, []byte("cross-ref eval"), 0644)
+
+	Advance(s, AdvanceInput{}, "") // ACCEPT → CROSS_REFERENCE
+	Advance(s, AdvanceInput{}, "") // CROSS_REFERENCE → CROSS_REFERENCE_EVAL (round 1)
+
+	// FAIL at round 1 with max_rounds=1 → forced accept, round==1 → CROSS_REFERENCE_REVIEW.
+	if err := Advance(s, AdvanceInput{Verdict: "FAIL", EvalReport: crEvalFile}, ""); err != nil {
+		t.Fatal(err)
+	}
+	if s.State != StateCrossReferenceReview {
+		t.Errorf("expected CROSS_REFERENCE_REVIEW (forced at round 1), got %s", s.State)
+	}
+}
+
+func TestCrossReferenceReviewEmptyQueueToDone(t *testing.T) {
+	// CROSS_REFERENCE_REVIEW with empty queue advances to DONE.
+	s := newSpecifyingState(1)
+	advanceToAccept(t, s)
+
+	dir := t.TempDir()
+	crEvalFile := filepath.Join(dir, "cr-eval.md")
+	os.WriteFile(crEvalFile, []byte("cross-ref eval"), 0644)
+
+	Advance(s, AdvanceInput{}, "")                                          // ACCEPT → CROSS_REFERENCE
+	Advance(s, AdvanceInput{}, "")                                          // CROSS_REFERENCE → CROSS_REFERENCE_EVAL
+	Advance(s, AdvanceInput{Verdict: "PASS", EvalReport: crEvalFile}, "")  // → CROSS_REFERENCE_REVIEW
+
+	if err := Advance(s, AdvanceInput{}, ""); err != nil {
+		t.Fatal(err)
+	}
+	if s.State != StateDone {
+		t.Errorf("expected DONE (empty queue), got %s", s.State)
+	}
+}
+
+func TestCrossReferenceReviewOutputUserReviewTrue(t *testing.T) {
+	// CROSS_REFERENCE_REVIEW output shows STOP when user_review=true.
+	s := newSpecifyingState(1)
+	s.Config.Specifying.CrossReference.UserReview = true
+	advanceToAccept(t, s)
+
+	dir := t.TempDir()
+	crEvalFile := filepath.Join(dir, "cr-eval.md")
+	os.WriteFile(crEvalFile, []byte("cross-ref eval"), 0644)
+
+	Advance(s, AdvanceInput{}, "")
+	Advance(s, AdvanceInput{}, "")
+	Advance(s, AdvanceInput{Verdict: "PASS", EvalReport: crEvalFile}, "") // → CROSS_REFERENCE_REVIEW
+
+	var buf bytes.Buffer
+	PrintAdvanceOutput(&buf, s, "")
+	out := buf.String()
+	if !strings.Contains(out, "STOP") {
+		t.Errorf("expected 'STOP' in CROSS_REFERENCE_REVIEW output when user_review=true, got:\n%s", out)
+	}
+}
+
+func TestCrossReferenceReviewOutputUserReviewFalse(t *testing.T) {
+	// CROSS_REFERENCE_REVIEW output shows 'Domain cross-reference complete' when user_review=false.
+	s := newSpecifyingState(1)
+	s.Config.Specifying.CrossReference.UserReview = false
+	advanceToAccept(t, s)
+
+	dir := t.TempDir()
+	crEvalFile := filepath.Join(dir, "cr-eval.md")
+	os.WriteFile(crEvalFile, []byte("cross-ref eval"), 0644)
+
+	Advance(s, AdvanceInput{}, "")
+	Advance(s, AdvanceInput{}, "")
+	Advance(s, AdvanceInput{Verdict: "PASS", EvalReport: crEvalFile}, "") // → CROSS_REFERENCE_REVIEW
+
+	var buf bytes.Buffer
+	PrintAdvanceOutput(&buf, s, "")
+	out := buf.String()
+	if !strings.Contains(out, "Domain cross-reference complete") {
+		t.Errorf("expected 'Domain cross-reference complete' in output when user_review=false, got:\n%s", out)
+	}
+}
+
+func TestLastDomainCrossReferenceReviewToDone(t *testing.T) {
+	// After the last domain's CROSS_REFERENCE_REVIEW, advancing transitions to DONE.
+	s := newSpecifyingState(1)
+	// Queue is empty after accept (single spec, single domain).
+	advanceToAccept(t, s)
+	if len(s.Specifying.Queue) != 0 {
+		t.Skip("test requires empty queue after accept")
+	}
+
+	dir := t.TempDir()
+	crEvalFile := filepath.Join(dir, "cr-eval.md")
+	os.WriteFile(crEvalFile, []byte("cross-ref eval"), 0644)
+
+	Advance(s, AdvanceInput{}, "")
+	Advance(s, AdvanceInput{}, "")
+	Advance(s, AdvanceInput{Verdict: "PASS", EvalReport: crEvalFile}, "") // → CROSS_REFERENCE_REVIEW
+
+	if s.State != StateCrossReferenceReview {
+		t.Fatalf("expected CROSS_REFERENCE_REVIEW, got %s", s.State)
+	}
+
+	if err := Advance(s, AdvanceInput{}, ""); err != nil {
+		t.Fatal(err)
+	}
+	if s.State != StateDone {
+		t.Errorf("expected DONE after last domain's CROSS_REFERENCE_REVIEW, got %s", s.State)
 	}
 }
 

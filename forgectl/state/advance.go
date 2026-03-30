@@ -197,17 +197,19 @@ func advanceSpecifying(s *ForgeState, in AdvanceInput) error {
 		forced := in.Verdict == "FAIL" && cr.Round >= maxRounds
 		passed := in.Verdict == "PASS" && cr.Round >= minRounds
 		if passed || forced {
-			s.State = StateCrossReferenceReview
+			// CROSS_REFERENCE_REVIEW fires once — only on the first passing eval (round==1).
+			// Subsequent passing evals skip review and go directly to next domain or DONE.
+			if cr.Round == 1 {
+				s.State = StateCrossReferenceReview
+			} else {
+				specCrossRefNextOrDone(s)
+			}
 		} else {
 			s.State = StateCrossReference
 		}
 
 	case StateCrossReferenceReview:
-		if len(spec.Queue) > 0 {
-			s.State = StateOrient
-		} else {
-			s.State = StateDone
-		}
+		specCrossRefNextOrDone(s)
 
 	case StateDone:
 		spec.Reconcile = &ReconcileState{Round: 0}
@@ -842,6 +844,16 @@ func archiveBatch(s *ForgeState) {
 	}
 
 	impl.CurrentBatch = nil
+}
+
+// specCrossRefNextOrDone advances to ORIENT if any specs remain in the queue,
+// or to DONE if the queue is exhausted (all domains cross-referenced).
+func specCrossRefNextOrDone(s *ForgeState) {
+	if len(s.Specifying.Queue) > 0 {
+		s.State = StateOrient
+	} else {
+		s.State = StateDone
+	}
 }
 
 func checkEvalReportExists(path string) error {
