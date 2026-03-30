@@ -324,20 +324,35 @@
     },
     {
       "id": "specifying.reconcile",
-      "name": "Spec reconciliation enable_commits gating and user_review output",
-      "description": "Gate --message on enable_commits in RECONCILE_EVAL. Update RECONCILE_REVIEW output to show 'STOP' when user_review=true vs 'Reconciliation review complete' when false. add-queue-item available at RECONCILE_REVIEW.",
+      "name": "Rebuild reconciliation state machine with round config and queue-based REVIEW",
+      "description": "Rebuild RECONCILE/RECONCILE_EVAL/RECONCILE_REVIEW state machine: add --eval-report requirement to RECONCILE_EVAL, implement round-based min/max transitions using s.Config.Specifying.Reconciliation, implement queue-based RECONCILE_REVIEW (empty→COMPLETE, non-empty→DONE). Remove --verdict from RECONCILE_REVIEW. Gate --message on enable_commits. Update all reconciliation output text.",
       "depends_on": ["specifying.commands"],
       "files": ["state/advance.go", "state/output.go"],
       "steps": [
+        "In RECONCILE_EVAL handling: add --eval-report as required flag (error if missing: same pattern as CROSS_REFERENCE_EVAL)",
+        "In RECONCILE_EVAL PASS handling: use s.Config.Specifying.Reconciliation.MinRounds and MaxRounds; PASS >= min and round==1 → RECONCILE_REVIEW; PASS >= min and round>1 → COMPLETE; PASS < min → RECONCILE",
+        "In RECONCILE_EVAL FAIL handling: FAIL < max → RECONCILE; FAIL >= max and round==1 → RECONCILE_REVIEW (forced); FAIL >= max and round>1 → COMPLETE (forced)",
         "In RECONCILE_EVAL PASS handling: only require --message when s.Config.General.EnableCommits is true",
-        "In RECONCILE_REVIEW output: check s.Config.Specifying.Reconciliation.UserReview to select action text",
-        "Ensure add-queue-item command accepts RECONCILE_REVIEW as a valid state"
+        "In RECONCILE_REVIEW handling: check s.Specifying.Queue — if empty → COMPLETE; if non-empty → DONE (re-enter for new specs)",
+        "Remove --verdict acceptance from RECONCILE_REVIEW (no flags; transition is now queue-based only)",
+        "Update RECONCILE output: count domains for 'Specs: N completed across M domains'; end with 'After completion of the above, advance to begin evaluation.'",
+        "Update RECONCILE_EVAL output: round as 'N/max_rounds'; 'Please spawn 1 opus sub-agent to evaluate cross-domain reconciliation.'; end with 'advance with --verdict PASS|FAIL --eval-report <path>'",
+        "Update RECONCILE_REVIEW output: check s.Config.Specifying.Reconciliation.UserReview for STOP vs 'Reconciliation review complete'; always append add-queue-item hint with --domain flag and 'Adding specs here re-enters DONE' note; end with 'After completion of the above, advance to continue.'"
       ],
       "spec": "spec-reconciliation.md",
       "ref": "notes/specifying.md",
       "tests": [
+        { "category": "functional",  "description": "RECONCILE_EVAL PASS at round 1 with min_rounds=0 transitions to RECONCILE_REVIEW" },
+        { "category": "functional",  "description": "RECONCILE_EVAL PASS below min_rounds loops back to RECONCILE" },
+        { "category": "functional",  "description": "RECONCILE_EVAL PASS at min_rounds on round>1 transitions to COMPLETE (skips review)" },
+        { "category": "functional",  "description": "RECONCILE_EVAL FAIL below max_rounds loops back to RECONCILE" },
+        { "category": "functional",  "description": "RECONCILE_EVAL FAIL at max_rounds on round==1 transitions to RECONCILE_REVIEW (forced)" },
+        { "category": "functional",  "description": "RECONCILE_EVAL FAIL at max_rounds on round>1 transitions to COMPLETE (forced)" },
+        { "category": "functional",  "description": "RECONCILE_REVIEW with empty queue transitions to COMPLETE" },
+        { "category": "functional",  "description": "RECONCILE_REVIEW with queue non-empty (after add-queue-item) transitions to DONE" },
         { "category": "functional",  "description": "RECONCILE_EVAL PASS with enable_commits=false does not require --message" },
         { "category": "rejection",   "description": "RECONCILE_EVAL PASS with enable_commits=true and no --message returns error" },
+        { "category": "rejection",   "description": "RECONCILE_EVAL without --eval-report returns error" },
         { "category": "functional",  "description": "RECONCILE_REVIEW output includes STOP when user_review=true" },
         { "category": "functional",  "description": "RECONCILE_REVIEW output says 'Reconciliation review complete' when user_review=false" }
       ]
@@ -509,7 +524,7 @@
       "steps": [
         "Add config tests to state/config_test.go: DefaultConfig values, LoadConfig partial override, ValidateConfig constraint violations",
         "Add root discovery tests to state/root_test.go: found in cwd, found 2 levels up, not found",
-        "Update state/advance_test.go: update existing tests to remove BatchSize/MinRounds/MaxRounds from ForgeState construction; add config object; add CROSS_REFERENCE state machine tests; add enable_commits gating tests; add auto-generate plan queue tests",
+        "Update state/advance_test.go: update existing tests to remove BatchSize/MinRounds/MaxRounds from ForgeState construction; add config object; add CROSS_REFERENCE state machine tests; add reconciliation state machine tests (round-based transitions, queue-based RECONCILE_REVIEW); add enable_commits gating tests; add auto-generate plan queue tests",
         "Create state/logger_test.go: log file creation, entry appending, pruning by age, pruning by count, disabled logging, best-effort failure",
         "Update cmd/commands_test.go: update init tests to use .forgectl/ fixture and config file instead of old flags; add validate command tests",
         "Create cmd/validate_test.go or add to commands_test.go: auto-detect, --type override, errors",

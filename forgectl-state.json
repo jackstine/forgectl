@@ -1,11 +1,15 @@
 {
   "phase": "planning",
-  "state": "ACCEPT",
+  "state": "PHASE_SHIFT",
   "batch_size": 1,
   "min_rounds": 1,
   "max_rounds": 3,
   "user_guided": true,
   "started_at_phase": "planning",
+  "phase_shift": {
+    "from": "planning",
+    "to": "implementing"
+  },
   "specifying": null,
   "planning": {
     "current_plan": {
