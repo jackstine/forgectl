@@ -2,6 +2,7 @@ package state
 
 import (
 	"fmt"
+	"os"
 	"path/filepath"
 
 	"github.com/BurntSushi/toml"
@@ -140,6 +141,9 @@ func LoadConfig(projectRoot string) (Config, error) {
 	path := filepath.Join(projectRoot, ".forgectl", "config")
 	_, err := toml.DecodeFile(path, &cfg)
 	if err != nil {
+		if os.IsNotExist(err) {
+			return cfg, nil
+		}
 		return cfg, fmt.Errorf("reading .forgectl/config: %w", err)
 	}
 	return cfg, nil
