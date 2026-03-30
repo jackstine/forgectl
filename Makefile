@@ -7,4 +7,4 @@ clean:
 	rm -f forgectl/forgectl
 
 install-global: build
-	mkdir -p ~/.local/bin && ln -sf $(CURDIR)/forgectl/forgectl ~/.local/bin/forgectl
+	mkdir -p ~/.local/bin && cp forgectl/forgectl ~/.local/bin/forgectl
