@@ -2,6 +2,15 @@
 
 Spec-driven development harness. Compiles planning documents into production code through specifying, planning, and implementing phases.
 
+## External Resources
+### Context 7 MCP resources
+- [cobra](https://context7.com/spf13/cobra)
+- [go-yaml](https://context7.com/goccy/go-yaml)
+- [golangci-lint](https://context7.com/golangci/golangci-lint)
+- [go-git](https://context7.com/go-git/go-git) Version 5 only (Version 6 is in pre-release at this moment)
+
+
+
 ## Build
 
 ```bash
