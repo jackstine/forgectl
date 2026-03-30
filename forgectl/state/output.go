@@ -825,21 +825,38 @@ func printPhaseShiftOutput(w io.Writer, s *ForgeState) {
 
 // --- Status ---
 
-// PrintStatus prints the full session status.
-func PrintStatus(w io.Writer, s *ForgeState, dir string) {
-	fmt.Fprintf(w, "Session: forgectl-state.json\n")
+// PrintStatus prints the session status. When verbose is true, full phase
+// sections are appended after the progress line.
+func PrintStatus(w io.Writer, s *ForgeState, dir string, verbose bool) {
+	// Session path: prefer relative (cfg.Paths.StateDir/forgectl-state.json).
+	sessionLabel := filepath.Join(s.Config.Paths.StateDir, "forgectl-state.json")
+	fmt.Fprintf(w, "Session: %s\n", sessionLabel)
+
 	fmt.Fprintf(w, "Phase:   %s", s.Phase)
 	if s.StartedAtPhase != "" && s.StartedAtPhase == s.Phase && s.StartedAtPhase != PhaseSpecifying {
 		fmt.Fprintf(w, " (started here)")
 	}
 	fmt.Fprintln(w)
-	fmt.Fprintf(w, "Config:  batch_size=%d, rounds=%d-%d, guided=%v\n", s.Config.Implementing.Batch, s.Config.Implementing.Eval.MinRounds, s.Config.Implementing.Eval.MaxRounds, s.Config.General.UserGuided)
+
+	// Phase-appropriate config values.
+	batch, minRounds, maxRounds := phaseConfig(s)
+	fmt.Fprintf(w, "Config:  batch=%d, rounds=%d-%d, guided=%v\n", batch, minRounds, maxRounds, s.Config.General.UserGuided)
 	fmt.Fprintln(w)
 
-	// Current state.
+	// Current state + action.
 	fmt.Fprintf(w, "--- Current ---\n\n")
 	PrintAdvanceOutput(w, s, dir)
 	fmt.Fprintln(w)
+
+	// One-line progress summary.
+	printProgressLine(w, s, dir)
+	fmt.Fprintln(w)
+
+	if !verbose {
+		return
+	}
+
+	// --- Verbose sections ---
 
 	// Specifying section.
 	if s.Specifying != nil {
@@ -944,6 +961,56 @@ func PrintStatus(w io.Writer, s *ForgeState, dir string) {
 			}
 		}
 		fmt.Fprintln(w)
+	}
+}
+
+// phaseConfig returns the batch size and round bounds for the current phase.
+func phaseConfig(s *ForgeState) (batch, minRounds, maxRounds int) {
+	switch s.Phase {
+	case PhaseSpecifying:
+		return s.Config.Specifying.Batch, s.Config.Specifying.Eval.MinRounds, s.Config.Specifying.Eval.MaxRounds
+	case PhasePlanning:
+		return s.Config.Planning.Batch, s.Config.Planning.Eval.MinRounds, s.Config.Planning.Eval.MaxRounds
+	default: // implementing
+		return s.Config.Implementing.Batch, s.Config.Implementing.Eval.MinRounds, s.Config.Implementing.Eval.MaxRounds
+	}
+}
+
+// printProgressLine writes a one-line progress summary for the current phase.
+func printProgressLine(w io.Writer, s *ForgeState, dir string) {
+	switch s.Phase {
+	case PhaseSpecifying:
+		if s.Specifying == nil {
+			return
+		}
+		spec := s.Specifying
+		total := len(spec.Completed) + len(spec.Queue) + len(spec.CurrentSpecs)
+		fmt.Fprintf(w, "Progress: %d/%d specs completed, %d queued\n", len(spec.Completed), total, len(spec.Queue))
+
+	case PhasePlanning:
+		if s.Planning == nil {
+			return
+		}
+		fmt.Fprintf(w, "Progress: round %d of %d\n", s.Planning.Round, s.Config.Planning.Eval.MaxRounds)
+
+	case PhaseImplementing:
+		plan, _ := loadPlan(s, dir)
+		if plan == nil {
+			return
+		}
+		var passed, failed, remaining int
+		for i := range plan.Items {
+			switch plan.Items[i].Passes {
+			case "passed":
+				passed++
+			case "failed":
+				failed++
+			default:
+				remaining++
+			}
+		}
+		total := passed + failed + remaining
+		fmt.Fprintf(w, "Progress: %d/%d passed, %d failed, %d remaining\n", passed, total, failed, remaining)
 	}
 }
 
