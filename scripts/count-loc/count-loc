@@ -1,0 +1,301 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# Parse options
+COUNT_TOKENS=false
+while [[ $# -gt 0 ]]; do
+  case $1 in
+    --tokens)
+      COUNT_TOKENS=true
+      shift
+      ;;
+    *)
+      echo "Unknown option: $1"
+      echo "Usage: $0 [--tokens]"
+      exit 1
+      ;;
+  esac
+done
+
+# Find project root
+PROJECT_ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
+
+# Load .env if it exists and --tokens is provided
+if [ "$COUNT_TOKENS" = true ] && [ -f "$PROJECT_ROOT/.env" ]; then
+  set +u
+  source "$PROJECT_ROOT/.env"
+  set -u
+fi
+
+# Check if cloc is installed
+if ! command -v cloc &> /dev/null; then
+  echo "Error: cloc is not installed"
+  echo "Install it with: brew install cloc"
+  exit 1
+fi
+
+# Check if ANTHROPIC_API_KEY is set (only if --tokens is enabled)
+if [ "$COUNT_TOKENS" = true ] && [ -z "${ANTHROPIC_API_KEY:-}" ]; then
+  echo "Error: ANTHROPIC_API_KEY environment variable is not set"
+  echo "Set it with: export ANTHROPIC_API_KEY=your-key-here"
+  exit 1
+fi
+
+# Run cloc and capture output
+echo "Running cloc on: $PROJECT_ROOT"
+CLOC_OUTPUT=$(cloc "$PROJECT_ROOT" --json \
+  --exclude-dir=node_modules,.next,dist,build \
+  --exclude-dir=.venv,__pycache__,.egg-info \
+  --exclude-dir=vendor \
+  --exclude-dir=.git,.github,.vscode,build,dist)
+
+echo ""
+echo "=== Lines of Code Count ==="
+
+# Extract header info and display
+N_FILES=$(echo "$CLOC_OUTPUT" | jq -r '.header.n_files')
+N_LINES=$(echo "$CLOC_OUTPUT" | jq -r '.header.n_lines')
+echo "Project: $PROJECT_ROOT"
+echo "Files: $N_FILES | Total Lines: $N_LINES"
+echo ""
+
+# Function to count tokens for a language
+count_tokens_for_language() {
+  local lang=$1
+  local patterns=$2
+
+  # Build content from files matching patterns
+  local content=""
+  for pattern in $patterns; do
+    content+=$(find "$PROJECT_ROOT" -type f -name "$pattern" \
+      -not -path "*/node_modules/*" -not -path "*/.next/*" -not -path "*/dist/*" -not -path "*/build/*" \
+      -not -path "*/.venv/*" -not -path "*/__pycache__/*" -not -path "*.egg-info/*" \
+      -not -path "*/vendor/*" -not -path "*/.git/*" -not -path "*/.github/*" -not -path "*/.vscode/*" \
+      -exec cat {} \; 2>/dev/null)
+  done
+
+  if [ -z "$content" ]; then
+    echo "0"
+    return
+  fi
+
+  # Count tokens via API
+  local token_response=$(curl -s https://api.anthropic.com/v1/messages/count_tokens \
+    -H "x-api-key: $ANTHROPIC_API_KEY" \
+    -H "anthropic-version: 2023-06-01" \
+    -H "content-type: application/json" \
+    -d "{\"model\":\"claude-sonnet-4-6\",\"messages\":[{\"role\":\"user\",\"content\":$(echo "$content" | jq -R -s '.')}]}")
+
+  echo "$token_response" | jq '.input_tokens // 0' 2>/dev/null || echo "0"
+}
+
+TOTAL_TOKENS=0
+if [ "$COUNT_TOKENS" = true ]; then
+  echo "Counting tokens..."
+  echo ""
+fi
+
+# Function to count characters for a language
+count_chars() {
+  local lang=$1
+  local patterns=$2
+
+  # Build find command with multiple -name patterns
+  local find_cmd="find \"$PROJECT_ROOT\" -type f"
+  for pattern in $patterns; do
+    find_cmd="$find_cmd -name \"$pattern\" -o"
+  done
+  # Remove trailing -o
+  find_cmd="${find_cmd% -o}"
+
+  # Add exclusions
+  find_cmd="$find_cmd -not -path \"*/node_modules/*\" -not -path \"*/.next/*\" -not -path \"*/dist/*\" -not -path \"*/build/*\" -not -path \"*/.venv/*\" -not -path \"*/__pycache__/*\" -not -path \"*.egg-info/*\" -not -path \"*/vendor/*\" -not -path \"*/.git/*\" -not -path \"*/.github/*\" -not -path \"*/.vscode/*\""
+
+  # Count characters
+  local char_count=$(eval "$find_cmd" -exec wc -c {} + 2>/dev/null | tail -1 | awk '{print $1}')
+  echo "${char_count:-0}"
+}
+
+# Create table header
+if [ "$COUNT_TOKENS" = true ]; then
+  printf "%-25s %8s %8s %10s %8s %12s %10s\n" "Language" "Files" "Blank" "Comment" "Code" "Characters" "Tokens"
+  printf "%-25s %8s %8s %10s %8s %12s %10s\n" "$(printf '%.0s-' {1..25})" "$(printf '%.0s-' {1..8})" "$(printf '%.0s-' {1..8})" "$(printf '%.0s-' {1..10})" "$(printf '%.0s-' {1..8})" "$(printf '%.0s-' {1..12})" "$(printf '%.0s-' {1..10})"
+else
+  printf "%-25s %8s %8s %10s %8s %12s\n" "Language" "Files" "Blank" "Comment" "Code" "Characters"
+  printf "%-25s %8s %8s %10s %8s %12s\n" "$(printf '%.0s-' {1..25})" "$(printf '%.0s-' {1..8})" "$(printf '%.0s-' {1..8})" "$(printf '%.0s-' {1..10})" "$(printf '%.0s-' {1..8})" "$(printf '%.0s-' {1..12})"
+fi
+
+# Function to count specs files and lines (all *.md in */specs/ directories)
+count_specs_files() {
+  find "$PROJECT_ROOT" -path "*/specs/*.md" \
+    -not -path "*/node_modules/*" -not -path "*/.next/*" -not -path "*/dist/*" -not -path "*/build/*" \
+    -not -path "*/.venv/*" -not -path "*/__pycache__/*" -not -path "*.egg-info/*" \
+    -not -path "*/vendor/*" -not -path "*/.git/*" -not -path "*/.github/*" -not -path "*/.vscode/*" \
+    2>/dev/null | wc -l
+}
+
+count_specs_lines() {
+  find "$PROJECT_ROOT" -path "*/specs/*.md" \
+    -not -path "*/node_modules/*" -not -path "*/.next/*" -not -path "*/dist/*" -not -path "*/build/*" \
+    -not -path "*/.venv/*" -not -path "*/__pycache__/*" -not -path "*.egg-info/*" \
+    -not -path "*/vendor/*" -not -path "*/.git/*" -not -path "*/.github/*" -not -path "*/.vscode/*" \
+    -exec wc -l {} + 2>/dev/null | tail -1 | awk '{print $1}'
+}
+
+# Create a sorted list and print table rows with character counts
+# Only include Go and Markdown (will be displayed as Specs)
+SORTED=$(echo "$CLOC_OUTPUT" | jq -r '
+  [to_entries[] |
+   select(.key != "header" and .key != "SUM" and (.key == "Go" or .key == "Markdown")) |
+   {lang: .key, files: .value.nFiles, blank: .value.blank, comment: .value.comment, code: .value.code}] |
+  sort_by(-.code) |
+  .[] |
+  "\(.lang)\t\(.files)\t\(.blank)\t\(.comment)\t\(.code)"
+')
+
+# Function to get character count for a specific language
+get_char_count() {
+  local lang=$1
+  case "$lang" in
+    "Go")
+      count_chars "Go" "*.go"
+      ;;
+    "Markdown")
+      # Count all *.md files in any */specs/ directory recursively
+      find "$PROJECT_ROOT" -path "*/specs/*.md" \
+        -not -path "*/node_modules/*" -not -path "*/.next/*" -not -path "*/dist/*" -not -path "*/build/*" \
+        -not -path "*/.venv/*" -not -path "*/__pycache__/*" -not -path "*.egg-info/*" \
+        -not -path "*/vendor/*" -not -path "*/.git/*" -not -path "*/.github/*" -not -path "*/.vscode/*" \
+        -exec wc -c {} + 2>/dev/null | tail -1 | awk '{print $1}'
+      ;;
+    *)
+      echo "0"
+      ;;
+  esac
+}
+
+# Function to get token count for a specific language
+get_token_count() {
+  if [ "$COUNT_TOKENS" = false ]; then
+    echo "0"
+    return
+  fi
+
+  local lang=$1
+  case "$lang" in
+    "Go")
+      count_tokens_for_language "Go" "*.go"
+      ;;
+    "Markdown")
+      # Count tokens for all *.md files in any */specs/ directory recursively
+      local content=$(find "$PROJECT_ROOT" -path "*/specs/*.md" \
+        -not -path "*/node_modules/*" -not -path "*/.next/*" -not -path "*/dist/*" -not -path "*/build/*" \
+        -not -path "*/.venv/*" -not -path "*/__pycache__/*" -not -path "*.egg-info/*" \
+        -not -path "*/vendor/*" -not -path "*/.git/*" -not -path "*/.github/*" -not -path "*/.vscode/*" \
+        -exec cat {} \; 2>/dev/null)
+
+      if [ -z "$content" ]; then
+        echo "0"
+        return
+      fi
+
+      local token_response=$(curl -s https://api.anthropic.com/v1/messages/count_tokens \
+        -H "x-api-key: $ANTHROPIC_API_KEY" \
+        -H "anthropic-version: 2023-06-01" \
+        -H "content-type: application/json" \
+        -d "{\"model\":\"claude-sonnet-4-6\",\"messages\":[{\"role\":\"user\",\"content\":$(echo "$content" | jq -R -s '.')}]}")
+
+      echo "$token_response" | jq '.input_tokens // 0' 2>/dev/null || echo "0"
+      ;;
+    *)
+      echo "0"
+      ;;
+  esac
+}
+
+TOTAL_TOKENS=0
+
+# Process each language
+while IFS=$'\t' read -r lang files blank comment code; do
+  if [ "$lang" = "Markdown" ]; then
+    # Use custom specs counts instead of cloc counts
+    specs_files=$(count_specs_files)
+    specs_lines=$(count_specs_lines)
+    specs_blank=0
+    specs_comment=0
+    specs_code="$specs_lines"
+
+    display_lang="Specs"
+    files="$specs_files"
+    blank="$specs_blank"
+    comment="$specs_comment"
+    code="$specs_code"
+  else
+    display_lang="$lang"
+  fi
+
+  char_count=$(get_char_count "$lang")
+  if [ "$COUNT_TOKENS" = true ]; then
+    token_count=$(get_token_count "$lang")
+    TOTAL_TOKENS=$((TOTAL_TOKENS + token_count))
+    printf "%-25s %8s %8s %10s %8s %12s %10s\n" "$display_lang" "$files" "$blank" "$comment" "$code" "$char_count" "$token_count"
+  else
+    printf "%-25s %8s %8s %10s %8s %12s\n" "$display_lang" "$files" "$blank" "$comment" "$code" "$char_count"
+  fi
+done <<< "$SORTED"
+
+# Print separator and total
+if [ "$COUNT_TOKENS" = true ]; then
+  printf "%-25s %8s %8s %10s %8s %12s %10s\n" "$(printf '%.0s-' {1..25})" "$(printf '%.0s-' {1..8})" "$(printf '%.0s-' {1..8})" "$(printf '%.0s-' {1..10})" "$(printf '%.0s-' {1..8})" "$(printf '%.0s-' {1..12})" "$(printf '%.0s-' {1..10})"
+else
+  printf "%-25s %8s %8s %10s %8s %12s\n" "$(printf '%.0s-' {1..25})" "$(printf '%.0s-' {1..8})" "$(printf '%.0s-' {1..8})" "$(printf '%.0s-' {1..10})" "$(printf '%.0s-' {1..8})" "$(printf '%.0s-' {1..12})"
+fi
+
+# Get totals for Go and Specs only
+GO_DATA=$(echo "$CLOC_OUTPUT" | jq -r '.Go // empty')
+
+if [ -n "$GO_DATA" ]; then
+  GO_FILES=$(echo "$GO_DATA" | jq -r '.nFiles')
+  GO_BLANK=$(echo "$GO_DATA" | jq -r '.blank')
+  GO_COMMENT=$(echo "$GO_DATA" | jq -r '.comment')
+  GO_CODE=$(echo "$GO_DATA" | jq -r '.code')
+else
+  GO_FILES=0
+  GO_BLANK=0
+  GO_COMMENT=0
+  GO_CODE=0
+fi
+
+# Get Specs (markdown in specs directories only)
+SPECS_FILES=$(count_specs_files)
+SPECS_LINES=$(count_specs_lines)
+# For specs, all lines are "code" in cloc terms (no blank/comment distinction for markdown)
+SPECS_BLANK=0
+SPECS_COMMENT=0
+SPECS_CODE="$SPECS_LINES"
+
+TOTAL_FILES=$((GO_FILES + SPECS_FILES))
+TOTAL_BLANK=$((GO_BLANK + SPECS_BLANK))
+TOTAL_COMMENT=$((GO_COMMENT + SPECS_COMMENT))
+TOTAL_CODE=$((GO_CODE + SPECS_CODE))
+
+# Count total characters for Go and Specs
+GO_CHARS=$(find "$PROJECT_ROOT" -type f -name "*.go" \
+  -not -path "*/node_modules/*" -not -path "*/.next/*" -not -path "*/dist/*" -not -path "*/build/*" \
+  -not -path "*/.venv/*" -not -path "*/__pycache__/*" -not -path "*.egg-info/*" \
+  -not -path "*/vendor/*" -not -path "*/.git/*" -not -path "*/.github/*" -not -path "*/.vscode/*" \
+  -exec wc -c {} + 2>/dev/null | tail -1 | awk '{print $1}')
+
+SPECS_CHARS=$(find "$PROJECT_ROOT" -path "*/specs/*.md" \
+  -not -path "*/node_modules/*" -not -path "*/.next/*" -not -path "*/dist/*" -not -path "*/build/*" \
+  -not -path "*/.venv/*" -not -path "*/__pycache__/*" -not -path "*.egg-info/*" \
+  -not -path "*/vendor/*" -not -path "*/.git/*" -not -path "*/.github/*" -not -path "*/.vscode/*" \
+  -exec wc -c {} + 2>/dev/null | tail -1 | awk '{print $1}')
+
+TOTAL_CHARS=$((${GO_CHARS:-0} + ${SPECS_CHARS:-0}))
+
+if [ "$COUNT_TOKENS" = true ]; then
+  printf "%-25s %8s %8s %10s %8s %12s %10s\n" "TOTAL" "$TOTAL_FILES" "$TOTAL_BLANK" "$TOTAL_COMMENT" "$TOTAL_CODE" "$TOTAL_CHARS" "$TOTAL_TOKENS"
+else
+  printf "%-25s %8s %8s %10s %8s %12s\n" "TOTAL" "$TOTAL_FILES" "$TOTAL_BLANK" "$TOTAL_COMMENT" "$TOTAL_CODE" "$TOTAL_CHARS"
+fi
