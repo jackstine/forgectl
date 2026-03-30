@@ -261,8 +261,12 @@ func printSpecifyingOutput(w io.Writer, s *ForgeState, dir string) {
 		fmt.Fprintf(w, "Specs:   %d completed across %d domains\n", len(spec.Completed), len(domains))
 		fmt.Fprintf(w, "Action:  Please spawn 1 opus sub-agent to evaluate cross-domain reconciliation.\n")
 		fmt.Fprintf(w, "         The sub-agent runs git diff --staged and evaluates consistency across all specs.\n")
-		fmt.Fprintf(w, "         After completion of the above, advance with --verdict PASS --message <commit msg>\n")
-		fmt.Fprintf(w, "           or --verdict FAIL.\n")
+		if s.Config.General.EnableCommits {
+			fmt.Fprintf(w, "         After completion of the above, advance with --verdict PASS|FAIL --eval-report <path>\n")
+			fmt.Fprintf(w, "           (--message <commit msg> required with PASS)\n")
+		} else {
+			fmt.Fprintf(w, "         After completion of the above, advance with --verdict PASS|FAIL --eval-report <path>\n")
+		}
 
 	case StateReconcileReview:
 		domains := uniqueDomains(spec.Completed)
@@ -277,9 +281,16 @@ func printSpecifyingOutput(w io.Writer, s *ForgeState, dir string) {
 		fmt.Fprintf(w, "Round:   %d/%d\n", spec.Reconcile.Round, maxRounds)
 		fmt.Fprintf(w, "Verdict: %s\n", lastVerdict)
 		fmt.Fprintln(w)
-		fmt.Fprintf(w, "Action:  Reconciliation eval found issues.\n")
-		fmt.Fprintf(w, "         Accept: advance (or --verdict PASS)\n")
-		fmt.Fprintf(w, "         Fix and re-evaluate: advance --verdict FAIL\n")
+		if s.Config.Specifying.Reconciliation.UserReview {
+			fmt.Fprintf(w, "Action:  STOP please review and discuss with user before continuing.\n")
+		} else {
+			fmt.Fprintf(w, "Action:  Reconciliation review complete.\n")
+		}
+		fmt.Fprintf(w, "         If additional specs are needed,\n")
+		fmt.Fprintf(w, "         write the new spec file, then register it:\n")
+		fmt.Fprintf(w, "           forgectl add-queue-item --name <name> --domain <domain> --topic <topic> --file <file> [--source <path>...]\n")
+		fmt.Fprintf(w, "           Adding specs here re-enters DONE for the new items before reconciliation restarts.\n")
+		fmt.Fprintf(w, "         After completion of the above, advance to continue.\n")
 
 	case StateComplete:
 		fmt.Fprintf(w, "State:   COMPLETE\n")

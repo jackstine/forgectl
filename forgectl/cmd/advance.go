@@ -142,16 +142,15 @@ func validateAdvanceFlags(s *state.ForgeState) error {
 		return fmt.Errorf("--file is only valid in specifying DRAFT state (current: %s %s)", s.Phase, s.State)
 	}
 
-	// --verdict only valid in eval/review states.
+	// --verdict only valid in eval states.
 	if advanceVerdict != "" {
 		validStates := map[state.StateName]bool{
 			state.StateEvaluate:           true,
 			state.StateReconcileEval:      true,
-			state.StateReconcileReview:    true,
 			state.StateCrossReferenceEval: true,
 		}
 		if !validStates[s.State] {
-			return fmt.Errorf("--verdict is only valid in EVALUATE, RECONCILE_EVAL, RECONCILE_REVIEW, or CROSS_REFERENCE_EVAL state (current: %s)", s.State)
+			return fmt.Errorf("--verdict is only valid in EVALUATE, RECONCILE_EVAL, or CROSS_REFERENCE_EVAL state (current: %s)", s.State)
 		}
 	}
 

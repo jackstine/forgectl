@@ -223,30 +223,48 @@ func advanceSpecifying(s *ForgeState, in AdvanceInput) error {
 		if in.Verdict == "" {
 			return fmt.Errorf("--verdict is required in RECONCILE_EVAL state")
 		}
+		if in.EvalReport == "" {
+			return fmt.Errorf("--eval-report is required in RECONCILE_EVAL state")
+		}
 		if in.Verdict != "PASS" && in.Verdict != "FAIL" {
 			return fmt.Errorf("--verdict must be PASS or FAIL")
 		}
+		if err := checkEvalReportExists(in.EvalReport); err != nil {
+			return err
+		}
 
 		eval := EvalRecord{
-			Round:   spec.Reconcile.Round,
-			Verdict: in.Verdict,
+			Round:      spec.Reconcile.Round,
+			Verdict:    in.Verdict,
+			EvalReport: in.EvalReport,
 		}
 		spec.Reconcile.Evals = append(spec.Reconcile.Evals, eval)
 
-		if in.Verdict == "PASS" {
-			if in.Message == "" {
-				return fmt.Errorf("--message is required when --verdict is PASS")
+		minRounds := s.Config.Specifying.Reconciliation.MinRounds
+		maxRounds := s.Config.Specifying.Reconciliation.MaxRounds
+
+		forced := in.Verdict == "FAIL" && spec.Reconcile.Round >= maxRounds
+		passed := in.Verdict == "PASS" && spec.Reconcile.Round >= minRounds
+		if passed || forced {
+			if s.Config.General.EnableCommits && in.Verdict == "PASS" && in.Message == "" {
+				return fmt.Errorf("--message is required when --verdict is PASS and enable_commits is true")
 			}
-			s.State = StateComplete
+			// RECONCILE_REVIEW fires once — only on the first passing (or forced) eval (round==1).
+			if spec.Reconcile.Round == 1 {
+				s.State = StateReconcileReview
+			} else {
+				s.State = StateComplete
+			}
 		} else {
-			s.State = StateReconcileReview
+			s.State = StateReconcile
 		}
 
 	case StateReconcileReview:
-		if in.Verdict == "FAIL" {
-			s.State = StateReconcile
+		// No flags — transition is queue-based only.
+		// Non-empty queue re-enters DONE so new specs can be drafted before reconciliation restarts.
+		if len(spec.Queue) > 0 {
+			s.State = StateDone
 		} else {
-			// No verdict or PASS = accept.
 			s.State = StateComplete
 		}
 

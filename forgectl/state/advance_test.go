@@ -659,20 +659,30 @@ func TestSpecifyingDoneToReconcile(t *testing.T) {
 }
 
 func TestReconcileFlowPass(t *testing.T) {
+	// RECONCILE_EVAL PASS at round 1 (min_rounds=0) → RECONCILE_REVIEW → COMPLETE (empty queue).
 	s := newSpecifyingState(1)
 	advanceToDone(t, s)
 
-	// DONE → RECONCILE
-	Advance(s, AdvanceInput{}, "")
-	// RECONCILE → RECONCILE_EVAL
-	Advance(s, AdvanceInput{}, "")
+	dir := t.TempDir()
+	evalFile := filepath.Join(dir, "reconcile-eval.md")
+	os.WriteFile(evalFile, []byte("reconcile eval"), 0644)
+
+	Advance(s, AdvanceInput{}, "") // DONE → RECONCILE
+	Advance(s, AdvanceInput{}, "") // RECONCILE → RECONCILE_EVAL
 	if s.State != StateReconcileEval {
 		t.Fatalf("expected RECONCILE_EVAL, got %s", s.State)
 	}
 
-	// RECONCILE_EVAL PASS → COMPLETE
-	err := Advance(s, AdvanceInput{Verdict: "PASS", Message: "reconcile"}, "")
-	if err != nil {
+	// PASS at round 1 with min_rounds=0 → RECONCILE_REVIEW.
+	if err := Advance(s, AdvanceInput{Verdict: "PASS", EvalReport: evalFile}, ""); err != nil {
+		t.Fatal(err)
+	}
+	if s.State != StateReconcileReview {
+		t.Fatalf("expected RECONCILE_REVIEW, got %s", s.State)
+	}
+
+	// RECONCILE_REVIEW with empty queue → COMPLETE.
+	if err := Advance(s, AdvanceInput{}, ""); err != nil {
 		t.Fatal(err)
 	}
 	if s.State != StateComplete {
@@ -681,25 +691,325 @@ func TestReconcileFlowPass(t *testing.T) {
 }
 
 func TestReconcileFlowFailThenFix(t *testing.T) {
+	// FAIL below max_rounds → RECONCILE; then PASS at round 2 → COMPLETE (skips REVIEW).
+	s := newSpecifyingState(1)
+	s.Config.Specifying.Reconciliation.MaxRounds = 3
+	advanceToDone(t, s)
+
+	dir := t.TempDir()
+	evalFile := filepath.Join(dir, "reconcile-eval.md")
+	os.WriteFile(evalFile, []byte("reconcile eval"), 0644)
+
+	Advance(s, AdvanceInput{}, "") // DONE → RECONCILE
+	Advance(s, AdvanceInput{}, "") // RECONCILE → RECONCILE_EVAL (round 1)
+
+	// FAIL at round 1 (below max=3) → RECONCILE.
+	if err := Advance(s, AdvanceInput{Verdict: "FAIL", EvalReport: evalFile}, ""); err != nil {
+		t.Fatal(err)
+	}
+	if s.State != StateReconcile {
+		t.Fatalf("expected RECONCILE after FAIL below max, got %s", s.State)
+	}
+
+	Advance(s, AdvanceInput{}, "") // RECONCILE → RECONCILE_EVAL (round 2)
+
+	// PASS at round 2 (round>1) → COMPLETE (skips REVIEW).
+	if err := Advance(s, AdvanceInput{Verdict: "PASS", EvalReport: evalFile}, ""); err != nil {
+		t.Fatal(err)
+	}
+	if s.State != StateComplete {
+		t.Errorf("expected COMPLETE (round>1 skips review), got %s", s.State)
+	}
+}
+
+func TestReconcileEvalRequiresEvalReport(t *testing.T) {
+	// RECONCILE_EVAL must reject advance without --eval-report.
 	s := newSpecifyingState(1)
 	advanceToDone(t, s)
+	Advance(s, AdvanceInput{}, "") // DONE → RECONCILE
+	Advance(s, AdvanceInput{}, "") // RECONCILE → RECONCILE_EVAL
+
+	// Missing eval-report.
+	err := Advance(s, AdvanceInput{Verdict: "PASS"}, "")
+	if err == nil {
+		t.Error("expected error for missing --eval-report in RECONCILE_EVAL")
+	}
+}
+
+func TestReconcileEvalRequiresVerdict(t *testing.T) {
+	// RECONCILE_EVAL must reject advance without --verdict.
+	s := newSpecifyingState(1)
+	advanceToDone(t, s)
+	Advance(s, AdvanceInput{}, "") // DONE → RECONCILE
+	Advance(s, AdvanceInput{}, "") // RECONCILE → RECONCILE_EVAL
+
+	err := Advance(s, AdvanceInput{}, "")
+	if err == nil {
+		t.Error("expected error for missing --verdict in RECONCILE_EVAL")
+	}
+}
+
+func TestReconcileEvalPassAtRound1GoesToReview(t *testing.T) {
+	// PASS at round 1 with min_rounds=0 → RECONCILE_REVIEW.
+	s := newSpecifyingState(1)
+	advanceToDone(t, s)
+
+	dir := t.TempDir()
+	evalFile := filepath.Join(dir, "re-eval.md")
+	os.WriteFile(evalFile, []byte("reconcile eval"), 0644)
+
+	Advance(s, AdvanceInput{}, "") // DONE → RECONCILE
+	Advance(s, AdvanceInput{}, "") // RECONCILE → RECONCILE_EVAL (round 1)
+
+	if err := Advance(s, AdvanceInput{Verdict: "PASS", EvalReport: evalFile}, ""); err != nil {
+		t.Fatal(err)
+	}
+	if s.State != StateReconcileReview {
+		t.Errorf("expected RECONCILE_REVIEW at round 1, got %s", s.State)
+	}
+}
+
+func TestReconcileEvalPassBelowMinRoundsLoopsBack(t *testing.T) {
+	// PASS below min_rounds loops back to RECONCILE.
+	s := newSpecifyingState(1)
+	s.Config.Specifying.Reconciliation.MinRounds = 2
+	advanceToDone(t, s)
+
+	dir := t.TempDir()
+	evalFile := filepath.Join(dir, "re-eval.md")
+	os.WriteFile(evalFile, []byte("reconcile eval"), 0644)
+
+	Advance(s, AdvanceInput{}, "") // DONE → RECONCILE
+	Advance(s, AdvanceInput{}, "") // RECONCILE → RECONCILE_EVAL (round 1)
+
+	// PASS at round 1 with min_rounds=2 → not enough, loop back.
+	if err := Advance(s, AdvanceInput{Verdict: "PASS", EvalReport: evalFile}, ""); err != nil {
+		t.Fatal(err)
+	}
+	if s.State != StateReconcile {
+		t.Errorf("expected RECONCILE (below min rounds), got %s", s.State)
+	}
+}
+
+func TestReconcileEvalPassAtRound2SkipsReview(t *testing.T) {
+	// PASS at round>1 with min_rounds met skips RECONCILE_REVIEW → COMPLETE.
+	s := newSpecifyingState(1)
+	s.Config.Specifying.Reconciliation.MaxRounds = 3
+	advanceToDone(t, s)
+
+	dir := t.TempDir()
+	evalFile := filepath.Join(dir, "re-eval.md")
+	os.WriteFile(evalFile, []byte("reconcile eval"), 0644)
+
+	Advance(s, AdvanceInput{}, "")                                        // DONE → RECONCILE
+	Advance(s, AdvanceInput{}, "")                                        // RECONCILE → RECONCILE_EVAL (round 1)
+	Advance(s, AdvanceInput{Verdict: "FAIL", EvalReport: evalFile}, "")  // FAIL → RECONCILE
+	Advance(s, AdvanceInput{}, "")                                        // RECONCILE → RECONCILE_EVAL (round 2)
+
+	// PASS at round 2 → skip REVIEW → COMPLETE.
+	if err := Advance(s, AdvanceInput{Verdict: "PASS", EvalReport: evalFile}, ""); err != nil {
+		t.Fatal(err)
+	}
+	if s.State != StateComplete {
+		t.Errorf("expected COMPLETE (skipped review at round>1), got %s", s.State)
+	}
+}
+
+func TestReconcileEvalFailBelowMaxLoopsBack(t *testing.T) {
+	// FAIL below max_rounds loops back to RECONCILE.
+	s := newSpecifyingState(1)
+	s.Config.Specifying.Reconciliation.MaxRounds = 2
+	advanceToDone(t, s)
+
+	dir := t.TempDir()
+	evalFile := filepath.Join(dir, "re-eval.md")
+	os.WriteFile(evalFile, []byte("reconcile eval"), 0644)
+
+	Advance(s, AdvanceInput{}, "") // DONE → RECONCILE
+	Advance(s, AdvanceInput{}, "") // RECONCILE → RECONCILE_EVAL (round 1)
+
+	if err := Advance(s, AdvanceInput{Verdict: "FAIL", EvalReport: evalFile}, ""); err != nil {
+		t.Fatal(err)
+	}
+	if s.State != StateReconcile {
+		t.Errorf("expected RECONCILE after FAIL below max, got %s", s.State)
+	}
+}
+
+func TestReconcileEvalForcedAtRound1GoesToReview(t *testing.T) {
+	// FAIL at max_rounds (forced) at round 1 → RECONCILE_REVIEW.
+	s := newSpecifyingState(1)
+	s.Config.Specifying.Reconciliation.MaxRounds = 1
+	advanceToDone(t, s)
+
+	dir := t.TempDir()
+	evalFile := filepath.Join(dir, "re-eval.md")
+	os.WriteFile(evalFile, []byte("reconcile eval"), 0644)
+
+	Advance(s, AdvanceInput{}, "") // DONE → RECONCILE
+	Advance(s, AdvanceInput{}, "") // RECONCILE → RECONCILE_EVAL (round 1)
+
+	// FAIL at round 1 with max_rounds=1 → forced → RECONCILE_REVIEW.
+	if err := Advance(s, AdvanceInput{Verdict: "FAIL", EvalReport: evalFile}, ""); err != nil {
+		t.Fatal(err)
+	}
+	if s.State != StateReconcileReview {
+		t.Errorf("expected RECONCILE_REVIEW (forced at round 1), got %s", s.State)
+	}
+}
+
+func TestReconcileEvalForcedAtRound2GoesToComplete(t *testing.T) {
+	// FAIL at max_rounds (forced) at round>1 → COMPLETE (skips REVIEW).
+	s := newSpecifyingState(1)
+	s.Config.Specifying.Reconciliation.MaxRounds = 2
+	advanceToDone(t, s)
+
+	dir := t.TempDir()
+	evalFile := filepath.Join(dir, "re-eval.md")
+	os.WriteFile(evalFile, []byte("reconcile eval"), 0644)
+
+	Advance(s, AdvanceInput{}, "")                                        // DONE → RECONCILE
+	Advance(s, AdvanceInput{}, "")                                        // RECONCILE → RECONCILE_EVAL (round 1)
+	Advance(s, AdvanceInput{Verdict: "FAIL", EvalReport: evalFile}, "")  // FAIL at round 1 (below max=2) → RECONCILE
+	Advance(s, AdvanceInput{}, "")                                        // RECONCILE → RECONCILE_EVAL (round 2)
+
+	// FAIL at round 2 with max_rounds=2 → forced → round>1 → COMPLETE.
+	if err := Advance(s, AdvanceInput{Verdict: "FAIL", EvalReport: evalFile}, ""); err != nil {
+		t.Fatal(err)
+	}
+	if s.State != StateComplete {
+		t.Errorf("expected COMPLETE (forced at round>1), got %s", s.State)
+	}
+}
+
+func TestReconcileReviewEmptyQueueToComplete(t *testing.T) {
+	// RECONCILE_REVIEW with empty queue → COMPLETE.
+	s := newSpecifyingState(1)
+	advanceToDone(t, s)
+
+	dir := t.TempDir()
+	evalFile := filepath.Join(dir, "re-eval.md")
+	os.WriteFile(evalFile, []byte("reconcile eval"), 0644)
+
+	Advance(s, AdvanceInput{}, "")
+	Advance(s, AdvanceInput{}, "")
+	Advance(s, AdvanceInput{Verdict: "PASS", EvalReport: evalFile}, "") // → RECONCILE_REVIEW
+
+	if err := Advance(s, AdvanceInput{}, ""); err != nil {
+		t.Fatal(err)
+	}
+	if s.State != StateComplete {
+		t.Errorf("expected COMPLETE (empty queue), got %s", s.State)
+	}
+}
+
+func TestReconcileReviewNonEmptyQueueToDone(t *testing.T) {
+	// RECONCILE_REVIEW with non-empty queue → DONE (re-enter for new specs).
+	s := newSpecifyingState(1)
+	advanceToDone(t, s)
+
+	// Add a spec to the queue.
+	s.Specifying.Queue = append(s.Specifying.Queue, SpecQueueEntry{
+		Name: "New Spec", Domain: "test", Topic: "t", File: "test/specs/new.md",
+	})
+
+	dir := t.TempDir()
+	evalFile := filepath.Join(dir, "re-eval.md")
+	os.WriteFile(evalFile, []byte("reconcile eval"), 0644)
+
+	Advance(s, AdvanceInput{}, "")
+	Advance(s, AdvanceInput{}, "")
+	Advance(s, AdvanceInput{Verdict: "PASS", EvalReport: evalFile}, "") // → RECONCILE_REVIEW
+
+	if err := Advance(s, AdvanceInput{}, ""); err != nil {
+		t.Fatal(err)
+	}
+	if s.State != StateDone {
+		t.Errorf("expected DONE (non-empty queue re-enters DONE), got %s", s.State)
+	}
+}
+
+func TestReconcileEvalMessageRequiredWhenEnableCommits(t *testing.T) {
+	// --message required at RECONCILE_EVAL PASS when enable_commits=true.
+	s := newSpecifyingState(1)
+	s.Config.General.EnableCommits = true
+	advanceToDone(t, s)
+
+	dir := t.TempDir()
+	evalFile := filepath.Join(dir, "re-eval.md")
+	os.WriteFile(evalFile, []byte("reconcile eval"), 0644)
 
 	Advance(s, AdvanceInput{}, "") // DONE → RECONCILE
 	Advance(s, AdvanceInput{}, "") // RECONCILE → RECONCILE_EVAL
 
-	// FAIL → RECONCILE_REVIEW
-	Advance(s, AdvanceInput{Verdict: "FAIL"}, "")
-	if s.State != StateReconcileReview {
-		t.Fatalf("expected RECONCILE_REVIEW, got %s", s.State)
+	// PASS without --message should fail when enable_commits=true.
+	err := Advance(s, AdvanceInput{Verdict: "PASS", EvalReport: evalFile}, "")
+	if err == nil {
+		t.Error("expected error for missing --message when enable_commits=true")
 	}
+}
 
-	// FAIL → RECONCILE
-	err := Advance(s, AdvanceInput{Verdict: "FAIL"}, "")
+func TestReconcileEvalMessageNotRequiredWithoutEnableCommits(t *testing.T) {
+	// --message NOT required at RECONCILE_EVAL PASS when enable_commits=false (default).
+	s := newSpecifyingState(1)
+	s.Config.General.EnableCommits = false
+	advanceToDone(t, s)
+
+	dir := t.TempDir()
+	evalFile := filepath.Join(dir, "re-eval.md")
+	os.WriteFile(evalFile, []byte("reconcile eval"), 0644)
+
+	Advance(s, AdvanceInput{}, "") // DONE → RECONCILE
+	Advance(s, AdvanceInput{}, "") // RECONCILE → RECONCILE_EVAL
+
+	// PASS without --message should succeed when enable_commits=false.
+	err := Advance(s, AdvanceInput{Verdict: "PASS", EvalReport: evalFile}, "")
 	if err != nil {
-		t.Fatal(err)
+		t.Errorf("expected no error without --message when enable_commits=false: %v", err)
 	}
-	if s.State != StateReconcile {
-		t.Errorf("expected RECONCILE, got %s", s.State)
+}
+
+func TestReconcileReviewOutputUserReviewTrue(t *testing.T) {
+	// RECONCILE_REVIEW output shows STOP when user_review=true.
+	s := newSpecifyingState(1)
+	s.Config.Specifying.Reconciliation.UserReview = true
+	advanceToDone(t, s)
+
+	dir := t.TempDir()
+	evalFile := filepath.Join(dir, "re-eval.md")
+	os.WriteFile(evalFile, []byte("reconcile eval"), 0644)
+
+	Advance(s, AdvanceInput{}, "")
+	Advance(s, AdvanceInput{}, "")
+	Advance(s, AdvanceInput{Verdict: "PASS", EvalReport: evalFile}, "") // → RECONCILE_REVIEW
+
+	var buf bytes.Buffer
+	PrintAdvanceOutput(&buf, s, "")
+	out := buf.String()
+	if !strings.Contains(out, "STOP") {
+		t.Errorf("expected 'STOP' in RECONCILE_REVIEW output when user_review=true, got:\n%s", out)
+	}
+}
+
+func TestReconcileReviewOutputUserReviewFalse(t *testing.T) {
+	// RECONCILE_REVIEW output shows 'Reconciliation review complete' when user_review=false.
+	s := newSpecifyingState(1)
+	s.Config.Specifying.Reconciliation.UserReview = false
+	advanceToDone(t, s)
+
+	dir := t.TempDir()
+	evalFile := filepath.Join(dir, "re-eval.md")
+	os.WriteFile(evalFile, []byte("reconcile eval"), 0644)
+
+	Advance(s, AdvanceInput{}, "")
+	Advance(s, AdvanceInput{}, "")
+	Advance(s, AdvanceInput{Verdict: "PASS", EvalReport: evalFile}, "") // → RECONCILE_REVIEW
+
+	var buf bytes.Buffer
+	PrintAdvanceOutput(&buf, s, "")
+	out := buf.String()
+	if !strings.Contains(out, "Reconciliation review complete") {
+		t.Errorf("expected 'Reconciliation review complete' when user_review=false, got:\n%s", out)
 	}
 }
 
@@ -1242,10 +1552,15 @@ func advanceToDone(t *testing.T, s *ForgeState) {
 
 func advanceToComplete(t *testing.T, s *ForgeState) {
 	t.Helper()
+	dir := t.TempDir()
+	reEvalFile := filepath.Join(dir, "reconcile-eval.md")
+	os.WriteFile(reEvalFile, []byte("reconcile eval"), 0644)
+
 	advanceToDone(t, s)
-	Advance(s, AdvanceInput{}, "")                                    // DONE → RECONCILE
-	Advance(s, AdvanceInput{}, "")                                    // RECONCILE → RECONCILE_EVAL
-	Advance(s, AdvanceInput{Verdict: "PASS", Message: "reconcile"}, "") // RECONCILE_EVAL → COMPLETE
+	Advance(s, AdvanceInput{}, "")                                                // DONE → RECONCILE
+	Advance(s, AdvanceInput{}, "")                                                // RECONCILE → RECONCILE_EVAL
+	Advance(s, AdvanceInput{Verdict: "PASS", EvalReport: reEvalFile}, "")        // RECONCILE_EVAL PASS → RECONCILE_REVIEW
+	Advance(s, AdvanceInput{}, "")                                                // RECONCILE_REVIEW → COMPLETE (empty queue)
 }
 
 func newPlanningState() *ForgeState {
