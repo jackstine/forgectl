@@ -348,8 +348,8 @@ func advancePlanning(s *ForgeState, in AdvanceInput, dir string) error {
 		return advancePlanningFromDraftOrRefine(s, dir)
 
 	case StateAccept:
-		if in.Message == "" {
-			return fmt.Errorf("--message is required in planning ACCEPT state")
+		if s.Config.General.EnableCommits && in.Message == "" {
+			return fmt.Errorf("--message is required in planning ACCEPT state when enable_commits is true")
 		}
 		s.State = StatePhaseShift
 		s.PhaseShift = &PhaseShiftInfo{From: PhasePlanning, To: PhaseImplementing}
@@ -428,8 +428,8 @@ func advanceImplementing(s *ForgeState, in AdvanceInput, dir string) error {
 		return advanceImplFromEvaluate(s, in, dir)
 
 	case StateCommit:
-		if in.Message == "" {
-			return fmt.Errorf("--message is required in COMMIT state")
+		if s.Config.General.EnableCommits && in.Message == "" {
+			return fmt.Errorf("--message is required in COMMIT state when enable_commits is true")
 		}
 		// Archive batch to history.
 		archiveBatch(s)
@@ -518,9 +518,9 @@ func advanceImplFromImplement(s *ForgeState, in AdvanceInput, dir string) error 
 		return err
 	}
 
-	// First round requires --message.
-	if batch.EvalRound == 0 && in.Message == "" {
-		return fmt.Errorf("--message is required for first-round implementation")
+	// First round requires --message when enable_commits is true.
+	if batch.EvalRound == 0 && s.Config.General.EnableCommits && in.Message == "" {
+		return fmt.Errorf("--message is required for first-round implementation when enable_commits is true")
 	}
 
 	// Mark current item as done.

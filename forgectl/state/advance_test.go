@@ -1430,6 +1430,33 @@ func TestPlanningAcceptToPhaseShift(t *testing.T) {
 	}
 }
 
+func TestPlanningAcceptNoMessageRequiredWithoutEnableCommits(t *testing.T) {
+	dir := t.TempDir()
+	s := newPlanningStateWithDir(dir)
+	// enable_commits defaults to false
+	advancePlanningToAccept(t, s, dir)
+
+	err := Advance(s, AdvanceInput{}, dir) // no --message
+	if err != nil {
+		t.Errorf("expected no error in planning ACCEPT without enable_commits, got: %v", err)
+	}
+	if s.State != StatePhaseShift {
+		t.Errorf("expected PHASE_SHIFT, got %s", s.State)
+	}
+}
+
+func TestPlanningAcceptRequiresMessageWhenEnableCommits(t *testing.T) {
+	dir := t.TempDir()
+	s := newPlanningStateWithDir(dir)
+	s.Config.General.EnableCommits = true
+	advancePlanningToAccept(t, s, dir)
+
+	err := Advance(s, AdvanceInput{}, dir) // no --message
+	if err == nil {
+		t.Error("expected error in planning ACCEPT when enable_commits=true and no --message")
+	}
+}
+
 // --- Implementing Phase Tests ---
 
 func TestImplementingOrientSelectsFirstBatch(t *testing.T) {
@@ -1487,15 +1514,29 @@ func TestImplementLastItemGoesToEvaluate(t *testing.T) {
 	}
 }
 
-func TestFirstRoundImplementRequiresMessage(t *testing.T) {
+func TestFirstRoundImplementRequiresMessageWhenEnableCommits(t *testing.T) {
 	dir := t.TempDir()
 	s := newImplementingState(dir, 1, 1)
+	s.Config.General.EnableCommits = true
 
 	Advance(s, AdvanceInput{}, dir) // ORIENT → IMPLEMENT
 
 	err := Advance(s, AdvanceInput{}, dir) // no --message
 	if err == nil {
-		t.Error("expected error for missing --message in first-round IMPLEMENT")
+		t.Error("expected error for missing --message in first-round IMPLEMENT when enable_commits=true")
+	}
+}
+
+func TestFirstRoundImplementNoMessageRequiredWithoutEnableCommits(t *testing.T) {
+	dir := t.TempDir()
+	s := newImplementingState(dir, 1, 1)
+	// enable_commits defaults to false
+
+	Advance(s, AdvanceInput{}, dir) // ORIENT → IMPLEMENT
+
+	err := Advance(s, AdvanceInput{}, dir) // no --message — should succeed
+	if err != nil {
+		t.Errorf("expected no error without enable_commits, got: %v", err)
 	}
 }
 
@@ -1568,6 +1609,32 @@ func TestCommitToOrientMoreItems(t *testing.T) {
 	}
 	if s.State != StateOrient {
 		t.Errorf("expected ORIENT (more items), got %s", s.State)
+	}
+}
+
+func TestCommitNoMessageRequiredWithoutEnableCommits(t *testing.T) {
+	dir := t.TempDir()
+	s := newImplementingState(dir, 1, 1)
+	// enable_commits defaults to false
+
+	advanceImplToCommit(t, s, dir)
+
+	err := Advance(s, AdvanceInput{}, dir) // no --message
+	if err != nil {
+		t.Errorf("expected no error in COMMIT without enable_commits, got: %v", err)
+	}
+}
+
+func TestCommitRequiresMessageWhenEnableCommits(t *testing.T) {
+	dir := t.TempDir()
+	s := newImplementingState(dir, 1, 1)
+	s.Config.General.EnableCommits = true
+
+	advanceImplToCommit(t, s, dir)
+
+	err := Advance(s, AdvanceInput{}, dir) // no --message
+	if err == nil {
+		t.Error("expected error in COMMIT when enable_commits=true and no --message")
 	}
 }
 

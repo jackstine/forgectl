@@ -495,7 +495,7 @@ func printImplementingOutput(w io.Writer, s *ForgeState, dir string) {
 			fmt.Fprintf(w, "Plan:    %s\n", s.Planning.CurrentPlan.Name)
 			fmt.Fprintf(w, "Domain:  %s\n", s.Planning.CurrentPlan.Domain)
 			fmt.Fprintf(w, "File:    %s\n", s.Planning.CurrentPlan.File)
-			fmt.Fprintf(w, "Config:  batch_size=%d, rounds=%d-%d\n", s.Config.Implementing.Batch, s.Config.Implementing.Eval.MinRounds, s.Config.Implementing.Eval.MaxRounds)
+			fmt.Fprintf(w, "Config:  implementing.batch=%d, eval.rounds=%d-%d\n", s.Config.Implementing.Batch, s.Config.Implementing.Eval.MinRounds, s.Config.Implementing.Eval.MaxRounds)
 			fmt.Fprintf(w, "\nInitialized plan.json for implementation:\n")
 			fmt.Fprintf(w, "  Items:  %d (passes: pending, rounds: 0)\n", len(plan.Items))
 			fmt.Fprintf(w, "  Layers: %d", len(plan.Layers))
@@ -661,10 +661,10 @@ func printImplementingOutput(w io.Writer, s *ForgeState, dir string) {
 			fmt.Fprintf(w, "Action:  Study the eval file %q\n", evalFile)
 			fmt.Fprintf(w, "         and implement any corrections as needed. If none found during the eval,\n")
 			fmt.Fprintf(w, "         please verify and look for corrections. Apply them.\n")
-			fmt.Fprintf(w, "         When complete, run: forgectl advance\n")
+			fmt.Fprintf(w, "         After completion of the above, advance to continue.\n")
 		} else {
 			fmt.Fprintf(w, "Action:  Implement this item.\n")
-			fmt.Fprintf(w, "         When complete, run: forgectl advance --message <commit msg>\n")
+			fmt.Fprintf(w, "         After completion of the above, advance to continue.\n")
 		}
 
 	case StateEvaluate:
@@ -723,7 +723,7 @@ func printImplementingOutput(w io.Writer, s *ForgeState, dir string) {
 		}
 
 		fmt.Fprintf(w, "Action:  Commit your changes before continuing.\n")
-		fmt.Fprintf(w, "         When ready, run: forgectl advance --message <commit msg>\n")
+		fmt.Fprintf(w, "         After completion of the above, advance to continue.\n")
 
 	case StateDone:
 		plan, _ := loadPlan(s, dir)
