@@ -95,9 +95,45 @@ func runAdvance(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("saving state: %w", err)
 	}
 
+	// Archive session at terminal states.
+	if isTerminalState(s) {
+		domain := sessionDomain(s)
+		if archErr := state.ArchiveSession(stateDir, domain, s); archErr != nil {
+			fmt.Fprintf(out, "Warning: failed to archive session: %v\n", archErr)
+		}
+	}
+
 	state.PrintAdvanceOutput(out, s, projectRoot)
 
 	return nil
+}
+
+// isTerminalState returns true when the session has reached a terminal point
+// that warrants archiving.
+func isTerminalState(s *state.ForgeState) bool {
+	// Implementing phase complete.
+	if s.Phase == state.PhaseImplementing && s.State == state.StateDone {
+		return true
+	}
+	// Specifying phase complete (phase shifting to planning, started at specifying).
+	if s.State == state.StatePhaseShift &&
+		s.PhaseShift != nil &&
+		s.PhaseShift.From == state.PhaseSpecifying &&
+		s.StartedAtPhase == state.PhaseSpecifying {
+		return true
+	}
+	return false
+}
+
+// sessionDomain returns the domain name for archive file naming.
+func sessionDomain(s *state.ForgeState) string {
+	if s.Planning != nil && s.Planning.CurrentPlan != nil {
+		return s.Planning.CurrentPlan.Domain
+	}
+	if s.Specifying != nil && len(s.Specifying.Completed) > 0 {
+		return s.Specifying.Completed[0].Domain
+	}
+	return "unknown"
 }
 
 func validateAdvanceFlags(s *state.ForgeState) error {
