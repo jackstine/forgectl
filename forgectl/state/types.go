@@ -13,25 +13,28 @@ const (
 type StateName string
 
 const (
-	StateOrient          StateName = "ORIENT"
-	StateSelect          StateName = "SELECT"
-	StateDraft           StateName = "DRAFT"
-	StateEvaluate        StateName = "EVALUATE"
-	StateRefine          StateName = "REFINE"
-	StateAccept          StateName = "ACCEPT"
-	StateDone            StateName = "DONE"
-	StateReconcile       StateName = "RECONCILE"
-	StateReconcileEval   StateName = "RECONCILE_EVAL"
-	StateReconcileReview StateName = "RECONCILE_REVIEW"
-	StateComplete        StateName = "COMPLETE"
-	StatePhaseShift      StateName = "PHASE_SHIFT"
-	StateStudySpecs      StateName = "STUDY_SPECS"
-	StateStudyCode       StateName = "STUDY_CODE"
-	StateStudyPackages   StateName = "STUDY_PACKAGES"
-	StateReview          StateName = "REVIEW"
-	StateValidate        StateName = "VALIDATE"
-	StateImplement       StateName = "IMPLEMENT"
-	StateCommit          StateName = "COMMIT"
+	StateOrient                StateName = "ORIENT"
+	StateSelect                StateName = "SELECT"
+	StateDraft                 StateName = "DRAFT"
+	StateEvaluate              StateName = "EVALUATE"
+	StateRefine                StateName = "REFINE"
+	StateAccept                StateName = "ACCEPT"
+	StateDone                  StateName = "DONE"
+	StateReconcile             StateName = "RECONCILE"
+	StateReconcileEval         StateName = "RECONCILE_EVAL"
+	StateReconcileReview       StateName = "RECONCILE_REVIEW"
+	StateCrossReference        StateName = "CROSS_REFERENCE"
+	StateCrossReferenceEval    StateName = "CROSS_REFERENCE_EVAL"
+	StateCrossReferenceReview  StateName = "CROSS_REFERENCE_REVIEW"
+	StateComplete              StateName = "COMPLETE"
+	StatePhaseShift            StateName = "PHASE_SHIFT"
+	StateStudySpecs            StateName = "STUDY_SPECS"
+	StateStudyCode             StateName = "STUDY_CODE"
+	StateStudyPackages         StateName = "STUDY_PACKAGES"
+	StateReview                StateName = "REVIEW"
+	StateValidate              StateName = "VALIDATE"
+	StateImplement             StateName = "IMPLEMENT"
+	StateCommit                StateName = "COMMIT"
 )
 
 // --- Input file schemas ---
@@ -55,9 +58,9 @@ type SpecQueueInput struct {
 type PlanQueueEntry struct {
 	Name            string   `json:"name"`
 	Domain          string   `json:"domain"`
-	Topic           string   `json:"topic"`
 	File            string   `json:"file"`
 	Specs           []string `json:"specs"`
+	SpecCommits     []string `json:"spec_commits"`
 	CodeSearchRoots []string `json:"code_search_roots"`
 }
 
@@ -136,6 +139,7 @@ type ActiveSpec struct {
 	Domain          string       `json:"domain"`
 	Topic           string       `json:"topic"`
 	File            string       `json:"file"`
+	DomainPath      string       `json:"domain_path,omitempty"`
 	PlanningSources []string     `json:"planning_sources"`
 	DependsOn       []string     `json:"depends_on"`
 	Round           int          `json:"round"`
@@ -148,8 +152,8 @@ type CompletedSpec struct {
 	Name         string       `json:"name"`
 	Domain       string       `json:"domain"`
 	File         string       `json:"file"`
+	DomainPath   string       `json:"domain_path,omitempty"`
 	RoundsTaken  int          `json:"rounds_taken"`
-	CommitHash   string       `json:"commit_hash,omitempty"`
 	CommitHashes []string     `json:"commit_hashes,omitempty"`
 	Evals        []EvalRecord `json:"evals,omitempty"`
 }
@@ -160,12 +164,26 @@ type ReconcileState struct {
 	Evals []EvalRecord `json:"evals,omitempty"`
 }
 
+// DomainMeta holds metadata for a spec domain.
+type DomainMeta struct {
+	CodeSearchRoots []string `json:"code_search_roots"`
+}
+
+// CrossReferenceState tracks cross-reference progress.
+type CrossReferenceState struct {
+	Domain string       `json:"domain"`
+	Round  int          `json:"round"`
+	Evals  []EvalRecord `json:"evals,omitempty"`
+}
+
 // SpecifyingState holds specifying phase data.
 type SpecifyingState struct {
-	CurrentSpec *ActiveSpec     `json:"current_spec"`
-	Queue       []SpecQueueEntry `json:"queue"`
-	Completed   []CompletedSpec  `json:"completed"`
-	Reconcile   *ReconcileState  `json:"reconcile,omitempty"`
+	CurrentSpecs   []*ActiveSpec                  `json:"current_specs"`
+	Domains        map[string]DomainMeta          `json:"domains,omitempty"`
+	CrossReference map[string]*CrossReferenceState `json:"cross_reference,omitempty"`
+	Queue          []SpecQueueEntry                `json:"queue"`
+	Completed      []CompletedSpec                 `json:"completed"`
+	Reconcile      *ReconcileState                 `json:"reconcile,omitempty"`
 }
 
 // --- Planning phase state ---
@@ -178,6 +196,7 @@ type ActivePlan struct {
 	Topic           string   `json:"topic"`
 	File            string   `json:"file"`
 	Specs           []string `json:"specs"`
+	SpecCommits     []string `json:"spec_commits,omitempty"`
 	CodeSearchRoots []string `json:"code_search_roots"`
 }
 
@@ -242,10 +261,8 @@ type PhaseShiftInfo struct {
 type ForgeState struct {
 	Phase          PhaseName          `json:"phase"`
 	State          StateName          `json:"state"`
-	BatchSize      int                `json:"batch_size"`
-	MinRounds      int                `json:"min_rounds"`
-	MaxRounds      int                `json:"max_rounds"`
-	UserGuided     bool               `json:"user_guided"`
+	Config         Config             `json:"config"`
+	SessionID      string             `json:"session_id,omitempty"`
 	StartedAtPhase PhaseName          `json:"started_at_phase"`
 	PhaseShift     *PhaseShiftInfo    `json:"phase_shift,omitempty"`
 	Specifying     *SpecifyingState   `json:"specifying"`
