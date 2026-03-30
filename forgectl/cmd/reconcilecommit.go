@@ -52,10 +52,27 @@ func runReconcileCommit(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("saving state: %w", err)
 	}
 
+	// Activity logging.
+	logger := state.NewLogger(s.Config.Logs, s.StartedAtPhase, s.SessionID)
+	matchedSpecs := make([]map[string]interface{}, len(updated))
+	for i, ms := range updated {
+		matchedSpecs[i] = map[string]interface{}{"id": ms.ID, "name": ms.Name}
+	}
+	logger.Write(state.LogEntry{
+		TS:    state.LogNow(),
+		Cmd:   "reconcile-commit",
+		Phase: string(s.Phase),
+		State: string(s.State),
+		Detail: map[string]interface{}{
+			"hash":          reconcileHash,
+			"matched_specs": matchedSpecs,
+		},
+	})
+
 	out := cmd.OutOrStdout()
 	fmt.Fprintf(out, "Registered %s to %d specs:\n", reconcileHash, len(updated))
-	for _, name := range updated {
-		fmt.Fprintf(out, "  - %s\n", name)
+	for _, ms := range updated {
+		fmt.Fprintf(out, "  - %s\n", ms.Name)
 	}
 
 	return nil

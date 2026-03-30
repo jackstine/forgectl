@@ -55,6 +55,29 @@ func runAddCommit(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("saving state: %w", err)
 	}
 
+	// Activity logging.
+	specName := ""
+	if s.Specifying != nil {
+		for _, cs := range s.Specifying.Completed {
+			if cs.ID == addCommitID {
+				specName = cs.Name
+				break
+			}
+		}
+	}
+	logger := state.NewLogger(s.Config.Logs, s.StartedAtPhase, s.SessionID)
+	logger.Write(state.LogEntry{
+		TS:    state.LogNow(),
+		Cmd:   "add-commit",
+		Phase: string(s.Phase),
+		State: string(s.State),
+		Detail: map[string]interface{}{
+			"spec_id":   addCommitID,
+			"spec_name": specName,
+			"hash":      addCommitHash,
+		},
+	})
+
 	fmt.Fprintf(cmd.OutOrStdout(), "Added %s to spec %d.\n", addCommitHash, addCommitID)
 	return nil
 }

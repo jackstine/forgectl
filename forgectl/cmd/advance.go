@@ -72,6 +72,10 @@ func runAdvance(cmd *cobra.Command, args []string) error {
 
 	out := cmd.OutOrStdout()
 
+	// Snapshot state before transition for logging.
+	prevState := string(s.State)
+	prevPhase := string(s.Phase)
+
 	err = state.Advance(s, in, projectRoot)
 	if err != nil {
 		// Check if it's a validation error — still save state if VALIDATE was entered.
@@ -95,6 +99,18 @@ func runAdvance(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("saving state: %w", err)
 	}
 
+	// Activity logging.
+	detail := buildAdvanceDetail(in)
+	logger := state.NewLogger(s.Config.Logs, s.StartedAtPhase, s.SessionID)
+	logger.Write(state.LogEntry{
+		TS:        state.LogNow(),
+		Cmd:       "advance",
+		Phase:     prevPhase,
+		PrevState: prevState,
+		State:     string(s.State),
+		Detail:    detail,
+	})
+
 	// Archive session at terminal states.
 	if isTerminalState(s) {
 		domain := sessionDomain(s)
@@ -106,6 +122,18 @@ func runAdvance(cmd *cobra.Command, args []string) error {
 	state.PrintAdvanceOutput(out, s, projectRoot)
 
 	return nil
+}
+
+// buildAdvanceDetail builds the log detail map from advance flags.
+func buildAdvanceDetail(in state.AdvanceInput) map[string]interface{} {
+	detail := map[string]interface{}{}
+	if in.Verdict != "" {
+		detail["verdict"] = in.Verdict
+	}
+	if in.EvalReport != "" {
+		detail["eval_report"] = in.EvalReport
+	}
+	return detail
 }
 
 // isTerminalState returns true when the session has reached a terminal point

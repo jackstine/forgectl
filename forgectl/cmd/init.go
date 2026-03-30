@@ -158,9 +158,40 @@ func runInit(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("saving state: %w", err)
 	}
 
+	// Activity logging — prune first, then create file, then write init entry.
+	state.PruneLogs(cfg.Logs)
+	logger := state.NewLogger(cfg.Logs, phase, sessionID)
+	batchSize, minRounds, maxRounds := phaseRoundConfig(cfg, phase)
+	logger.Write(state.LogEntry{
+		TS:    state.LogNow(),
+		Cmd:   "init",
+		Phase: string(phase),
+		State: string(s.State),
+		Detail: map[string]interface{}{
+			"from":       initFrom,
+			"batch_size": batchSize,
+			"rounds":     fmt.Sprintf("%d-%d", minRounds, maxRounds),
+			"guided":     cfg.General.UserGuided,
+		},
+	})
+
 	state.PrintAdvanceOutput(out, s, projectRoot)
 
 	return nil
+}
+
+// phaseRoundConfig returns batch size and min/max rounds for the given phase.
+func phaseRoundConfig(cfg state.Config, phase state.PhaseName) (batchSize, minRounds, maxRounds int) {
+	switch phase {
+	case state.PhaseSpecifying:
+		return cfg.Specifying.Batch, cfg.Specifying.Eval.MinRounds, cfg.Specifying.Eval.MaxRounds
+	case state.PhasePlanning:
+		return cfg.Planning.Batch, cfg.Planning.Eval.MinRounds, cfg.Planning.Eval.MaxRounds
+	case state.PhaseImplementing:
+		return cfg.Implementing.Batch, cfg.Implementing.Eval.MinRounds, cfg.Implementing.Eval.MaxRounds
+	default:
+		return 0, 0, 0
+	}
 }
 
 func printValidationErrors(w interface{ Write([]byte) (int, error) }, errs []string) {
