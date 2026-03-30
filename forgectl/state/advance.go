@@ -11,7 +11,7 @@ import (
 func Advance(s *ForgeState, in AdvanceInput, dir string) error {
 	// Update guided setting if provided.
 	if in.Guided != nil {
-		s.UserGuided = *in.Guided
+		s.Config.General.UserGuided = *in.Guided
 	}
 
 	// Phase shift is handled before phase dispatch — it can occur
@@ -39,20 +39,22 @@ func advanceSpecifying(s *ForgeState, in AdvanceInput) error {
 
 	switch s.State {
 	case StateOrient:
-		// Pull next from queue into current_spec.
+		// Pull next from queue into current_specs.
 		if len(spec.Queue) == 0 {
 			return fmt.Errorf("queue is empty")
 		}
 		entry := spec.Queue[0]
 		spec.Queue = spec.Queue[1:]
-		spec.CurrentSpec = &ActiveSpec{
-			ID:              len(spec.Completed) + 1,
-			Name:            entry.Name,
-			Domain:          entry.Domain,
-			Topic:           entry.Topic,
-			File:            entry.File,
-			PlanningSources: entry.PlanningSources,
-			DependsOn:       entry.DependsOn,
+		spec.CurrentSpecs = []*ActiveSpec{
+			{
+				ID:              len(spec.Completed) + 1,
+				Name:            entry.Name,
+				Domain:          entry.Domain,
+				Topic:           entry.Topic,
+				File:            entry.File,
+				PlanningSources: entry.PlanningSources,
+				DependsOn:       entry.DependsOn,
+			},
 		}
 		s.State = StateSelect
 
@@ -60,13 +62,15 @@ func advanceSpecifying(s *ForgeState, in AdvanceInput) error {
 		s.State = StateDraft
 
 	case StateDraft:
+		cs := spec.CurrentSpecs[0]
 		if in.File != "" {
-			spec.CurrentSpec.File = in.File
+			cs.File = in.File
 		}
-		spec.CurrentSpec.Round = 1
+		cs.Round = 1
 		s.State = StateEvaluate
 
 	case StateEvaluate:
+		cs := spec.CurrentSpecs[0]
 		if in.Verdict == "" {
 			return fmt.Errorf("--verdict is required in EVALUATE state")
 		}
@@ -81,14 +85,17 @@ func advanceSpecifying(s *ForgeState, in AdvanceInput) error {
 		}
 
 		eval := EvalRecord{
-			Round:      spec.CurrentSpec.Round,
+			Round:      cs.Round,
 			Verdict:    in.Verdict,
 			EvalReport: in.EvalReport,
 		}
-		spec.CurrentSpec.Evals = append(spec.CurrentSpec.Evals, eval)
+		cs.Evals = append(cs.Evals, eval)
+
+		minRounds := s.Config.Specifying.Eval.MinRounds
+		maxRounds := s.Config.Specifying.Eval.MaxRounds
 
 		if in.Verdict == "PASS" {
-			if spec.CurrentSpec.Round >= s.MinRounds {
+			if cs.Round >= minRounds {
 				if in.Message == "" {
 					return fmt.Errorf("--message is required when --verdict is PASS")
 				}
@@ -97,7 +104,7 @@ func advanceSpecifying(s *ForgeState, in AdvanceInput) error {
 				s.State = StateRefine
 			}
 		} else {
-			if spec.CurrentSpec.Round >= s.MaxRounds {
+			if cs.Round >= maxRounds {
 				s.State = StateAccept
 			} else {
 				s.State = StateRefine
@@ -105,20 +112,21 @@ func advanceSpecifying(s *ForgeState, in AdvanceInput) error {
 		}
 
 	case StateRefine:
-		spec.CurrentSpec.Round++
+		spec.CurrentSpecs[0].Round++
 		s.State = StateEvaluate
 
 	case StateAccept:
+		cs := spec.CurrentSpecs[0]
 		completed := CompletedSpec{
-			ID:          spec.CurrentSpec.ID,
-			Name:        spec.CurrentSpec.Name,
-			Domain:      spec.CurrentSpec.Domain,
-			File:        spec.CurrentSpec.File,
-			RoundsTaken: spec.CurrentSpec.Round,
-			Evals:       spec.CurrentSpec.Evals,
+			ID:          cs.ID,
+			Name:        cs.Name,
+			Domain:      cs.Domain,
+			File:        cs.File,
+			RoundsTaken: cs.Round,
+			Evals:       cs.Evals,
 		}
 		spec.Completed = append(spec.Completed, completed)
-		spec.CurrentSpec = nil
+		spec.CurrentSpecs = nil
 
 		if len(spec.Queue) == 0 {
 			s.State = StateDone
@@ -222,14 +230,17 @@ func advancePlanning(s *ForgeState, in AdvanceInput, dir string) error {
 		}
 		s.Planning.Evals = append(s.Planning.Evals, eval)
 
+		minRounds := s.Config.Planning.Eval.MinRounds
+		maxRounds := s.Config.Planning.Eval.MaxRounds
+
 		if in.Verdict == "PASS" {
-			if s.Planning.Round >= s.MinRounds {
+			if s.Planning.Round >= minRounds {
 				s.State = StateAccept
 			} else {
 				s.State = StateRefine
 			}
 		} else {
-			if s.Planning.Round >= s.MaxRounds {
+			if s.Planning.Round >= maxRounds {
 				s.State = StateAccept
 			} else {
 				s.State = StateRefine
@@ -381,7 +392,7 @@ func advanceImplFromOrient(s *ForgeState, dir string) error {
 		}
 
 		// Check for unblocked items.
-		batch := selectBatch(plan, layer, s.BatchSize)
+		batch := selectBatch(plan, layer, s.Config.Implementing.Batch)
 		if len(batch) == 0 {
 			continue
 		}
@@ -473,8 +484,11 @@ func advanceImplFromEvaluate(s *ForgeState, in AdvanceInput, dir string) error {
 		return err
 	}
 
+	minRounds := s.Config.Implementing.Eval.MinRounds
+	maxRounds := s.Config.Implementing.Eval.MaxRounds
+
 	if in.Verdict == "PASS" {
-		if batch.EvalRound >= s.MinRounds {
+		if batch.EvalRound >= minRounds {
 			// Mark items passed.
 			for _, id := range batch.Items {
 				setItemPasses(plan, id, "passed")
@@ -489,7 +503,7 @@ func advanceImplFromEvaluate(s *ForgeState, in AdvanceInput, dir string) error {
 			s.State = StateImplement
 		}
 	} else {
-		if batch.EvalRound >= s.MaxRounds {
+		if batch.EvalRound >= maxRounds {
 			// Force accept — mark items failed.
 			for _, id := range batch.Items {
 				setItemPasses(plan, id, "failed")
@@ -543,9 +557,9 @@ func advancePhaseShift(s *ForgeState, in AdvanceInput, dir string) error {
 				ID:              1,
 				Name:            entry.Name,
 				Domain:          entry.Domain,
-				Topic:           entry.Topic,
 				File:            entry.File,
 				Specs:           entry.Specs,
+				SpecCommits:     entry.SpecCommits,
 				CodeSearchRoots: entry.CodeSearchRoots,
 			}
 		}

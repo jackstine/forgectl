@@ -81,13 +81,20 @@ func runInit(cmd *cobra.Command, args []string) error {
 	phase := state.PhaseName(initPhase)
 	out := cmd.OutOrStdout()
 
+	cfg := state.DefaultConfig()
+	cfg.Implementing.Batch = initBatchSize
+	cfg.Implementing.Eval.MinRounds = initMinRounds
+	cfg.Implementing.Eval.MaxRounds = initMaxRounds
+	cfg.Specifying.Eval.MinRounds = initMinRounds
+	cfg.Specifying.Eval.MaxRounds = initMaxRounds
+	cfg.Planning.Eval.MinRounds = initMinRounds
+	cfg.Planning.Eval.MaxRounds = initMaxRounds
+	cfg.General.UserGuided = userGuided
+
 	s := &state.ForgeState{
 		Phase:          phase,
 		State:          state.StateOrient,
-		BatchSize:      initBatchSize,
-		MinRounds:      initMinRounds,
-		MaxRounds:      initMaxRounds,
-		UserGuided:     userGuided,
+		Config:         cfg,
 		StartedAtPhase: phase,
 	}
 
@@ -126,9 +133,9 @@ func runInit(cmd *cobra.Command, args []string) error {
 				ID:              1,
 				Name:            entry.Name,
 				Domain:          entry.Domain,
-				Topic:           entry.Topic,
 				File:            entry.File,
 				Specs:           entry.Specs,
+				SpecCommits:     entry.SpecCommits,
 				CodeSearchRoots: entry.CodeSearchRoots,
 			}
 		}
