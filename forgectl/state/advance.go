@@ -39,34 +39,42 @@ func advanceSpecifying(s *ForgeState, in AdvanceInput) error {
 
 	switch s.State {
 	case StateOrient:
-		// Pull next from queue into current_specs.
+		// Select batch: take up to BatchSize contiguous specs from the first domain.
 		if len(spec.Queue) == 0 {
 			return fmt.Errorf("queue is empty")
 		}
-		entry := spec.Queue[0]
-		spec.Queue = spec.Queue[1:]
-		spec.CurrentSpecs = []*ActiveSpec{
-			{
-				ID:              len(spec.Completed) + 1,
+		firstDomain := spec.Queue[0].Domain
+		batchSize := s.Config.Specifying.Batch
+		var taken int
+		for taken < len(spec.Queue) && taken < batchSize && spec.Queue[taken].Domain == firstDomain {
+			taken++
+		}
+		spec.BatchNumber++
+		spec.CurrentDomain = firstDomain
+
+		batch := make([]*ActiveSpec, taken)
+		for i, entry := range spec.Queue[:taken] {
+			batch[i] = &ActiveSpec{
+				ID:              len(spec.Completed) + i + 1,
 				Name:            entry.Name,
 				Domain:          entry.Domain,
 				Topic:           entry.Topic,
 				File:            entry.File,
 				PlanningSources: entry.PlanningSources,
 				DependsOn:       entry.DependsOn,
-			},
+			}
 		}
+		spec.Queue = spec.Queue[taken:]
+		spec.CurrentSpecs = batch
 		s.State = StateSelect
 
 	case StateSelect:
 		s.State = StateDraft
 
 	case StateDraft:
-		cs := spec.CurrentSpecs[0]
-		if in.File != "" {
-			cs.File = in.File
+		for _, cs := range spec.CurrentSpecs {
+			cs.Round = 1
 		}
-		cs.Round = 1
 		s.State = StateEvaluate
 
 	case StateEvaluate:
@@ -89,15 +97,17 @@ func advanceSpecifying(s *ForgeState, in AdvanceInput) error {
 			Verdict:    in.Verdict,
 			EvalReport: in.EvalReport,
 		}
-		cs.Evals = append(cs.Evals, eval)
+		for _, bcs := range spec.CurrentSpecs {
+			bcs.Evals = append(bcs.Evals, eval)
+		}
 
 		minRounds := s.Config.Specifying.Eval.MinRounds
 		maxRounds := s.Config.Specifying.Eval.MaxRounds
 
 		if in.Verdict == "PASS" {
 			if cs.Round >= minRounds {
-				if in.Message == "" {
-					return fmt.Errorf("--message is required when --verdict is PASS")
+				if s.Config.General.EnableCommits && in.Message == "" {
+					return fmt.Errorf("--message is required when --verdict is PASS and enable_commits is true")
 				}
 				s.State = StateAccept
 			} else {
@@ -112,26 +122,91 @@ func advanceSpecifying(s *ForgeState, in AdvanceInput) error {
 		}
 
 	case StateRefine:
-		spec.CurrentSpecs[0].Round++
+		for _, cs := range spec.CurrentSpecs {
+			cs.Round++
+		}
 		s.State = StateEvaluate
 
 	case StateAccept:
-		cs := spec.CurrentSpecs[0]
-		completed := CompletedSpec{
-			ID:          cs.ID,
-			Name:        cs.Name,
-			Domain:      cs.Domain,
-			File:        cs.File,
-			RoundsTaken: cs.Round,
-			Evals:       cs.Evals,
+		currentDomain := spec.CurrentDomain
+		for _, cs := range spec.CurrentSpecs {
+			completed := CompletedSpec{
+				ID:          cs.ID,
+				Name:        cs.Name,
+				Domain:      cs.Domain,
+				File:        cs.File,
+				BatchNumber: spec.BatchNumber,
+				RoundsTaken: cs.Round,
+				Evals:       cs.Evals,
+			}
+			spec.Completed = append(spec.Completed, completed)
 		}
-		spec.Completed = append(spec.Completed, completed)
 		spec.CurrentSpecs = nil
 
-		if len(spec.Queue) == 0 {
-			s.State = StateDone
-		} else {
+		// Check if the same domain has more queued specs.
+		hasSameDomain := false
+		for _, q := range spec.Queue {
+			if q.Domain == currentDomain {
+				hasSameDomain = true
+				break
+			}
+		}
+
+		if hasSameDomain {
 			s.State = StateOrient
+		} else {
+			// Domain exhausted — start cross-reference.
+			if spec.CrossReference == nil {
+				spec.CrossReference = make(map[string]*CrossReferenceState)
+			}
+			spec.CrossReference[currentDomain] = &CrossReferenceState{Domain: currentDomain}
+			s.State = StateCrossReference
+		}
+
+	case StateCrossReference:
+		currentDomain := spec.CurrentDomain
+		spec.CrossReference[currentDomain].Round++
+		s.State = StateCrossReferenceEval
+
+	case StateCrossReferenceEval:
+		if in.Verdict == "" {
+			return fmt.Errorf("--verdict is required in CROSS_REFERENCE_EVAL state")
+		}
+		if in.EvalReport == "" {
+			return fmt.Errorf("--eval-report is required in CROSS_REFERENCE_EVAL state")
+		}
+		if in.Verdict != "PASS" && in.Verdict != "FAIL" {
+			return fmt.Errorf("--verdict must be PASS or FAIL")
+		}
+		if err := checkEvalReportExists(in.EvalReport); err != nil {
+			return err
+		}
+
+		currentDomain := spec.CurrentDomain
+		cr := spec.CrossReference[currentDomain]
+		eval := EvalRecord{
+			Round:      cr.Round,
+			Verdict:    in.Verdict,
+			EvalReport: in.EvalReport,
+		}
+		cr.Evals = append(cr.Evals, eval)
+
+		minRounds := s.Config.Specifying.CrossReference.MinRounds
+		maxRounds := s.Config.Specifying.CrossReference.MaxRounds
+
+		forced := in.Verdict == "FAIL" && cr.Round >= maxRounds
+		passed := in.Verdict == "PASS" && cr.Round >= minRounds
+		if passed || forced {
+			s.State = StateCrossReferenceReview
+		} else {
+			s.State = StateCrossReference
+		}
+
+	case StateCrossReferenceReview:
+		if len(spec.Queue) > 0 {
+			s.State = StateOrient
+		} else {
+			s.State = StateDone
 		}
 
 	case StateDone:

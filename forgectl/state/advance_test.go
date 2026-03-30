@@ -197,7 +197,8 @@ func TestSpecifyingPassAtMinRoundsGoesToAccept(t *testing.T) {
 	}
 }
 
-func TestSpecifyingPassRequiresMessage(t *testing.T) {
+func TestSpecifyingPassMessageNotRequiredWithoutEnableCommits(t *testing.T) {
+	// enable_commits defaults to false — message should not be required.
 	s := newSpecifyingState(1)
 	advanceToEvaluate(t, s)
 
@@ -206,20 +207,262 @@ func TestSpecifyingPassRequiresMessage(t *testing.T) {
 	os.WriteFile(evalFile, []byte("eval"), 0644)
 
 	err := Advance(s, AdvanceInput{Verdict: "PASS", EvalReport: evalFile}, "")
+	if err != nil {
+		t.Errorf("expected no error without enable_commits, got: %v", err)
+	}
+}
+
+func TestSpecifyingPassRequiresMessageWhenEnableCommits(t *testing.T) {
+	s := newSpecifyingState(1)
+	s.Config.General.EnableCommits = true
+	advanceToEvaluate(t, s)
+
+	dir := t.TempDir()
+	evalFile := filepath.Join(dir, "eval.md")
+	os.WriteFile(evalFile, []byte("eval"), 0644)
+
+	err := Advance(s, AdvanceInput{Verdict: "PASS", EvalReport: evalFile}, "")
 	if err == nil {
-		t.Error("expected error for missing --message with PASS")
+		t.Error("expected error for missing --message with PASS when enable_commits is true")
+	}
+}
+
+func TestSpecifyingAcceptGoesToCrossReference(t *testing.T) {
+	s := newSpecifyingState(1)
+	advanceToAccept(t, s)
+
+	// ACCEPT → CROSS_REFERENCE (domain done, queue empty)
+	Advance(s, AdvanceInput{}, "")
+	if s.State != StateCrossReference {
+		t.Fatalf("expected CROSS_REFERENCE, got %s", s.State)
+	}
+}
+
+// --- Batch Processing Tests ---
+
+func newSpecifyingStateWithSpecs(specs []SpecQueueEntry) *ForgeState {
+	return &ForgeState{
+		Phase:      PhaseSpecifying,
+		State:      StateOrient,
+		Config:     makeTestConfig(2, 1, 3),
+		Specifying: NewSpecifyingState(specs),
+	}
+}
+
+func TestBatchSelectionSameDomain(t *testing.T) {
+	// With batch_size=2 and 3 same-domain specs, ORIENT selects first 2.
+	specs := []SpecQueueEntry{
+		{Name: "A", Domain: "test", Topic: "t", File: "a.md"},
+		{Name: "B", Domain: "test", Topic: "t", File: "b.md"},
+		{Name: "C", Domain: "test", Topic: "t", File: "c.md"},
+	}
+	s := newSpecifyingStateWithSpecs(specs)
+	s.Config.Specifying.Batch = 2
+
+	if err := Advance(s, AdvanceInput{}, ""); err != nil {
+		t.Fatal(err)
+	}
+	if s.State != StateSelect {
+		t.Fatalf("expected SELECT, got %s", s.State)
+	}
+	if len(s.Specifying.CurrentSpecs) != 2 {
+		t.Errorf("expected 2 specs in batch, got %d", len(s.Specifying.CurrentSpecs))
+	}
+	if len(s.Specifying.Queue) != 1 {
+		t.Errorf("expected 1 spec remaining in queue, got %d", len(s.Specifying.Queue))
+	}
+	if s.Specifying.BatchNumber != 1 {
+		t.Errorf("expected BatchNumber=1, got %d", s.Specifying.BatchNumber)
+	}
+}
+
+func TestBatchSelectionStopsAtDomainBoundary(t *testing.T) {
+	// Batch stops at domain boundary — specs from "other" stay in queue.
+	specs := []SpecQueueEntry{
+		{Name: "A", Domain: "test", Topic: "t", File: "a.md"},
+		{Name: "B", Domain: "other", Topic: "t", File: "b.md"},
+		{Name: "C", Domain: "test", Topic: "t", File: "c.md"},
+	}
+	s := newSpecifyingStateWithSpecs(specs)
+	s.Config.Specifying.Batch = 3
+
+	if err := Advance(s, AdvanceInput{}, ""); err != nil {
+		t.Fatal(err)
+	}
+	if len(s.Specifying.CurrentSpecs) != 1 {
+		t.Errorf("expected 1 spec in batch (contiguous boundary), got %d", len(s.Specifying.CurrentSpecs))
+	}
+	if s.Specifying.CurrentSpecs[0].Name != "A" {
+		t.Errorf("expected spec A in batch, got %s", s.Specifying.CurrentSpecs[0].Name)
+	}
+	if len(s.Specifying.Queue) != 2 {
+		t.Errorf("expected 2 specs in queue, got %d", len(s.Specifying.Queue))
+	}
+}
+
+func TestBatchEvalRecordAppliedToAllSpecs(t *testing.T) {
+	// EVALUATE applies eval record to ALL specs in batch.
+	specs := []SpecQueueEntry{
+		{Name: "A", Domain: "test", Topic: "t", File: "a.md"},
+		{Name: "B", Domain: "test", Topic: "t", File: "b.md"},
+	}
+	s := newSpecifyingStateWithSpecs(specs)
+	s.Config.Specifying.Batch = 2
+
+	advanceToEvaluate(t, s)
+
+	dir := t.TempDir()
+	evalFile := filepath.Join(dir, "eval.md")
+	os.WriteFile(evalFile, []byte("eval"), 0644)
+
+	if err := Advance(s, AdvanceInput{Verdict: "FAIL", EvalReport: evalFile}, ""); err != nil {
+		t.Fatal(err)
+	}
+
+	for i, cs := range s.Specifying.CurrentSpecs {
+		if len(cs.Evals) != 1 {
+			t.Errorf("spec[%d] expected 1 eval record, got %d", i, len(cs.Evals))
+		}
+	}
+}
+
+func TestBatchAcceptMovesAllSpecsToCompleted(t *testing.T) {
+	// ACCEPT moves all current_specs to completed.
+	specs := []SpecQueueEntry{
+		{Name: "A", Domain: "test", Topic: "t", File: "a.md"},
+		{Name: "B", Domain: "test", Topic: "t", File: "b.md"},
+	}
+	s := newSpecifyingStateWithSpecs(specs)
+	s.Config.Specifying.Batch = 2
+
+	advanceToAccept(t, s)
+	if len(s.Specifying.CurrentSpecs) != 2 {
+		t.Fatalf("expected 2 specs in batch before accept advance")
+	}
+
+	// ACCEPT → CROSS_REFERENCE
+	if err := Advance(s, AdvanceInput{}, ""); err != nil {
+		t.Fatal(err)
+	}
+	if len(s.Specifying.Completed) != 2 {
+		t.Errorf("expected 2 completed specs, got %d", len(s.Specifying.Completed))
+	}
+	if s.Specifying.CurrentSpecs != nil {
+		t.Errorf("expected current_specs to be nil after accept")
+	}
+	for i, c := range s.Specifying.Completed {
+		if c.BatchNumber != 1 {
+			t.Errorf("completed[%d] expected BatchNumber=1, got %d", i, c.BatchNumber)
+		}
+	}
+}
+
+func TestBatchAcceptSameDomainRemainingGoesToOrient(t *testing.T) {
+	// When same domain has more queued specs, ACCEPT transitions to ORIENT.
+	specs := []SpecQueueEntry{
+		{Name: "A", Domain: "test", Topic: "t", File: "a.md"},
+		{Name: "B", Domain: "test", Topic: "t", File: "b.md"},
+	}
+	s := newSpecifyingStateWithSpecs(specs)
+	s.Config.Specifying.Batch = 1 // batch of 1, so B stays queued
+
+	advanceToAccept(t, s)
+	// ACCEPT → ORIENT (same domain still in queue)
+	if err := Advance(s, AdvanceInput{}, ""); err != nil {
+		t.Fatal(err)
+	}
+	if s.State != StateOrient {
+		t.Errorf("expected ORIENT (same domain in queue), got %s", s.State)
+	}
+}
+
+func TestCrossReferenceFlow(t *testing.T) {
+	// Full CROSS_REFERENCE → CROSS_REFERENCE_EVAL → CROSS_REFERENCE_REVIEW → DONE.
+	s := newSpecifyingState(1)
+	advanceToAccept(t, s)
+
+	dir := t.TempDir()
+	crEvalFile := filepath.Join(dir, "cr-eval.md")
+	os.WriteFile(crEvalFile, []byte("cross-ref eval"), 0644)
+
+	// ACCEPT → CROSS_REFERENCE
+	if err := Advance(s, AdvanceInput{}, ""); err != nil {
+		t.Fatal(err)
+	}
+	if s.State != StateCrossReference {
+		t.Fatalf("expected CROSS_REFERENCE, got %s", s.State)
+	}
+
+	// CROSS_REFERENCE → CROSS_REFERENCE_EVAL
+	if err := Advance(s, AdvanceInput{}, ""); err != nil {
+		t.Fatal(err)
+	}
+	if s.State != StateCrossReferenceEval {
+		t.Fatalf("expected CROSS_REFERENCE_EVAL, got %s", s.State)
+	}
+
+	// CROSS_REFERENCE_EVAL PASS → CROSS_REFERENCE_REVIEW
+	if err := Advance(s, AdvanceInput{Verdict: "PASS", EvalReport: crEvalFile}, ""); err != nil {
+		t.Fatal(err)
+	}
+	if s.State != StateCrossReferenceReview {
+		t.Fatalf("expected CROSS_REFERENCE_REVIEW, got %s", s.State)
+	}
+
+	// CROSS_REFERENCE_REVIEW → DONE (queue empty)
+	if err := Advance(s, AdvanceInput{}, ""); err != nil {
+		t.Fatal(err)
+	}
+	if s.State != StateDone {
+		t.Errorf("expected DONE, got %s", s.State)
+	}
+}
+
+func TestCrossReferenceEvalRequiresVerdictAndReport(t *testing.T) {
+	// CROSS_REFERENCE_EVAL must reject advance without verdict or eval-report.
+	s := newSpecifyingState(1)
+	advanceToAccept(t, s)
+	Advance(s, AdvanceInput{}, "")  // ACCEPT → CROSS_REFERENCE
+	Advance(s, AdvanceInput{}, "")  // CROSS_REFERENCE → CROSS_REFERENCE_EVAL
+
+	// Missing both.
+	err := Advance(s, AdvanceInput{}, "")
+	if err == nil {
+		t.Error("expected error for missing --verdict in CROSS_REFERENCE_EVAL")
+	}
+
+	// Verdict present but missing eval-report.
+	err = Advance(s, AdvanceInput{Verdict: "PASS"}, "")
+	if err == nil {
+		t.Error("expected error for missing --eval-report in CROSS_REFERENCE_EVAL")
+	}
+}
+
+func TestCrossReferenceFailBelowMaxGoesBackToRef(t *testing.T) {
+	// CROSS_REFERENCE_EVAL FAIL below max_rounds returns to CROSS_REFERENCE.
+	s := newSpecifyingState(1)
+	s.Config.Specifying.CrossReference.MaxRounds = 2
+	advanceToAccept(t, s)
+
+	dir := t.TempDir()
+	crEvalFile := filepath.Join(dir, "cr-eval.md")
+	os.WriteFile(crEvalFile, []byte("cross-ref eval"), 0644)
+
+	Advance(s, AdvanceInput{}, "") // ACCEPT → CROSS_REFERENCE
+	Advance(s, AdvanceInput{}, "") // CROSS_REFERENCE → CROSS_REFERENCE_EVAL (round 1)
+
+	// FAIL at round 1 (below max=2) → back to CROSS_REFERENCE
+	if err := Advance(s, AdvanceInput{Verdict: "FAIL", EvalReport: crEvalFile}, ""); err != nil {
+		t.Fatal(err)
+	}
+	if s.State != StateCrossReference {
+		t.Errorf("expected CROSS_REFERENCE after FAIL below max, got %s", s.State)
 	}
 }
 
 func TestSpecifyingDoneToReconcile(t *testing.T) {
 	s := newSpecifyingState(1)
-	advanceToAccept(t, s)
-
-	// ACCEPT → DONE (queue empty)
-	Advance(s, AdvanceInput{}, "")
-	if s.State != StateDone {
-		t.Fatalf("expected DONE, got %s", s.State)
-	}
+	advanceToDone(t, s)
 
 	// DONE → RECONCILE
 	Advance(s, AdvanceInput{}, "")
@@ -799,7 +1042,15 @@ func advanceToAccept(t *testing.T, s *ForgeState) {
 func advanceToDone(t *testing.T, s *ForgeState) {
 	t.Helper()
 	advanceToAccept(t, s)
-	Advance(s, AdvanceInput{}, "") // ACCEPT → DONE
+
+	dir := t.TempDir()
+	crEvalFile := filepath.Join(dir, "cr-eval.md")
+	os.WriteFile(crEvalFile, []byte("cross-ref eval"), 0644)
+
+	Advance(s, AdvanceInput{}, "")                                             // ACCEPT → CROSS_REFERENCE
+	Advance(s, AdvanceInput{}, "")                                             // CROSS_REFERENCE → CROSS_REFERENCE_EVAL
+	Advance(s, AdvanceInput{Verdict: "PASS", EvalReport: crEvalFile}, "")      // CROSS_REFERENCE_EVAL → CROSS_REFERENCE_REVIEW
+	Advance(s, AdvanceInput{}, "")                                             // CROSS_REFERENCE_REVIEW → DONE (queue empty)
 }
 
 func advanceToComplete(t *testing.T, s *ForgeState) {

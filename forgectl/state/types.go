@@ -153,6 +153,7 @@ type CompletedSpec struct {
 	Domain       string       `json:"domain"`
 	File         string       `json:"file"`
 	DomainPath   string       `json:"domain_path,omitempty"`
+	BatchNumber  int          `json:"batch_number,omitempty"`
 	RoundsTaken  int          `json:"rounds_taken"`
 	CommitHashes []string     `json:"commit_hashes,omitempty"`
 	Evals        []EvalRecord `json:"evals,omitempty"`
@@ -178,8 +179,10 @@ type CrossReferenceState struct {
 
 // SpecifyingState holds specifying phase data.
 type SpecifyingState struct {
-	CurrentSpecs   []*ActiveSpec                  `json:"current_specs"`
-	Domains        map[string]DomainMeta          `json:"domains,omitempty"`
+	CurrentSpecs   []*ActiveSpec                   `json:"current_specs"`
+	CurrentDomain  string                          `json:"current_domain,omitempty"`
+	BatchNumber    int                             `json:"batch_number,omitempty"`
+	Domains        map[string]DomainMeta           `json:"domains,omitempty"`
 	CrossReference map[string]*CrossReferenceState `json:"cross_reference,omitempty"`
 	Queue          []SpecQueueEntry                `json:"queue"`
 	Completed      []CompletedSpec                 `json:"completed"`
