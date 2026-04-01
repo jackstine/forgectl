@@ -144,6 +144,15 @@
                    │                               │
                    ▼                               ▼
   ┌─────────────────────────────────────────────────────────────────────────┐
+  │  SELF_REVIEW  (only when planning.self_review: true)                    │
+  │                                                                         │
+  │  Review plan against specs and study notes.                             │
+  │  Revise plan.json and notes as needed.                                  │
+  │  Action: forgectl advance (re-validates on advance)                     │
+  └────────────────────────────────┬────────────────────────────────────────┘
+                                   │
+                                   ▼
+  ┌─────────────────────────────────────────────────────────────────────────┐
   │  EVALUATE                                                               │
   │                                                                         │
   │  Command: forgectl eval  (outputs full context for sub-agent)           │
@@ -185,8 +194,9 @@
   │  forgectl advance     │                          │
   └───────────┬───────────┘                          │
               │                                      │
-              └──► EVALUATE (or VALIDATE             │
-                   if plan invalid)                   │
+              └──► SELF_REVIEW* or EVALUATE          │
+                   (or VALIDATE if plan invalid)      │
+                   * when self_review: true           │
                                                      ▼
                                                PHASE_SHIFT
                                           (planning → implementing)

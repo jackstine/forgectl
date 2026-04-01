@@ -33,15 +33,15 @@ Only these 4 top-level fields are allowed.
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
 | `id` | string | **yes** | Short identifier (e.g., `"spec-logging"`, `"notes-config"`). |
-| `path` | string | **yes** | Path relative to plan.json directory. Must exist on disk. **No `#anchor` fragments** — forgectl runs `os.Stat()` on the raw string. |
+| `path` | string | **yes** | Path relative to project root. Must exist on disk. **No `#anchor` fragments** — forgectl runs `os.Stat()` on the raw string. |
 
 **Important:** Refs must be objects `{"id": "...", "path": "..."}`, not strings.
 
 ### Path Resolution
 
-All paths in `refs[].path` and `items[].ref` are resolved relative to `filepath.Dir(plan.json)`.
+All paths in `refs[].path`, `items[].ref`, and `items[].files` are resolved relative to the project root (the directory containing `.forgectl/`).
 
-Example: if plan.json is at `api/.workspace/implementation_plan/plan.json`, then `../../specs/foo.md` resolves to `api/specs/foo.md`.
+Example: if plan.json is at `api/.forge_workspace/implementation_plan/plan.json`, then `api/specs/foo.md` resolves to `<project_root>/api/specs/foo.md`.
 
 ---
 
@@ -70,9 +70,9 @@ Example: if plan.json is at `api/.workspace/implementation_plan/plan.json`, then
 | `description` | string | **yes** | One or two sentences explaining what and why. |
 | `depends_on` | string[] | **yes** | Item IDs that must complete first. Use `[]` for no deps. **Never null.** |
 | `steps` | string[] | no | Ordered implementation instructions. Omitted if empty. |
-| `files` | string[] | no | File paths to create/modify, relative to domain root. Omitted if empty. |
+| `files` | string[] | no | File paths to create/modify, relative to project root. Omitted if empty. |
 | `spec` | string | no | Spec filename reference. Single string only. No `#anchors`. |
-| `ref` | string | no | Notes file path relative to plan.json directory. Must exist on disk. No `#anchors`. |
+| `ref` | string | no | Notes file path relative to project root. Must exist on disk. No `#anchors`. |
 | `tests` | Test[] | **yes** | Acceptance criteria. Use `[]` for items with no tests. **Never null.** |
 
 ### Fields Added by Phase Transition
@@ -111,7 +111,7 @@ Forgectl validates plan.json at two points: during DRAFT advance and during impl
 
 1. Only `context`, `refs`, `layers`, `items` allowed at top level.
 2. `context.domain` and `context.module` must be non-empty strings.
-3. All `refs[].path` and `items[].ref` paths must exist on disk. No `#anchors`.
+3. All `refs[].path`, `items[].ref`, and `items[].files` paths are relative to project root and must exist on disk (for refs/ref) or be valid paths (for files). No `#anchors`.
 4. Item IDs must be unique.
 5. Every item must appear in exactly one layer.
 6. Items can only depend on same-layer or earlier-layer items.
@@ -131,8 +131,8 @@ Forgectl validates plan.json at two points: during DRAFT advance and during impl
     "module": "spectacular/launcher"
   },
   "refs": [
-    {"id": "spec-config", "path": "../../specs/service-configuration.md"},
-    {"id": "notes-config", "path": "notes/config.md"}
+    {"id": "spec-config", "path": "launcher/specs/service-configuration.md"},
+    {"id": "notes-config", "path": "launcher/.forge_workspace/implementation_plan/notes/config.md"}
   ],
   "layers": [
     {"id": "L0", "name": "Foundation", "items": ["config.types", "config.load"]},
@@ -144,10 +144,10 @@ Forgectl validates plan.json at two points: during DRAFT advance and during impl
       "name": "Service config type definitions",
       "description": "Go structs for validated service endpoint configuration.",
       "depends_on": [],
-      "files": ["internal/config/types.go"],
+      "files": ["launcher/internal/config/types.go"],
       "steps": ["Define ServiceEndpoint struct", "Define ServicesConfig struct"],
       "spec": "service-configuration.md",
-      "ref": "notes/config.md",
+      "ref": "launcher/.forge_workspace/implementation_plan/notes/config.md",
       "tests": [
         {"category": "functional", "description": "Three named fields, not a map"}
       ]
@@ -157,10 +157,10 @@ Forgectl validates plan.json at two points: during DRAFT advance and during impl
       "name": "Load YAML, apply defaults, validate",
       "description": "Parse config file, apply default values, reject invalid config.",
       "depends_on": ["config.types"],
-      "files": ["internal/config/load.go", "internal/config/load_test.go"],
+      "files": ["launcher/internal/config/load.go", "launcher/internal/config/load_test.go"],
       "steps": ["Implement LoadConfig()", "Add default port logic", "Add validation"],
       "spec": "service-configuration.md",
-      "ref": "notes/config.md",
+      "ref": "launcher/.forge_workspace/implementation_plan/notes/config.md",
       "tests": [
         {"category": "functional", "description": "Default ports applied when services are empty"},
         {"category": "rejection", "description": "Missing services section rejected"},
@@ -172,9 +172,9 @@ Forgectl validates plan.json at two points: during DRAFT advance and during impl
       "name": "Spawn detached process",
       "description": "Start a system process in a new process group.",
       "depends_on": ["config.load"],
-      "files": ["internal/daemon/spawn.go"],
+      "files": ["launcher/internal/daemon/spawn.go"],
       "spec": "launching-system-processes.md",
-      "ref": "notes/daemon.md",
+      "ref": "launcher/.forge_workspace/implementation_plan/notes/daemon.md",
       "tests": [
         {"category": "functional", "description": "Process starts in new process group"}
       ]
@@ -184,9 +184,9 @@ Forgectl validates plan.json at two points: during DRAFT advance and during impl
       "name": "Health check spawned process",
       "description": "Poll process health endpoint until ready or timeout.",
       "depends_on": ["daemon.spawn"],
-      "files": ["internal/daemon/health.go"],
+      "files": ["launcher/internal/daemon/health.go"],
       "spec": "launching-system-processes.md",
-      "ref": "notes/daemon.md",
+      "ref": "launcher/.forge_workspace/implementation_plan/notes/daemon.md",
       "tests": [
         {"category": "functional", "description": "Returns healthy after endpoint responds"},
         {"category": "edge_case", "description": "Times out after configured duration"}

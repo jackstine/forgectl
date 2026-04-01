@@ -128,7 +128,7 @@
   │  .forgectl/state/forgectl-state.json                                 │
   │                                                                      │
   │  {                                                                   │
-  │    "phase": "specifying | planning | implementing",                  │
+  │    "phase": "specifying | generate_planning_queue | planning | ...",  │
   │    "state": "<current state>",                                       │
   │    "started_at_phase": "specifying | planning | implementing",       │
   │    "config": {                                                       │

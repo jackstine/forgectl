@@ -42,7 +42,6 @@
 
   Cross-cutting:
   - phase-transitions — hard-stop checkpoints between phases
-  - commit-tracking — git hash registration against completed specs
   - version-command — standalone --version output
 
   I'm ready to review and make changes. What would you like to focus on — a
@@ -342,9 +341,9 @@ reliant and dependent on the `specs` skill please
           he scaffold tracks round count, verdict, and eval report path |
       30  | spec-reconciliation | Receives the completed specs list when 
           the queue is exhausted (DONE state) |
-      31  | commit-tracking | Completed specs receive commit hashes (via 
-          `commit_hashes` field) through add-commit and reconcile-commit 
-          |
+      31  | spec-reconciliation | Completed specs receive commit hashes (via
+          `commit_hashes` field) through auto-commit at COMPLETE when
+          `enable_commits: true` |
 
 ⏺ Done. Here's a summary of all changes to the spec:
 
@@ -1047,15 +1046,13 @@ during the ORIENT states... (TODO need to confirm)
   - init — session created
   - advance — every state transition, verdicts, round increments, forced
   acceptances, batch/item selections
-  - add-commit — hash registered to spec
-  - reconcile-commit — hash matched to specs
 
   Read-only commands (skip):
   - status, eval, --version, validate
 
-  So your instinct was right — advance is the main one, plus init, add-commit,
-  and reconcile-commit. eval is read-only (it assembles context for sub-agents
-  but doesn't change state), so it doesn't need logging.
+  So your instinct was right — advance is the main one, plus init. eval is
+  read-only (it assembles context for sub-agents but doesn't change state),
+  so it doesn't need logging.
 
   For the JSONL format, here's what I'm thinking each entry looks like:
 
@@ -1075,9 +1072,6 @@ during the ORIENT states... (TODO need to confirm)
   {"ts":"2026-03-29T15:30:00Z","cmd":"advance","phase":"specifying","prev_state"
   :"EVALUATE","state":"ACCEPT","detail":{"round":2,"verdict":"PASS","forced":fal
   se}}
-  {"ts":"2026-03-29T16:00:00Z","cmd":"add-commit","phase":"specifying","state":"
-  DONE","detail":{"spec_id":1,"spec_name":"Repository
-  Loading","hash":"7cede10"}}
 
   Open questions for you:
 
@@ -1241,7 +1235,7 @@ but I'll make a note in my meeting tomorrow about this.
   2. activity-logging.md — new spec covering:
     - ~/.forgectl/logs/ directory
     - JSONL format, one file per session named <domain>-<phase>-<uuid>.jsonl
-    - Log entries on init, advance, add-commit, reconcile-commit
+    - Log entries on init, advance
     - Each entry: ts, cmd, phase, prev_state, state, detail
     - [logs] config: retention_days (default 90), max_files (default 50),
   enabled (default true)
@@ -1325,8 +1319,8 @@ list for the specs that show the spec diff.
   On commit hashes in plan-queue.json:
 
   This makes sense — if the specifying phase tracked commit hashes against
-  completed specs (via add-commit / reconcile-commit), those hashes tell the
-  planning phase exactly what changed. The planning STUDY_SPECS step could then
+  completed specs, those hashes tell the planning phase exactly what changed.
+  The planning STUDY_SPECS step could then
   look at git diff <hash> to see the spec content as it was written, rather than
    just reading the current file.
 
@@ -2519,9 +2513,9 @@ them?
 ⏺ Update(forgectl/specs/spec-lifecycle.md)  ⎿  Added 1 line
       30  | spec-reconciliation | Receives the completed specs list when 
           the queue is exhausted (DONE state) |
-      31  | commit-tracking | Completed specs receive commit hashes (via 
-          `commit_hashes` field) through add-commit and reconcile-commit 
-          |
+      31  | spec-reconciliation | Completed specs receive commit hashes (via
+          `commit_hashes` field) through auto-commit at COMPLETE when
+          `enable_commits: true` |
       32  | Eval output directory | The specifying eval sub-agent writes 
           output to `<domain>/specs/.eval/`; the scaffold does not read t
           hese files but the convention is documented |
@@ -3184,9 +3178,8 @@ do not update skills at all please.  after the sub agents have finished, review
        8 Forgectl writes structured log entries to `~/.forgectl/logs/` in
           JSONL format. Each session gets its own log file, named with th
          e domain, phase, and session UUID. Logging captures state-mutati
-         ng commands — `init`, `advance`, `add-commit`, and `reconcile-co
-         mmit` — so the user can reconstruct what happened during a sessi
-         on.
+         ng commands — `init`, `advance` — so the user can reconstruct
+         what happened during a session.
        9 
       10 Read-only commands (`status`, `eval`, `validate`, `--version`) d
          o not produce log entries.
@@ -3489,7 +3482,8 @@ do not update skills at all please.  after the sub agents have finished, review
 ⏺ Update(forgectl/specs/state-persistence.md)
   ⎿  Added 2 lines
       393  | `specifying.completed[].commit_hashes` | string[] | Git comm
-           it hashes registered via add-commit/reconcile-commit |
+           it hashes auto-registered at commit points when enable_commits
+           is true |
       394  | `specifying.completed[].evals` | array | Full eval trail per
             spec |
       395  | `specifying.cross_reference` | object | Per-domain cross-ref
@@ -3659,19 +3653,13 @@ do not update skills at all please.  after the sub agents have finished, review
        93 -{"ts":"2026-03-29T14:23:15Z","cmd":"advance","phase":"plan","p
           -rev_state":"Evaluating","state":"PendingDecision","detail":{"r
           -ound":1,"verdict":"accept","batch":{"count":5,"items":[{"spec"
-          -:"auth.md","state":"Specified"}]}}}                           
-       94 -{"ts":"2026-03-29T14:23:45Z","cmd":"add-commit","state":"Pendi
-          -ngDecision","detail":{"commit":"abc123def456","spec":"auth.md"
-          -}}                                                            
-       95 -{"ts":"2026-03-29T14:24:00Z","cmd":"advance","phase":"plan","p
+          -:"auth.md","state":"Specified"}]}}}
+       94 -{"ts":"2026-03-29T14:24:00Z","cmd":"advance","phase":"plan","p
           -rev_state":"PendingDecision","state":"Evaluating","detail":{"r
-          -ound":2}}                                                     
-       96 -{"ts":"2026-03-29T14:25:30Z","cmd":"reconcile-commit","state":
-          -"Evaluating","detail":{"commit":"789ghi012jkl","spec":"databas
-          -e.md"}}                                                       
-       97 -{"ts":"2026-03-29T14:26:00Z","cmd":"advance","phase":"plan","p
+          -ound":2}}
+       95 -{"ts":"2026-03-29T14:26:00Z","cmd":"advance","phase":"plan","p
           -rev_state":"Evaluating","state":"Complete","detail":{"round":2
-          -,"verdict":"complete"}}                                       
+          -,"verdict":"complete"}}
        91 +{"ts":"2026-03-29T14:32:01Z","cmd":"init","phase":"specifying"
           +,"state":"ORIENT","detail":{"from":"spec-queue.json","batch_si
           +ze":3,"rounds":"1-3","guided":true}}                          
@@ -3690,15 +3678,8 @@ do not update skills at all please.  after the sub agents have finished, review
           +-1-r1.md"}}                                                   
        96 +{"ts":"2026-03-29T15:30:00Z","cmd":"advance","phase":"specifyi
           +ng","prev_state":"EVALUATE","state":"ACCEPT","detail":{"round"
-          +:2,"verdict":"PASS","forced":false}}                          
-       97 +{"ts":"2026-03-29T16:00:00Z","cmd":"add-commit","phase":"speci
-          +fying","state":"DONE","detail":{"spec_id":1,"spec_name":"Repos
-          +itory Loading","hash":"7cede10"}}                             
-       98 +{"ts":"2026-03-29T16:01:00Z","cmd":"reconcile-commit","phase":
-          +"specifying","state":"DONE","detail":{"hash":"8743b1d","matche
-          +d_specs":[{"id":2,"name":"Snapshot Diffing"},{"id":3,"name":"C
-          +ache Invalidation"}]}}                                        
-       99  ```
+          +:2,"verdict":"PASS","forced":false}}
+       97  ```
       100  
       101  ## Viewing Logs
 
@@ -3708,7 +3689,7 @@ do not update skills at all please.  after the sub agents have finished, review
       81  | `ts` | string | ISO 8601 timestamp in UTC (e.g., `2026-03-29T
           14:22:30Z`) |
       82  | `cmd` | string | Command that triggered the entry: `init`, `a
-          dvance`, `add-commit`, `reconcile-commit` |
+          dvance` |
       83 -| `phase` | string | Phase name (only in `advance` entries) |  
       84 -| `prev_state` | string | Previous state name (only in `advance
          -` entries) |                                                   
@@ -3952,8 +3933,8 @@ please
    examples, no session required, 12-point plan validation, testing criteria.
 
   activity-logging.md — Confirmed: JSONL format, ~/.forgectl/logs/, session UUID
-   naming, logged commands (init/advance/add-commit/reconcile-commit), pruning
-  behavior, config section, best-effort logging.
+   naming, logged commands (init/advance), pruning behavior, config section,
+  best-effort logging.
 
   batch-implementation.md — Confirmed: compact vs verbose status output with
   Progress line.
@@ -4001,13 +3982,13 @@ fail? What are your thoughts?
   suboptimal UX for the primary collection point of code search roots. This
   means most users will rely on the auto-default of ["<domain>/"], which may be
   fine — but if they need custom roots, the experience is awkward.
-  4. spec_commits will often be empty. Commit hashes are populated via
-  add-commit and reconcile-commit — both manual operations. If the architect
-  doesn't register commits during specifying, spec_commits will be empty in the
-  auto-generated plan-queue. The planning phase then has no spec diffs to
-  reference. There's no warning or prompt about this during the phase shift. We
-  might need the PHASE_SHIFT output to flag "Warning: 0 spec commits registered.
-   Run reconcile-commit to register commits before advancing."
+  4. spec_commits will often be empty. Commit hashes are auto-registered at
+  commit points when enable_commits is true, but if commits are disabled,
+  spec_commits will be empty in the auto-generated plan-queue. The planning
+  phase then has no spec diffs to reference. There's no warning or prompt
+  about this during the phase shift. We might need the PHASE_SHIFT output to
+  flag "Warning: 0 spec commits registered. Consider enabling commits before
+  advancing."
   5. Active session pruning is unprotected. We documented the assumption that
   active sessions are never deleted, but the pruning algorithm has no mechanism
   to detect or skip active sessions. In practice this is low-risk (50 files
@@ -4541,8 +4522,7 @@ exist yet.  so that means we do not verify during `set-roots`
       131 +3. Create the log file: `<phase>-<session_id_prefix>.jsonl`.  
       132  4. Write the `init` log entry.
       133  
-      134  For subsequent commands (`advance`, `add-commit`, `reconcile-c
-           ommit`):
+      134  For subsequent commands (`advance`):
 
 ⏺ Now update the example filenames in the log directory listing.
 

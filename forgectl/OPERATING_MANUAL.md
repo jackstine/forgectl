@@ -8,8 +8,9 @@
 | `advance` | Transition from current state to the next |
 | `status` | Print current state with action guidance and full session overview |
 | `eval` | Output full evaluation context for the sub-agent (EVALUATE states only) |
-| `add-commit` | Register a commit hash to a completed spec by ID |
-| `reconcile-commit` | Auto-register a commit to all specs whose files were touched |
+| `add-queue-item` | Append a spec to the specifying queue |
+| `set-roots` | Set code search roots for a domain |
+| `validate` | Validate a JSON input file against its schema |
 
 ## `init` Flags
 
@@ -26,23 +27,27 @@ All batch sizes, round limits, and guided settings are configured in `.forgectl/
 |------|-------------|
 | `--verdict PASS\|FAIL` | Evaluation verdict |
 | `--eval-report <path>` | Path to evaluation report file |
-| `--message <text>` | Commit message or acceptance message (required when `enable_commits` is true in config) |
+| `--message <text>` / `-m` | Commit message (required at commit points when `enable_commits` is true). See `docs/auto-committing.md`. |
 | `--file <path>` | Override spec file path (specifying DRAFT only) |
-| `--from <path>` | Plan queue input file (specifying→planning phase shift only) |
+| `--from <path>` | Plan queue input file (specifying or generate_planning_queue PHASE_SHIFT) |
 | `--guided` / `--no-guided` | Update guided setting (accepted on any advance) |
 
-## `add-commit` Flags
+## `add-queue-item` Flags
 
 | Flag | Required | Description |
 |------|----------|-------------|
-| `--id N` | yes | Completed spec ID |
-| `--hash <hash>` | yes | Git commit hash (validated against repo) |
+| `--name` | yes | Display name for the spec |
+| `--domain` | at DONE only | Domain this spec belongs to |
+| `--topic` | yes | One-sentence topic of concern |
+| `--file` | yes | Target spec file path (must exist) |
+| `--source` | no | Planning source path (repeatable) |
 
-## `reconcile-commit` Flags
+## `set-roots` Flags
 
 | Flag | Required | Description |
 |------|----------|-------------|
-| `--hash <hash>` | yes | Git commit hash (matched against spec file paths) |
+| `--domain` | at DONE only | Domain to set roots for |
+| (positional) | yes | One or more directory paths |
 
 ---
 
@@ -55,7 +60,7 @@ All batch sizes, round limits, and guided settings are configured in `.forgectl/
 | ORIENT | — | SELECT | Pulls next spec from queue |
 | SELECT | — | DRAFT | Review topic and sources. Guided pause. |
 | DRAFT | `--file` (optional) | EVALUATE | Draft the spec. Round set to 1. |
-| EVALUATE | `--verdict PASS`, `--eval-report`, `--message` | ACCEPT | When round >= `specifying.eval.min_rounds`. Auto-commits. |
+| EVALUATE | `--verdict PASS`, `--eval-report` | ACCEPT | When round >= `specifying.eval.min_rounds` |
 | EVALUATE | `--verdict PASS`, `--eval-report` | REFINE | When round < `specifying.eval.min_rounds` |
 | EVALUATE | `--verdict FAIL`, `--eval-report` | REFINE | When round < `specifying.eval.max_rounds` |
 | EVALUATE | `--verdict FAIL`, `--eval-report` | ACCEPT | When round >= `specifying.eval.max_rounds` (forced) |
@@ -64,17 +69,20 @@ All batch sizes, round limits, and guided settings are configured in `.forgectl/
 | ACCEPT | — | DONE | When queue empty |
 | DONE | — | RECONCILE | Begins cross-reference reconciliation |
 | RECONCILE | — | RECONCILE_EVAL | Increments reconcile round |
-| RECONCILE_EVAL | `--verdict PASS`, `--message` | COMPLETE | Reconciliation accepted |
+| RECONCILE_EVAL | `--verdict PASS`, `--eval-report` | COMPLETE | Reconciliation accepted |
 | RECONCILE_EVAL | `--verdict FAIL` | RECONCILE_REVIEW | Issues found |
 | RECONCILE_REVIEW | — or `--verdict PASS` | COMPLETE | Accept as-is |
 | RECONCILE_REVIEW | `--verdict FAIL` | RECONCILE | Fix and re-evaluate |
-| COMPLETE | — | PHASE_SHIFT | Specifying phase complete |
+| COMPLETE | `--message` | PHASE_SHIFT | Specifying phase complete. Auto-commits when `enable_commits` is true. |
 
 ### Phase Shifts
 
 | From | To | Advance Flags | Notes |
 |------|----|---------------|-------|
-| PHASE_SHIFT (specifying→planning) | ORIENT (planning) | `--from <plans-queue.json>` | Required. Validates plan queue. |
+| PHASE_SHIFT (specifying→generate_planning_queue) | ORIENT (generate_planning_queue) | `--from <plans-queue.json>` (optional) | Without `--from`: enters generate_planning_queue. With `--from`: skips to planning ORIENT. |
+| ORIENT (generate_planning_queue) | REFINE | — | Auto-generates `<state_dir>/plan-queue.json`. |
+| REFINE (generate_planning_queue) | PHASE_SHIFT | — | Validates plan queue. Stays at REFINE if invalid. |
+| PHASE_SHIFT (generate_planning_queue→planning) | ORIENT (planning) | `--from <path>` (optional) | Without `--from`: uses auto-generated file. With `--from`: uses override. |
 | PHASE_SHIFT (planning→implementing) | ORIENT (implementing) | — | Validates plan.json. Adds `passes`/`rounds` to items. |
 
 ### Planning Phase
@@ -96,7 +104,8 @@ All batch sizes, round limits, and guided settings are configured in `.forgectl/
 | EVALUATE | `--verdict FAIL`, `--eval-report` | ACCEPT | When round >= `planning.eval.max_rounds` (forced) |
 | REFINE | — | EVALUATE | If plan.json valid. Increments round. |
 | REFINE | — | VALIDATE | If plan.json invalid. Increments round. |
-| ACCEPT | `--message` | PHASE_SHIFT | Plan accepted |
+| ACCEPT | `--message` | ORIENT or DONE | Plan accepted. Auto-commits when `enable_commits` is true. ORIENT if queue non-empty, DONE if empty. |
+| DONE | — | PHASE_SHIFT | All plans complete |
 
 ### Implementing Phase
 

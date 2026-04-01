@@ -173,4 +173,5 @@
   ╚════════════╪══════════════════════════════════════════════════╝
                │
                ▼
-         PHASE_SHIFT ──► Planning Phase
+         PHASE_SHIFT ──► Generate Planning Queue Phase ──► Planning Phase
+                    └──► Planning Phase (if --from provided, skips generation)

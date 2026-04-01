@@ -14,7 +14,7 @@ go test ./cmd/ -v         # command tests
 
 ## Structure
 
-- `cmd/` — Cobra CLI commands (init, advance, status, eval, add-commit, reconcile-commit)
+- `cmd/` — Cobra CLI commands (init, advance, status, eval, validate, add-queue-item, set-roots)
 - `state/` — State machine types, transitions, validation, output, git operations
 - `evaluators/` — Evaluation prompts for plan and implementation sub-agents
 - `specs/` — Specification files

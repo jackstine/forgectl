@@ -253,5 +253,5 @@ Each key in `domains` is a domain name, value is:
 - Type definitions: `forgectl/state/types.go`
 - Persistence: `forgectl/state/state.go`
 - Transitions: `forgectl/state/advance.go`
-- Config loading: TODO (not yet implemented)
+- Config loading: `forgectl/state/config.go`
 - Location: `.forgectl/state/forgectl-state.json`

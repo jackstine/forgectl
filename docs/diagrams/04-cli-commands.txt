@@ -51,14 +51,14 @@
   │   │  │ DRAFT            │ --file <path>  (override output, spec only)│
   │   │  │ EVALUATE         │ --verdict PASS|FAIL  --eval-report <path>  │
   │   │  │ REFINE           │ (none required)                            │
-  │   │  │ ACCEPT           │ --message (if general.enable_commits)      │
-  │   │  │ IMPLEMENT        │ --message (if general.enable_commits)      │
-  │   │  │ COMMIT           │ --message (if general.enable_commits)      │
+  │   │  │ ACCEPT           │ --message (planning, if enable_commits)     │
+  │   │  │ IMPLEMENT        │ --message (first round, if enable_commits) │
+  │   │  │ COMMIT           │ --message (if enable_commits)              │
   │   │  │ RECONCILE        │ (none required)                            │
   │   │  │ RECONCILE_EVAL   │ --verdict PASS|FAIL  --eval-report <path>  │
-  │   │  │ RECONCILE_REVIEW │ --verdict FAIL  (optional, sends back)     │
-  │   │  │ COMPLETE         │ --from <path>  (plan-queue for phase shift)│
-  │   │  │ PHASE_SHIFT      │ --from <path>  (if specifying→planning)    │
+  │   │  │ RECONCILE_REVIEW │ (none required)                            │
+  │   │  │ COMPLETE         │ --message (specifying, if enable_commits)  │
+  │   │  │ PHASE_SHIFT      │ --from <path>  (specifying or gen_plan_q)  │
   │   │  │ STUDY_*          │ (none required)                            │
   │   │  │ REVIEW           │ (none required)                            │
   │   │  │ VALIDATE         │ (none required)                            │
@@ -86,26 +86,26 @@
   │                (items, specs, tests, evaluator prompt)
   │
   │
-  ├── add-commit ──────── Register a commit hash to a spec
+  ├── add-queue-item ───── Append a spec to the specifying queue
   │   │
   │   │  Required flags:
-  │   │    --id <int>      Spec ID
-  │   │    --hash <string> Commit hash (must exist in repo)
+  │   │    --domain <str>  Domain name
+  │   │    --name <str>    Spec name to add to queue
   │   │
-  │   │  Appends to commit_hashes[] array. Rejects duplicates.
+  │   │  Appends to specifying.queue[]. Valid only when session exists.
   │   │
-  │   └─── Output: "Added {hash} to spec {id}."
+  │   └─── Output: "Added {name} to specifying queue."
   │
   │
-  ├── reconcile-commit ── Auto-register commit to touched specs
+  ├── set-roots ────────── Set code search roots for a domain
   │   │
   │   │  Required flags:
-  │   │    --hash <string> Commit hash (must exist in repo)
+  │   │    --domain <str>  Domain name
+  │   │    --roots <str>   Comma-separated list of root paths
   │   │
-  │   │  Analyzes commit diff ──► matches files to specs
-  │   │  Updates commit_hashes[] (array, not commit_hash)
+  │   │  Writes to specifying.domains[<domain>].code_search_roots
   │   │
-  │   └─── Output: List of specs updated with the commit
+  │   └─── Output: "Set code search roots for {domain}."
   │
   │
   └── --version ───────── Display version (v0.0.1)
@@ -123,9 +123,9 @@
   │    forgectl init         │         │    forgectl eval         │
   │    forgectl advance      │         │                          │
   │    forgectl status       │         │  Reads:                  │
-  │    forgectl add-commit   │         │    - Spec files          │
-  │    forgectl reconcile-   │         │    - Implementation      │
-  │             commit       │         │    - Notes/refs          │
+  │    forgectl add-queue-   │         │    - Spec files          │
+  │             item         │         │    - Implementation      │
+  │    forgectl set-roots    │         │    - Notes/refs          │
   │                          │         │    - Evaluator prompt    │
   │  Writes:                 │         │                          │
   │    - Specs               │         │  Writes:                 │

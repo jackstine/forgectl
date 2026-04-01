@@ -79,4 +79,4 @@ For each entry, the planning phase produces:
 - Type definitions: `forgectl/state/types.go` (`PlanQueueInput`, `PlanQueueEntry`)
 - Validation: `forgectl/state/validate.go` (`ValidatePlanQueue`)
 - Reference docs: `skills/implementation_planning/references/plan-queue-format.md`
-- Auto-generation: At specifying→planning phase shift, forgectl can auto-generate this file from completed specs, commit hashes, and code search roots collected during the specifying phase. See phase-transitions spec.
+- Auto-generation: During the generate_planning_queue phase, forgectl auto-generates this file from completed specs, commit hashes, and code search roots collected during the specifying phase. The architect reviews and reorders before planning begins. See phase-transitions spec.

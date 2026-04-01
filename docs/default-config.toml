@@ -2,6 +2,20 @@
 # Place this file at .forgectl/config in your project root.
 # All values shown are defaults.
 
+# --- Domains (optional) ---
+# Declare known domains with names and paths.
+# Domains are optional. When configured, spec queue entries at init
+# must reference a configured domain name.
+# No domain path may be a prefix of another domain path.
+#
+# [[domains]]
+# name = "optimizer"
+# path = "optimizer"
+#
+# [[domains]]
+# name = "portal"
+# path = "portal"
+
 # --- Specifying Phase ---
 # Controls spec generation from planning documents.
 
@@ -10,6 +24,9 @@
 # never mixes domains. If a domain has more specs than batch, it
 # produces multiple batches before moving to the next domain.
 batch = 3
+# Commit staging strategy for specifying commits.
+# "all-specs" stages all files found in domain specs/ directories.
+commit_strategy = "all-specs"
 
 [specifying.eval]
 # Minimum eval rounds before PASS can accept a spec batch.
@@ -60,8 +77,15 @@ user_review = false
 
 [planning]
 # Number of plans processed per cycle.
-# TODO: values > 1 are not yet supported. Reserved for future use.
+# Values > 1 are not yet supported. Reserved for future use.
 batch = 1
+# Commit staging strategy for planning commits.
+# "strict" only stages files explicitly registered in state/plan.json.
+commit_strategy = "strict"
+# When true, SELF_REVIEW state is entered between validation and
+# EVALUATE. The agent reviews their plan against specs and study
+# notes before evaluation.
+self_review = false
 
 [planning.study_code]
 # Sub-agent type for codebase exploration.
@@ -92,6 +116,9 @@ agent_count = 1
 # Maximum unblocked plan items per implementation batch.
 # Items are selected in dependency order from the current layer.
 batch = 2
+# Commit staging strategy for implementing commits.
+# "scoped" stages files registered in state plus any changes within the domain path.
+commit_strategy = "scoped"
 
 [implementing.eval]
 # Minimum eval rounds before PASS can accept an implementation batch.
@@ -126,10 +153,9 @@ workspace_dir = ".forge_workspace"
 user_guided = true
 
 # Controls whether the scaffold requires and executes git commits.
-# false: COMMIT states are pause points but --message is not required.
-#        No git operations. Engineer commits manually.
-# true:  --message is required and validated at COMMIT states.
-#        TODO: automatic git commit execution is not yet implemented.
+# false: No git operations. --message is not required. Engineer commits manually.
+# true:  --message is required at commit points. Scaffold stages and commits automatically.
+#        See docs/auto-committing.md for commit points, staging strategies, and behavior.
 enable_commits = false
 
 # --- Logs ---

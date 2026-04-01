@@ -24,8 +24,6 @@ The following commands and state transitions are logged:
 |-----------|---------|
 | `init` | Session initialization with configuration snapshot |
 | `advance` | State transition with phase, previous state, new state, and command-specific details |
-| `add-commit` | Commit hash registered to a spec during `add-commit` command |
-| `reconcile-commit` | Commit hash auto-matched to specs during `reconcile-commit` command |
 
 ### Read-Only Commands (Not Logged)
 
@@ -78,7 +76,7 @@ Each log entry is a JSON object on a single line, with the following fields:
 | Field | Type | Description |
 |-------|------|-------------|
 | `ts` | string | ISO 8601 timestamp in UTC (e.g., `2026-03-29T14:22:30Z`) |
-| `cmd` | string | Command that triggered the entry: `init`, `advance`, `add-commit`, `reconcile-commit` |
+| `cmd` | string | Command that triggered the entry: `init`, `advance` |
 | `phase` | string | Current phase at time of command |
 | `prev_state` | string | Previous state name (`advance` only) |
 | `state` | string | Current state name |
@@ -93,8 +91,6 @@ Each log entry is a JSON object on a single line, with the following fields:
 {"ts":"2026-03-29T15:10:33Z","cmd":"advance","phase":"specifying","prev_state":"DRAFT","state":"EVALUATE","detail":{"round":1}}
 {"ts":"2026-03-29T15:12:01Z","cmd":"advance","phase":"specifying","prev_state":"EVALUATE","state":"REFINE","detail":{"round":1,"verdict":"FAIL","eval_report":"optimizer/specs/.eval/batch-1-r1.md"}}
 {"ts":"2026-03-29T15:30:00Z","cmd":"advance","phase":"specifying","prev_state":"EVALUATE","state":"ACCEPT","detail":{"round":2,"verdict":"PASS","forced":false}}
-{"ts":"2026-03-29T16:00:00Z","cmd":"add-commit","phase":"specifying","state":"DONE","detail":{"spec_id":1,"spec_name":"Repository Loading","hash":"7cede10"}}
-{"ts":"2026-03-29T16:01:00Z","cmd":"reconcile-commit","phase":"specifying","state":"DONE","detail":{"hash":"8743b1d","matched_specs":[{"id":2,"name":"Snapshot Diffing"},{"id":3,"name":"Cache Invalidation"}]}}
 ```
 
 ## Viewing Logs

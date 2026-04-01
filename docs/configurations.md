@@ -41,8 +41,17 @@ The scaffold resolves the project root by walking up from the current directory:
 See `docs/default-config.toml` for the complete default config with comments.
 
 ```toml
+[[domains]]
+name = "optimizer"
+path = "optimizer"
+
+[[domains]]
+name = "portal"
+path = "portal"
+
 [specifying]
 batch = 3
+commit_strategy = "all-specs"
 
 [specifying.eval]
 min_rounds = 1
@@ -69,6 +78,8 @@ agent_count = 1
 
 [planning]
 batch = 1
+commit_strategy = "strict"
+self_review = false
 
 [planning.study_code]
 agent_type = "haiku"
@@ -86,6 +97,7 @@ agent_count = 1
 
 [implementing]
 batch = 2
+commit_strategy = "scoped"
 
 [implementing.eval]
 min_rounds = 1
@@ -103,6 +115,38 @@ enable_commits = false
 ```
 
 ## Configuration Parameters
+
+### Domains
+
+#### `[[domains]]`
+
+- **Type:** array of tables (optional)
+- **Default:** none
+
+Declares known domains with their names and paths. Domains are optional metadata — projects can operate without defining any. When configured, domain resolution for `add-queue-item` and spec queue validation uses these entries.
+
+```toml
+[[domains]]
+name = "emails"
+path = "domains/emails"
+
+[[domains]]
+name = "databases"
+path = "pkg/internal/databases"
+```
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `name` | string | yes | Domain name (used in spec queue `domain` field and `add-queue-item --domain`) |
+| `path` | string | yes | Domain directory path relative to project root. Specs live in `<path>/specs/`. |
+
+**Constraints:**
+- No domain path is a prefix of another domain path. E.g., `domains/users` and `domains/users/employees` is rejected.
+- Domain names must be unique.
+
+**Behavior:**
+- Domains are read-only in config. `add-queue-item --domain` with a new domain registers it in the session state only — the config file is never modified by forgectl.
+- When domains are configured, spec queue entries at init must reference a configured domain name, and the file path must match the domain's `<path>/specs/` prefix.
 
 ### Sub-Agent Configuration
 
@@ -245,6 +289,14 @@ Number of sub-agents to spawn for reconciliation evaluation.
 
 When true, RECONCILE_REVIEW action includes "STOP please review and discuss with user before continuing." When false, it says "Reconciliation review complete." The RECONCILE_REVIEW state is entered either way — this only controls the output message.
 
+#### `specifying.commit_strategy`
+
+- **Type:** string
+- **Default:** `"all-specs"`
+- **Valid values:** `strict`, `all-specs`, `scoped`, `tracked`, `all`
+
+Controls which files are staged when the scaffold auto-commits during the specifying phase. A single commit is made at COMPLETE. See `docs/auto-committing.md` for full behavior details.
+
 ### Planning Phase
 
 #### `planning.batch`
@@ -253,7 +305,7 @@ When true, RECONCILE_REVIEW action includes "STOP please review and discuss with
 - **Default:** 1
 - **Constraint:** >= 1
 
-Number of plans processed per planning cycle. TODO: values > 1 are not yet supported by the planning state machine. Reserved for future use.
+Number of plans processed per planning cycle. Values > 1 are not yet supported. Reserved for future use.
 
 #### `planning.study_code.agent_type`
 
@@ -269,6 +321,13 @@ Sub-agent type for codebase exploration at STUDY_CODE state.
 - **Constraint:** >= 1
 
 Number of sub-agents to spawn for codebase exploration.
+
+#### `planning.self_review`
+
+- **Type:** boolean
+- **Default:** `false`
+
+When true, SELF_REVIEW state is entered between validation and EVALUATE on every round. The agent reviews their plan against specs and study notes, revising plan.json and notes as needed before evaluation. When false, SELF_REVIEW is skipped.
 
 #### `planning.eval.min_rounds`
 
@@ -316,6 +375,14 @@ Sub-agent type for updating plan from eval findings at REFINE state.
 
 Number of sub-agents to spawn for plan refinement.
 
+#### `planning.commit_strategy`
+
+- **Type:** string
+- **Default:** `"strict"`
+- **Valid values:** `strict`, `all-specs`, `scoped`, `tracked`, `all`
+
+Controls which files are staged when the scaffold auto-commits during the planning phase. A per-plan commit is made at ACCEPT. See `docs/auto-committing.md` for full behavior details.
+
 ### Implementing Phase
 
 #### `implementing.batch`
@@ -357,6 +424,14 @@ Sub-agent type for implementation evaluation at EVALUATE state.
 
 Number of sub-agents to spawn for implementation evaluation.
 
+#### `implementing.commit_strategy`
+
+- **Type:** string
+- **Default:** `"scoped"`
+- **Valid values:** `strict`, `all-specs`, `scoped`, `tracked`, `all`
+
+Controls which files are staged when the scaffold auto-commits during the implementing phase. A per-item commit is made at IMPLEMENT (first round only) and a per-batch commit is made at COMMIT. See `docs/auto-committing.md` for full behavior details.
+
 ### Paths
 
 #### `paths.state_dir`
@@ -392,9 +467,14 @@ When true, the scaffold inserts pause points at SELECT (specifying), REVIEW (pla
 
 Controls whether the scaffold requires and executes git commits.
 
-When `false` (default): COMMIT states remain as pause points but `--message` is not required or prompted. No git operations are performed. The engineer commits manually.
+When `false` (default): COMMIT states remain as pause points but `--message` (`-m`) is not required or prompted. No git operations are performed. The engineer commits manually.
 
-When `true`: `--message` is required and validated at COMMIT states and first-round IMPLEMENT advances. TODO: automatic `git commit` execution is not yet implemented — the flag is validated and stored but no git operation occurs.
+When `true`: `--message` / `-m` is required and validated at the following commit points:
+- **Specifying:** single commit at COMPLETE
+- **Planning:** per-plan commit at ACCEPT
+- **Implementing:** per-item commit at IMPLEMENT (first round only) + per-batch commit at COMMIT
+
+See `docs/auto-committing.md` for full auto-commit behavior details.
 
 ### Logs
 
@@ -430,8 +510,13 @@ After `init`, the effective configuration is stored in the state file's `config`
 ```json
 {
   "config": {
+    "domains": [
+      { "name": "optimizer", "path": "optimizer" },
+      { "name": "portal", "path": "portal" }
+    ],
     "specifying": {
       "batch": 3,
+      "commit_strategy": "all-specs",
       "eval": { "min_rounds": 1, "max_rounds": 3, "agent_type": "opus", "agent_count": 1 },
       "cross_reference": {
         "min_rounds": 1,
@@ -445,12 +530,15 @@ After `init`, the effective configuration is stored in the state file's `config`
     },
     "planning": {
       "batch": 1,
+      "commit_strategy": "strict",
+      "self_review": false,
       "study_code": { "agent_type": "haiku", "agent_count": 3 },
       "eval": { "min_rounds": 1, "max_rounds": 3, "agent_type": "opus", "agent_count": 1 },
       "refine": { "agent_type": "opus", "agent_count": 1 }
     },
     "implementing": {
       "batch": 2,
+      "commit_strategy": "scoped",
       "eval": { "min_rounds": 1, "max_rounds": 3, "agent_type": "opus", "agent_count": 1 }
     },
     "paths": {
@@ -492,8 +580,8 @@ All other configuration is read from `.forgectl/config`.
 | `--guided` / `--no-guided` | any state | Toggle guided mode (updates `config.general.user_guided` in state) |
 | `--verdict PASS\|FAIL` | EVALUATE, RECONCILE_EVAL, CROSS_REFERENCE_EVAL | Evaluation verdict |
 | `--eval-report <path>` | EVALUATE, RECONCILE_EVAL, CROSS_REFERENCE_EVAL | Path to evaluation report |
-| `--message <text>` | COMMIT, ACCEPT (when `enable_commits: true`) | Commit message |
-| `--from <path>` | PHASE_SHIFT (specifying→planning) | Plan queue input file |
+| `--message <text>`, `-m <text>` | COMPLETE (specifying), ACCEPT (planning), IMPLEMENT first round (implementing), COMMIT (implementing) — when `enable_commits: true` | Commit message |
+| `--from <path>` | PHASE_SHIFT (specifying→generate_planning_queue, generate_planning_queue→planning) | Plan queue input file |
 
 ## Non-Config Session Fields
 
