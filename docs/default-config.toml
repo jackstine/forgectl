@@ -33,29 +33,35 @@ commit_strategy = "all-specs"
 min_rounds = 1
 # Maximum eval rounds. FAIL at this threshold forces acceptance.
 max_rounds = 3
-# Sub-agent type for spec batch evaluation.
-agent_type = "opus"
+# Sub-agent role for this spawn point.
+type = "eval"
+# Model name for spec batch evaluation.
+model = "opus"
 # Number of sub-agents to spawn for evaluation.
-agent_count = 1
+count = 1
 
 [specifying.cross_reference]
 # Minimum eval rounds for domain cross-reference.
 min_rounds = 1
 # Maximum eval rounds. FAIL at this threshold forces acceptance.
 max_rounds = 2
-# Sub-agent type for cross-referencing domain specs.
-agent_type = "haiku"
+# Sub-agent role for this spawn point.
+type = "explore"
+# Model name for cross-referencing domain specs.
+model = "haiku"
 # Number of sub-agents to spawn for cross-referencing.
-agent_count = 3
+count = 3
 # When true, pause for user review after first CROSS_REFERENCE_EVAL.
 # Overrides user_guided — fires even when user_guided is false.
 user_review = false
 
 [specifying.cross_reference.eval]
-# Sub-agent type for evaluating cross-reference work.
-agent_type = "opus"
+# Sub-agent role for this spawn point.
+type = "eval"
+# Model name for evaluating cross-reference work.
+model = "opus"
 # Number of sub-agents to spawn for cross-reference evaluation.
-agent_count = 1
+count = 1
 
 [specifying.reconciliation]
 # Minimum rounds before PASS can complete reconciliation.
@@ -63,10 +69,12 @@ agent_count = 1
 min_rounds = 0
 # Maximum reconciliation rounds. FAIL at this threshold forces completion.
 max_rounds = 3
-# Sub-agent type for reconciliation evaluation.
-agent_type = "opus"
+# Sub-agent role for this spawn point.
+type = "eval"
+# Model name for reconciliation evaluation.
+model = "opus"
 # Number of sub-agents to spawn for reconciliation evaluation.
-agent_count = 1
+count = 1
 # When true, RECONCILE_REVIEW action includes "STOP please review and discuss
 # with user before continuing." When false, it says "Reconciliation review complete."
 # The state is entered either way — this only controls the output message.
@@ -86,28 +94,38 @@ commit_strategy = "strict"
 # EVALUATE. The agent reviews their plan against specs and study
 # notes before evaluation.
 self_review = false
+# When false (default, interleaved): each domain is planned then
+# immediately implemented before the next domain begins.
+# When true: all domains are planned first, then all implemented.
+plan_all_before_implementing = false
 
 [planning.study_code]
-# Sub-agent type for codebase exploration.
-agent_type = "haiku"
+# Sub-agent role for this spawn point.
+type = "explore"
+# Model name for codebase exploration.
+model = "haiku"
 # Number of sub-agents to spawn for codebase exploration.
-agent_count = 3
+count = 3
 
 [planning.eval]
 # Minimum eval rounds before PASS can accept a plan.
 min_rounds = 1
 # Maximum eval rounds. FAIL at this threshold forces acceptance.
 max_rounds = 3
-# Sub-agent type for plan evaluation.
-agent_type = "opus"
+# Sub-agent role for this spawn point.
+type = "eval"
+# Model name for plan evaluation.
+model = "opus"
 # Number of sub-agents to spawn for plan evaluation.
-agent_count = 1
+count = 1
 
 [planning.refine]
-# Sub-agent type for updating plan from eval findings.
-agent_type = "opus"
+# Sub-agent role for this spawn point.
+type = "refine"
+# Model name for updating plan from eval findings.
+model = "opus"
 # Number of sub-agents to spawn for plan refinement.
-agent_count = 1
+count = 1
 
 # --- Implementing Phase ---
 # Controls batched implementation of plan items.
@@ -125,10 +143,12 @@ commit_strategy = "scoped"
 min_rounds = 1
 # Maximum eval rounds. FAIL at this threshold forces acceptance.
 max_rounds = 3
-# Sub-agent type for implementation evaluation.
-agent_type = "opus"
+# Sub-agent role for this spawn point.
+type = "eval"
+# Model name for implementation evaluation.
+model = "opus"
 # Number of sub-agents to spawn for implementation evaluation.
-agent_count = 1
+count = 1
 
 # --- Paths ---
 # Directory locations for scaffold state and domain artifacts.

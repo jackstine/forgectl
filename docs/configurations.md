@@ -56,44 +56,52 @@ commit_strategy = "all-specs"
 [specifying.eval]
 min_rounds = 1
 max_rounds = 3
-agent_type = "opus"
-agent_count = 1
+type = "eval"
+model = "opus"
+count = 1
 
 [specifying.cross_reference]
 min_rounds = 1
 max_rounds = 2
-agent_type = "haiku"
-agent_count = 3
+type = "explore"
+model = "haiku"
+count = 3
 user_review = false
 
 [specifying.cross_reference.eval]
-agent_type = "opus"
-agent_count = 1
+type = "eval"
+model = "opus"
+count = 1
 
 [specifying.reconciliation]
 min_rounds = 0
 max_rounds = 3
-agent_type = "opus"
-agent_count = 1
+type = "eval"
+model = "opus"
+count = 1
 
 [planning]
 batch = 1
 commit_strategy = "strict"
 self_review = false
+plan_all_before_implementing = false
 
 [planning.study_code]
-agent_type = "haiku"
-agent_count = 3
+type = "explore"
+model = "haiku"
+count = 3
 
 [planning.eval]
 min_rounds = 1
 max_rounds = 3
-agent_type = "opus"
-agent_count = 1
+type = "eval"
+model = "opus"
+count = 1
 
 [planning.refine]
-agent_type = "opus"
-agent_count = 1
+type = "refine"
+model = "opus"
+count = 1
 
 [implementing]
 batch = 2
@@ -102,8 +110,9 @@ commit_strategy = "scoped"
 [implementing.eval]
 min_rounds = 1
 max_rounds = 3
-agent_type = "opus"
-agent_count = 1
+type = "eval"
+model = "opus"
+count = 1
 
 [paths]
 state_dir = ".forgectl/state"
@@ -150,10 +159,11 @@ path = "pkg/internal/databases"
 
 ### Sub-Agent Configuration
 
-Every configuration section that involves spawning sub-agents includes `agent_type` and `agent_count`:
+Every configuration section that involves spawning sub-agents includes `type`, `model`, and `count`:
 
-- **`agent_type`** — A string identifying the type of sub-agent to spawn. Can be a model name (e.g., `"opus"`, `"haiku"`) or a descriptive phrase (e.g., `"opus explorer"`, `"spec-eval-expert"`).
-- **`agent_count`** — An integer specifying how many sub-agents to spawn. Must be >= 1.
+- **`type`** — The role of the sub-agent at this spawn point. Valid values: `"eval"`, `"explore"`, `"refine"`.
+- **`model`** — A string identifying the model for the sub-agent. Can be a model name (e.g., `"opus"`, `"haiku"`) or a descriptive phrase (e.g., `"opus explorer"`, `"spec-eval-expert"`).
+- **`count`** — An integer specifying how many sub-agents to spawn. Must be >= 1.
 
 The scaffold outputs these values in spawn instructions: `"Please spawn {count} {type} sub-agent(s) to {purpose}."`
 
@@ -183,14 +193,21 @@ Minimum evaluation rounds before a PASS verdict can accept a spec batch. PASS be
 
 Maximum evaluation rounds for a spec batch. FAIL at this threshold forces acceptance.
 
-#### `specifying.eval.agent_type`
+#### `specifying.eval.type`
+
+- **Type:** string
+- **Default:** `"eval"`
+
+Sub-agent role for spec batch evaluation at EVALUATE state.
+
+#### `specifying.eval.model`
 
 - **Type:** string
 - **Default:** `"opus"`
 
-Sub-agent type for spec batch evaluation at EVALUATE state.
+Model name for spec batch evaluation at EVALUATE state.
 
-#### `specifying.eval.agent_count`
+#### `specifying.eval.count`
 
 - **Type:** integer
 - **Default:** 1
@@ -214,14 +231,21 @@ Minimum evaluation rounds for domain cross-reference. PASS below this threshold 
 
 Maximum evaluation rounds for domain cross-reference. FAIL at this threshold forces acceptance.
 
-#### `specifying.cross_reference.agent_type`
+#### `specifying.cross_reference.type`
+
+- **Type:** string
+- **Default:** `"explore"`
+
+Sub-agent role for cross-referencing domain specs at CROSS_REFERENCE state.
+
+#### `specifying.cross_reference.model`
 
 - **Type:** string
 - **Default:** `"haiku"`
 
-Sub-agent type for cross-referencing domain specs at CROSS_REFERENCE state.
+Model name for cross-referencing domain specs at CROSS_REFERENCE state.
 
-#### `specifying.cross_reference.agent_count`
+#### `specifying.cross_reference.count`
 
 - **Type:** integer
 - **Default:** 3
@@ -236,14 +260,21 @@ Number of sub-agents to spawn for domain cross-referencing.
 
 When true, the scaffold pauses at CROSS_REFERENCE_REVIEW after the first CROSS_REFERENCE_EVAL (regardless of verdict). This fires even when `general.user_guided` is false. The pause asks the architect to review with their user before continuing. Only fires once per domain — subsequent rounds skip the review pause.
 
-#### `specifying.cross_reference.eval.agent_type`
+#### `specifying.cross_reference.eval.type`
+
+- **Type:** string
+- **Default:** `"eval"`
+
+Sub-agent role for evaluating cross-reference work at CROSS_REFERENCE_EVAL state.
+
+#### `specifying.cross_reference.eval.model`
 
 - **Type:** string
 - **Default:** `"opus"`
 
-Sub-agent type for evaluating cross-reference work at CROSS_REFERENCE_EVAL state.
+Model name for evaluating cross-reference work at CROSS_REFERENCE_EVAL state.
 
-#### `specifying.cross_reference.eval.agent_count`
+#### `specifying.cross_reference.eval.count`
 
 - **Type:** integer
 - **Default:** 1
@@ -267,14 +298,21 @@ Minimum reconciliation eval rounds before a PASS verdict can complete the specif
 
 Maximum reconciliation eval rounds. FAIL at this threshold forces completion.
 
-#### `specifying.reconciliation.agent_type`
+#### `specifying.reconciliation.type`
+
+- **Type:** string
+- **Default:** `"eval"`
+
+Sub-agent role for reconciliation evaluation at RECONCILE_EVAL state.
+
+#### `specifying.reconciliation.model`
 
 - **Type:** string
 - **Default:** `"opus"`
 
-Sub-agent type for reconciliation evaluation at RECONCILE_EVAL state.
+Model name for reconciliation evaluation at RECONCILE_EVAL state.
 
-#### `specifying.reconciliation.agent_count`
+#### `specifying.reconciliation.count`
 
 - **Type:** integer
 - **Default:** 1
@@ -307,14 +345,32 @@ Controls which files are staged when the scaffold auto-commits during the specif
 
 Number of plans processed per planning cycle. Values > 1 are not yet supported. Reserved for future use.
 
-#### `planning.study_code.agent_type`
+#### `planning.plan_all_before_implementing`
+
+- **Type:** boolean
+- **Default:** `false`
+
+Controls how domains are processed across planning and implementing phases.
+
+When `false` (default, interleaved): each domain is planned and then immediately implemented before the next domain begins. The flow cycles between planning and implementing per domain. PHASE_SHIFT fires at every phase and domain boundary.
+
+When `true` (all planning first): all domains are planned first (with PHASE_SHIFT between each domain), then all domains are implemented (with PHASE_SHIFT between each domain).
+
+#### `planning.study_code.type`
+
+- **Type:** string
+- **Default:** `"explore"`
+
+Sub-agent role for codebase exploration at STUDY_CODE state.
+
+#### `planning.study_code.model`
 
 - **Type:** string
 - **Default:** `"haiku"`
 
-Sub-agent type for codebase exploration at STUDY_CODE state.
+Model name for codebase exploration at STUDY_CODE state.
 
-#### `planning.study_code.agent_count`
+#### `planning.study_code.count`
 
 - **Type:** integer
 - **Default:** 3
@@ -345,14 +401,21 @@ Minimum evaluation rounds before a PASS verdict can accept a plan.
 
 Maximum evaluation rounds for a plan. FAIL at this threshold forces acceptance.
 
-#### `planning.eval.agent_type`
+#### `planning.eval.type`
+
+- **Type:** string
+- **Default:** `"eval"`
+
+Sub-agent role for plan evaluation at EVALUATE state.
+
+#### `planning.eval.model`
 
 - **Type:** string
 - **Default:** `"opus"`
 
-Sub-agent type for plan evaluation at EVALUATE state.
+Model name for plan evaluation at EVALUATE state.
 
-#### `planning.eval.agent_count`
+#### `planning.eval.count`
 
 - **Type:** integer
 - **Default:** 1
@@ -360,14 +423,21 @@ Sub-agent type for plan evaluation at EVALUATE state.
 
 Number of sub-agents to spawn for plan evaluation.
 
-#### `planning.refine.agent_type`
+#### `planning.refine.type`
+
+- **Type:** string
+- **Default:** `"refine"`
+
+Sub-agent role for updating plan from eval findings at REFINE state.
+
+#### `planning.refine.model`
 
 - **Type:** string
 - **Default:** `"opus"`
 
-Sub-agent type for updating plan from eval findings at REFINE state.
+Model name for updating plan from eval findings at REFINE state.
 
-#### `planning.refine.agent_count`
+#### `planning.refine.count`
 
 - **Type:** integer
 - **Default:** 1
@@ -409,14 +479,21 @@ Minimum evaluation rounds before a PASS verdict can accept an implementation bat
 
 Maximum evaluation rounds for an implementation batch. FAIL at this threshold forces acceptance.
 
-#### `implementing.eval.agent_type`
+#### `implementing.eval.type`
+
+- **Type:** string
+- **Default:** `"eval"`
+
+Sub-agent role for implementation evaluation at EVALUATE state.
+
+#### `implementing.eval.model`
 
 - **Type:** string
 - **Default:** `"opus"`
 
-Sub-agent type for implementation evaluation at EVALUATE state.
+Model name for implementation evaluation at EVALUATE state.
 
-#### `implementing.eval.agent_count`
+#### `implementing.eval.count`
 
 - **Type:** integer
 - **Default:** 1
@@ -517,29 +594,31 @@ After `init`, the effective configuration is stored in the state file's `config`
     "specifying": {
       "batch": 3,
       "commit_strategy": "all-specs",
-      "eval": { "min_rounds": 1, "max_rounds": 3, "agent_type": "opus", "agent_count": 1 },
+      "eval": { "min_rounds": 1, "max_rounds": 3, "type": "eval", "model": "opus", "count": 1 },
       "cross_reference": {
         "min_rounds": 1,
         "max_rounds": 2,
-        "agent_type": "haiku",
-        "agent_count": 3,
+        "type": "explore",
+        "model": "haiku",
+        "count": 3,
         "user_review": false,
-        "eval": { "agent_type": "opus", "agent_count": 1 }
+        "eval": { "type": "eval", "model": "opus", "count": 1 }
       },
-      "reconciliation": { "min_rounds": 0, "max_rounds": 3, "agent_type": "opus", "agent_count": 1, "user_review": false }
+      "reconciliation": { "min_rounds": 0, "max_rounds": 3, "type": "eval", "model": "opus", "count": 1, "user_review": false }
     },
     "planning": {
       "batch": 1,
       "commit_strategy": "strict",
       "self_review": false,
-      "study_code": { "agent_type": "haiku", "agent_count": 3 },
-      "eval": { "min_rounds": 1, "max_rounds": 3, "agent_type": "opus", "agent_count": 1 },
-      "refine": { "agent_type": "opus", "agent_count": 1 }
+      "plan_all_before_implementing": false,
+      "study_code": { "type": "explore", "model": "haiku", "count": 3 },
+      "eval": { "min_rounds": 1, "max_rounds": 3, "type": "eval", "model": "opus", "count": 1 },
+      "refine": { "type": "refine", "model": "opus", "count": 1 }
     },
     "implementing": {
       "batch": 2,
       "commit_strategy": "scoped",
-      "eval": { "min_rounds": 1, "max_rounds": 3, "agent_type": "opus", "agent_count": 1 }
+      "eval": { "min_rounds": 1, "max_rounds": 3, "type": "eval", "model": "opus", "count": 1 }
     },
     "paths": {
       "state_dir": ".forgectl/state",

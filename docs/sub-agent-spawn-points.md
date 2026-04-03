@@ -25,40 +25,50 @@ Please spawn {count} {type} sub-agent(s) to {purpose}.
 
 ## Configuration
 
-`agent_type` is a string that can be a model name (e.g., `"opus"`, `"haiku"`) or a descriptive phrase (e.g., `"opus explorer"`, `"spec-eval-expert"`). The scaffold includes this value verbatim in its spawn instructions.
+`model` is a string that can be a model name (e.g., `"opus"`, `"haiku"`) or a descriptive phrase (e.g., `"opus explorer"`, `"spec-eval-expert"`). The scaffold includes this value verbatim in its spawn instructions.
 
-Each spawn point has `agent_type` and `agent_count` in `.forgectl/config`:
+`type` identifies the role of the sub-agent at this spawn point: `"eval"`, `"explore"`, or `"refine"`.
+
+Each spawn point has `type`, `model`, and `count` in `.forgectl/config`:
 
 ```toml
 [specifying.eval]
-agent_type = "opus"
-agent_count = 1
+type = "eval"
+model = "opus"
+count = 1
 
 [specifying.cross_reference]
-agent_type = "haiku"
-agent_count = 3
+type = "explore"
+model = "haiku"
+count = 3
 
 [specifying.cross_reference.eval]
-agent_type = "opus"
-agent_count = 1
+type = "eval"
+model = "opus"
+count = 1
 
 [specifying.reconciliation]
-agent_type = "opus"
-agent_count = 1
+type = "eval"
+model = "opus"
+count = 1
 
 [planning.study_code]
-agent_type = "haiku"
-agent_count = 3
+type = "explore"
+model = "haiku"
+count = 3
 
 [planning.eval]
-agent_type = "opus"
-agent_count = 1
+type = "eval"
+model = "opus"
+count = 1
 
 [planning.refine]
-agent_type = "opus"
-agent_count = 1
+type = "refine"
+model = "opus"
+count = 1
 
 [implementing.eval]
-agent_type = "opus"
-agent_count = 1
+type = "eval"
+model = "opus"
+count = 1
 ```
