@@ -166,9 +166,13 @@ func sessionDomain(s *state.ForgeState) string {
 }
 
 func validateAdvanceFlags(s *state.ForgeState) error {
-	// --file only valid in specifying DRAFT.
-	if advanceFile != "" && !(s.Phase == state.PhaseSpecifying && s.State == state.StateDraft) {
-		return fmt.Errorf("--file is only valid in specifying DRAFT state (current: %s %s)", s.Phase, s.State)
+	// --file valid in specifying DRAFT or reverse_engineering QUEUE.
+	if advanceFile != "" {
+		specifyingDraft := s.Phase == state.PhaseSpecifying && s.State == state.StateDraft
+		reQueue := s.Phase == state.PhaseReverseEngineering && s.State == state.StateQueue
+		if !specifyingDraft && !reQueue {
+			return fmt.Errorf("--file is only valid in specifying DRAFT or reverse_engineering QUEUE state (current: %s %s)", s.Phase, s.State)
+		}
 	}
 
 	// --verdict only valid in eval states.

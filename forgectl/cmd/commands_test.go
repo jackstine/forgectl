@@ -1303,6 +1303,86 @@ func TestValidateTypePlanExplicit(t *testing.T) {
 	}
 }
 
+// TestAddDomainAddsNewDomain verifies that add-domain appends the domain and increments TotalDomains.
+func TestAddDomainAddsNewDomain(t *testing.T) {
+	dir := setupProjectDir(t)
+	sd := resolvedStateDir(dir)
+	os.MkdirAll(sd, 0755)
+
+	s := &state.ForgeState{
+		Phase:  state.PhaseReverseEngineering,
+		State:  state.StateQueue,
+		Config: state.DefaultForgeConfig(),
+		ReverseEngineering: state.NewReverseEngineeringState("test concept", []string{"optimizer", "api"}, false),
+	}
+	state.Save(sd, s)
+
+	var buf bytes.Buffer
+	addDomainCmd.SetOut(&buf)
+
+	if err := runAddDomain(addDomainCmd, []string{"portal"}); err != nil {
+		t.Fatalf("add-domain: %v", err)
+	}
+
+	loaded, _ := state.Load(sd)
+	re := loaded.ReverseEngineering
+	if re.TotalDomains != 3 {
+		t.Fatalf("TotalDomains = %d, want 3", re.TotalDomains)
+	}
+	if re.Domains[2] != "portal" {
+		t.Fatalf("Domains[2] = %q, want %q", re.Domains[2], "portal")
+	}
+	if !strings.Contains(buf.String(), "portal") {
+		t.Errorf("expected confirmation output mentioning 'portal', got: %s", buf.String())
+	}
+}
+
+// TestAddDomainRejectsDuplicate verifies that add-domain rejects an already-existing domain.
+func TestAddDomainRejectsDuplicate(t *testing.T) {
+	dir := setupProjectDir(t)
+	sd := resolvedStateDir(dir)
+	os.MkdirAll(sd, 0755)
+
+	s := &state.ForgeState{
+		Phase:              state.PhaseReverseEngineering,
+		State:              state.StateQueue,
+		Config:             state.DefaultForgeConfig(),
+		ReverseEngineering: state.NewReverseEngineeringState("test concept", []string{"optimizer", "api"}, false),
+	}
+	state.Save(sd, s)
+
+	err := runAddDomain(addDomainCmd, []string{"api"})
+	if err == nil {
+		t.Fatal("expected error for duplicate domain")
+	}
+	if !strings.Contains(err.Error(), "already exists") {
+		t.Errorf("unexpected error: %v", err)
+	}
+}
+
+// TestAddDomainBlockedOutsideQueue verifies that add-domain is rejected outside QUEUE state.
+func TestAddDomainBlockedOutsideQueue(t *testing.T) {
+	dir := setupProjectDir(t)
+	sd := resolvedStateDir(dir)
+	os.MkdirAll(sd, 0755)
+
+	s := &state.ForgeState{
+		Phase:              state.PhaseReverseEngineering,
+		State:              state.StateSurvey,
+		Config:             state.DefaultForgeConfig(),
+		ReverseEngineering: state.NewReverseEngineeringState("test concept", []string{"optimizer"}, false),
+	}
+	state.Save(sd, s)
+
+	err := runAddDomain(addDomainCmd, []string{"portal"})
+	if err == nil {
+		t.Fatal("expected error outside QUEUE state")
+	}
+	if !strings.Contains(err.Error(), "only available during the QUEUE state") {
+		t.Errorf("unexpected error: %v", err)
+	}
+}
+
 func TestValidateEmptyObjectFailsAutoDetect(t *testing.T) {
 	dir := t.TempDir()
 	data := []byte(`{}`)

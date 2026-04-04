@@ -1,6 +1,8 @@
 package state
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -30,6 +32,8 @@ func Advance(s *ForgeState, in AdvanceInput, dir string) error {
 		return advancePlanning(s, in, dir)
 	case PhaseImplementing:
 		return advanceImplementing(s, in, dir)
+	case PhaseReverseEngineering:
+		return advanceReverseEngineering(s, in, dir)
 	default:
 		return fmt.Errorf("unknown phase %q", s.Phase)
 	}
@@ -1231,4 +1235,89 @@ type ValidationError struct {
 
 func (e *ValidationError) Error() string {
 	return fmt.Sprintf("validation failed: %d errors", len(e.Errors))
+}
+
+// --- Reverse Engineering Phase ---
+
+func advanceReverseEngineering(s *ForgeState, in AdvanceInput, dir string) error {
+	re := s.ReverseEngineering
+	if re == nil {
+		return fmt.Errorf("reverse engineering state is nil")
+	}
+
+	switch s.State {
+	case StateOrient:
+		re.CurrentDomain = 0
+		s.State = StateSurvey
+
+	case StateSurvey:
+		s.State = StateGapAnalysis
+
+	case StateGapAnalysis:
+		s.State = StateDecompose
+
+	case StateDecompose:
+		s.State = StateQueue
+
+	case StateQueue:
+		return advanceREFromQueue(s, re, in, dir)
+
+	default:
+		return fmt.Errorf("cannot advance from state %q in reverse_engineering phase", s.State)
+	}
+
+	return nil
+}
+
+func advanceREFromQueue(s *ForgeState, re *ReverseEngineeringState, in AdvanceInput, dir string) error {
+	if re.QueueFile == "" {
+		// First advance: --file required.
+		if in.File == "" {
+			return fmt.Errorf("Queue file path required. Use: forgectl advance --file <queue.json>")
+		}
+		data, err := os.ReadFile(in.File)
+		if err != nil {
+			return fmt.Errorf("reading queue file %q: %w", in.File, err)
+		}
+		errs := ValidateReverseEngineeringQueue(data, dir, re.Domains)
+		if len(errs) > 0 {
+			return &ValidationError{Errors: errs}
+		}
+		// Store path and hash only after successful validation.
+		re.QueueFile = in.File
+		re.QueueHash = computeContentHash(data)
+	} else {
+		// Subsequent advance: --file not accepted.
+		if in.File != "" {
+			return fmt.Errorf("Queue file path already set to %q. Update that file and run: forgectl advance", re.QueueFile)
+		}
+		data, err := os.ReadFile(re.QueueFile)
+		if err != nil {
+			return fmt.Errorf("reading queue file %q: %w", re.QueueFile, err)
+		}
+		newHash := computeContentHash(data)
+		if newHash == re.QueueHash {
+			return fmt.Errorf("Queue file has not changed. Update the file and retry.")
+		}
+		errs := ValidateReverseEngineeringQueue(data, dir, re.Domains)
+		if len(errs) > 0 {
+			return &ValidationError{Errors: errs}
+		}
+		re.QueueHash = newHash
+	}
+
+	// Determine next state.
+	if re.CurrentDomain < re.TotalDomains-1 {
+		re.CurrentDomain++
+		s.State = StateSurvey
+	} else {
+		s.State = StateExecute
+	}
+	return nil
+}
+
+// computeContentHash returns a hex-encoded SHA-256 hash of data.
+func computeContentHash(data []byte) string {
+	h := sha256.Sum256(data)
+	return hex.EncodeToString(h[:])
 }
