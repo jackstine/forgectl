@@ -390,6 +390,360 @@ func TestEvalOutputOutsideValidStatesReturnsError(t *testing.T) {
 
 // TestOutputDoneDomainVariantWhenPlansRemain verifies that the DONE output shows
 // "Domain complete. Advance to continue to next domain." when plans remain.
+// TestREEvalOutputContainsPromptAndSpecs verifies that PrintReverseEngineeringEvalOutput
+// outputs the evaluator prompt, spec list with depends_on, and eval report path.
+func TestREEvalOutputContainsPromptAndSpecs(t *testing.T) {
+	dir := t.TempDir()
+
+	queueFile := filepath.Join(dir, "re-queue.json")
+	qi := ReverseEngineeringQueueInput{
+		Specs: []ReverseEngineeringQueueEntry{
+			{Name: "Auth Init", Domain: "api", File: "specs/auth-init.md", Action: "create", DependsOn: []string{}},
+			{Name: "Auth Tokens", Domain: "api", File: "specs/auth-tokens.md", Action: "create", DependsOn: []string{"Auth Init"}},
+		},
+	}
+	data, _ := json.Marshal(qi)
+	os.WriteFile(queueFile, data, 0644)
+
+	s := newREState([]string{"api"})
+	s.State = StateReconcileEval
+	s.ReverseEngineering.ReconcileDomain = 0
+	s.ReverseEngineering.Round = 1
+	s.ReverseEngineering.QueueFile = queueFile
+	s.Config.ReverseEngineering.Reconcile.MaxRounds = 3
+
+	var buf bytes.Buffer
+	if err := PrintReverseEngineeringEvalOutput(&buf, s); err != nil {
+		t.Fatalf("PrintReverseEngineeringEvalOutput: %v", err)
+	}
+	out := buf.String()
+
+	if !strings.Contains(out, "RECONCILIATION EVALUATION ROUND 1/3") {
+		t.Errorf("expected round header in eval output, got:\n%s", out)
+	}
+	if !strings.Contains(out, "--- EVALUATOR INSTRUCTIONS ---") {
+		t.Errorf("expected evaluator instructions section, got:\n%s", out)
+	}
+	if !strings.Contains(out, "Reconciliation Evaluation Prompt") {
+		t.Errorf("expected embedded prompt in eval output, got:\n%s", out)
+	}
+	if !strings.Contains(out, "api/specs/auth-init.md") {
+		t.Errorf("expected spec file in eval output, got:\n%s", out)
+	}
+	if !strings.Contains(out, "Auth Init") {
+		t.Errorf("expected depends_on reference in eval output, got:\n%s", out)
+	}
+	if !strings.Contains(out, "reconciliation-r1.md") {
+		t.Errorf("expected eval report path in eval output, got:\n%s", out)
+	}
+}
+
+// TestREEvalOutputRejectsNonReconcileEvalState verifies that PrintReverseEngineeringEvalOutput
+// returns an error when called outside RECONCILE_EVAL state.
+func TestREEvalOutputRejectsNonReconcileEvalState(t *testing.T) {
+	s := newREState([]string{"api"})
+	s.State = StateReconcile // wrong state
+
+	var buf bytes.Buffer
+	err := PrintReverseEngineeringEvalOutput(&buf, s)
+	if err == nil {
+		t.Fatal("expected error when calling PrintReverseEngineeringEvalOutput outside RECONCILE_EVAL")
+	}
+	if !strings.Contains(err.Error(), "RECONCILE_EVAL") {
+		t.Errorf("expected error to mention RECONCILE_EVAL, got: %v", err)
+	}
+}
+
+// --- Reverse Engineering Output Tests ---
+
+func newREState(domains []string) *ForgeState {
+	cfg := DefaultForgeConfig()
+	return &ForgeState{
+		Phase:  PhaseReverseEngineering,
+		State:  StateOrient,
+		Config: cfg,
+		ReverseEngineering: &ReverseEngineeringState{
+			Concept:       "understand the auth system",
+			Domains:       domains,
+			TotalDomains:  len(domains),
+			CurrentDomain: 0,
+			Round:         1,
+		},
+	}
+}
+
+func TestStatusREShowsModeAndRounds(t *testing.T) {
+	s := newREState([]string{"api", "billing"})
+	s.Config.ReverseEngineering.Mode = "self_refine"
+	s.Config.ReverseEngineering.Reconcile.MinRounds = 1
+	s.Config.ReverseEngineering.Reconcile.MaxRounds = 3
+
+	var buf bytes.Buffer
+	PrintStatus(&buf, s, t.TempDir(), false)
+	out := buf.String()
+
+	if !strings.Contains(out, "mode=self_refine") {
+		t.Errorf("expected mode in RE status config line, got:\n%s", out)
+	}
+	if !strings.Contains(out, "rounds=1-3") {
+		t.Errorf("expected reconcile rounds in RE status config line, got:\n%s", out)
+	}
+	// Should NOT show batch= for RE phase.
+	if strings.Contains(out, "batch=") {
+		t.Errorf("unexpected batch= in RE status config line, got:\n%s", out)
+	}
+}
+
+func TestOutputREOrientShowsConceptAndDomains(t *testing.T) {
+	s := newREState([]string{"api", "billing"})
+	s.State = StateOrient
+
+	out := outputOf(s, t.TempDir())
+	if !strings.Contains(out, "understand the auth system") {
+		t.Errorf("expected concept in ORIENT output, got:\n%s", out)
+	}
+	if !strings.Contains(out, "api (1/2)") {
+		t.Errorf("expected domain index in ORIENT output, got:\n%s", out)
+	}
+	if !strings.Contains(out, "billing (2/2)") {
+		t.Errorf("expected second domain in ORIENT output, got:\n%s", out)
+	}
+	if !strings.Contains(out, "Advance to begin SURVEY on domain: api") {
+		t.Errorf("expected advance action in ORIENT output, got:\n%s", out)
+	}
+}
+
+func TestOutputRESurveyShowsDomainAndSubagentConfig(t *testing.T) {
+	s := newREState([]string{"api"})
+	s.State = StateSurvey
+	s.Config.ReverseEngineering.Survey = SubAgentConfig{Model: "haiku", Type: "explorer", Count: 3}
+
+	out := outputOf(s, t.TempDir())
+	if !strings.Contains(out, "api (1/1)") {
+		t.Errorf("expected domain in SURVEY output, got:\n%s", out)
+	}
+	if !strings.Contains(out, "3 haiku explorer") {
+		t.Errorf("expected sub-agent config in SURVEY output, got:\n%s", out)
+	}
+	if !strings.Contains(out, "api/specs/") {
+		t.Errorf("expected specs dir in SURVEY output, got:\n%s", out)
+	}
+}
+
+func TestOutputRESurveyNotesMissingSpecsDir(t *testing.T) {
+	dir := t.TempDir()
+	s := newREState([]string{"no-specs-domain"})
+	s.State = StateSurvey
+	// dir has no no-specs-domain/specs/ subdirectory
+
+	out := outputOf(s, dir)
+	if !strings.Contains(out, "does not exist") {
+		t.Errorf("expected missing specs dir note in SURVEY output, got:\n%s", out)
+	}
+}
+
+func TestOutputREGapAnalysisShowsDomainAndSubagentConfig(t *testing.T) {
+	s := newREState([]string{"api"})
+	s.State = StateGapAnalysis
+	s.Config.ReverseEngineering.GapAnalysis = SubAgentConfig{Model: "sonnet", Type: "explore", Count: 5}
+
+	out := outputOf(s, t.TempDir())
+	if !strings.Contains(out, "GAP_ANALYSIS") {
+		t.Errorf("expected state in GAP_ANALYSIS output, got:\n%s", out)
+	}
+	if !strings.Contains(out, "5 sonnet explore") {
+		t.Errorf("expected sub-agent config in GAP_ANALYSIS output, got:\n%s", out)
+	}
+	if !strings.Contains(out, "Next: DECOMPOSE for domain api") {
+		t.Errorf("expected next step in GAP_ANALYSIS output, got:\n%s", out)
+	}
+}
+
+func TestOutputREDecomposeShowsDomainAndAction(t *testing.T) {
+	s := newREState([]string{"payments"})
+	s.State = StateDecompose
+
+	out := outputOf(s, t.TempDir())
+	if !strings.Contains(out, "DECOMPOSE") {
+		t.Errorf("expected state in DECOMPOSE output, got:\n%s", out)
+	}
+	if !strings.Contains(out, "Synthesize findings from domain payments") {
+		t.Errorf("expected action in DECOMPOSE output, got:\n%s", out)
+	}
+	if !strings.Contains(out, "payments") {
+		t.Errorf("expected domain name in DECOMPOSE output, got:\n%s", out)
+	}
+}
+
+func TestOutputREQueueFirstTimeShowsFileFlag(t *testing.T) {
+	s := newREState([]string{"api"})
+	s.State = StateQueue
+	// QueueFile is empty — first time
+
+	out := outputOf(s, t.TempDir())
+	if !strings.Contains(out, "--file <queue.json>") {
+		t.Errorf("expected --file flag instruction in first QUEUE output, got:\n%s", out)
+	}
+}
+
+func TestOutputREQueueSubsequentShowsStoredPath(t *testing.T) {
+	s := newREState([]string{"api", "billing"})
+	s.State = StateQueue
+	s.ReverseEngineering.CurrentDomain = 1
+	s.ReverseEngineering.QueueFile = "/tmp/re-queue.json"
+
+	out := outputOf(s, t.TempDir())
+	if !strings.Contains(out, "/tmp/re-queue.json") {
+		t.Errorf("expected stored queue path in subsequent QUEUE output, got:\n%s", out)
+	}
+	if strings.Contains(out, "--file <queue.json>") {
+		t.Errorf("unexpected --file flag in subsequent QUEUE output (file already set), got:\n%s", out)
+	}
+}
+
+func TestOutputREReconcileShowsSpecsAndDependsOn(t *testing.T) {
+	dir := t.TempDir()
+
+	// Write a queue file with entries.
+	queueFile := filepath.Join(dir, "re-queue.json")
+	qi := ReverseEngineeringQueueInput{
+		Specs: []ReverseEngineeringQueueEntry{
+			{Name: "Auth Init", Domain: "api", Topic: "auth init", File: "specs/auth-init.md", Action: "create", DependsOn: []string{}},
+			{Name: "Auth Tokens", Domain: "api", Topic: "auth tokens", File: "specs/auth-tokens.md", Action: "create", DependsOn: []string{"Auth Init"}},
+		},
+	}
+	data, _ := json.Marshal(qi)
+	os.WriteFile(queueFile, data, 0644)
+
+	s := newREState([]string{"api"})
+	s.State = StateReconcile
+	s.ReverseEngineering.ReconcileDomain = 0
+	s.ReverseEngineering.QueueFile = queueFile
+
+	out := outputOf(s, dir)
+	if !strings.Contains(out, "RECONCILE") {
+		t.Errorf("expected state in RECONCILE output, got:\n%s", out)
+	}
+	if !strings.Contains(out, "api/specs/auth-init.md") {
+		t.Errorf("expected spec file in RECONCILE output, got:\n%s", out)
+	}
+	if !strings.Contains(out, "Auth Init") {
+		t.Errorf("expected depends_on entry in RECONCILE output, got:\n%s", out)
+	}
+}
+
+func TestOutputREReconcileEvalShowsEvalInstructions(t *testing.T) {
+	s := newREState([]string{"api"})
+	s.State = StateReconcileEval
+	s.ReverseEngineering.ReconcileDomain = 0
+	s.ReverseEngineering.Round = 1
+	s.Config.ReverseEngineering.Reconcile.MaxRounds = 3
+	s.Config.ReverseEngineering.Reconcile.Eval = AgentConfig{Model: "opus", Type: "general-purpose", Count: 1}
+
+	out := outputOf(s, t.TempDir())
+	if !strings.Contains(out, "RECONCILE_EVAL") {
+		t.Errorf("expected state in RECONCILE_EVAL output, got:\n%s", out)
+	}
+	if !strings.Contains(out, "forgectl eval") {
+		t.Errorf("expected forgectl eval instruction in RECONCILE_EVAL output, got:\n%s", out)
+	}
+	if !strings.Contains(out, "reconciliation-r1.md") {
+		t.Errorf("expected eval report path in RECONCILE_EVAL output, got:\n%s", out)
+	}
+}
+
+func TestOutputREExecuteShowsModeAndQueueCount(t *testing.T) {
+	dir := t.TempDir()
+
+	// Write a queue file.
+	queueFile := filepath.Join(dir, "re-queue.json")
+	qi := ReverseEngineeringQueueInput{
+		Specs: []ReverseEngineeringQueueEntry{
+			{Name: "Spec A", Domain: "api", File: "specs/a.md", Action: "create", CodeSearchRoots: []string{"src/"}},
+			{Name: "Spec B", Domain: "api", File: "specs/b.md", Action: "create", CodeSearchRoots: []string{"src/"}},
+			{Name: "Spec C", Domain: "api", File: "specs/c.md", Action: "update", CodeSearchRoots: []string{"src/"}},
+		},
+	}
+	data, _ := json.Marshal(qi)
+	os.WriteFile(queueFile, data, 0644)
+
+	s := newREState([]string{"api"})
+	s.State = StateExecute
+	s.ReverseEngineering.QueueFile = queueFile
+	s.Config.ReverseEngineering.Mode = "self_refine"
+
+	out := outputOf(s, dir)
+	if !strings.Contains(out, "EXECUTE") {
+		t.Errorf("expected state in EXECUTE output, got:\n%s", out)
+	}
+	if !strings.Contains(out, "3 entries") {
+		t.Errorf("expected queue entry count in EXECUTE output, got:\n%s", out)
+	}
+	if !strings.Contains(out, "self_refine") {
+		t.Errorf("expected mode in EXECUTE output, got:\n%s", out)
+	}
+}
+
+func TestOutputREReconcileSubsequentRoundShowsFailureContext(t *testing.T) {
+	dir := t.TempDir()
+
+	queueFile := filepath.Join(dir, "re-queue.json")
+	qi := ReverseEngineeringQueueInput{
+		Specs: []ReverseEngineeringQueueEntry{
+			{Name: "Spec A", Domain: "api", File: "specs/a.md", Action: "create", DependsOn: []string{}},
+		},
+	}
+	data, _ := json.Marshal(qi)
+	os.WriteFile(queueFile, data, 0644)
+
+	s := newREState([]string{"api"})
+	s.State = StateReconcile
+	s.ReverseEngineering.ReconcileDomain = 0
+	s.ReverseEngineering.Round = 2 // subsequent round
+	s.ReverseEngineering.QueueFile = queueFile
+
+	out := outputOf(s, dir)
+	if !strings.Contains(out, "evaluation failed on the previous round") {
+		t.Errorf("expected failure context in subsequent RECONCILE output, got:\n%s", out)
+	}
+	if !strings.Contains(out, "api/specs/a.md") {
+		t.Errorf("expected spec file in subsequent RECONCILE output, got:\n%s", out)
+	}
+}
+
+func TestOutputREExecuteFailureRendersStopTemplate(t *testing.T) {
+	var buf bytes.Buffer
+	stderrText := "Traceback (most recent call last):\n  File \"reverse_engineer.py\"\nKeyError: 'model'"
+	PrintExecuteFailureOutput(&buf, stderrText)
+	out := buf.String()
+
+	if !strings.Contains(out, "STOP") {
+		t.Errorf("expected STOP in failure output, got:\n%s", out)
+	}
+	if !strings.Contains(out, "Python subprocess") {
+		t.Errorf("expected Python subprocess mention in failure output, got:\n%s", out)
+	}
+	if !strings.Contains(out, stderrText) {
+		t.Errorf("expected full stderr in failure output, got:\n%s", out)
+	}
+}
+
+func TestOutputREDoneShowsSummary(t *testing.T) {
+	s := newREState([]string{"api", "billing"})
+	s.State = StateDone
+
+	out := outputOf(s, t.TempDir())
+	if !strings.Contains(out, "DONE") {
+		t.Errorf("expected state in DONE output, got:\n%s", out)
+	}
+	if !strings.Contains(out, "Reverse engineering workflow complete") {
+		t.Errorf("expected completion message in DONE output, got:\n%s", out)
+	}
+	if !strings.Contains(out, "understand the auth system") {
+		t.Errorf("expected concept in DONE output, got:\n%s", out)
+	}
+}
+
 func TestOutputDoneDomainVariantWhenPlansRemain(t *testing.T) {
 	dir := t.TempDir()
 	s := newImplementingState(dir, 1, 1)
