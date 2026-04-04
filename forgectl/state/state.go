@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"time"
 )
 
 const (
@@ -131,6 +132,40 @@ func Save(dir string, s *ForgeState) error {
 	}
 
 	return nil
+}
+
+// ArchiveSession copies the active state file to <stateDir>/sessions/<domain>-<date>.json.
+// This is called at terminal state (DONE in implementing, or PHASE_SHIFT after COMPLETE in specifying).
+func ArchiveSession(stateDir string, domain string, s *ForgeState) error {
+	sessionsDir := filepath.Join(stateDir, "sessions")
+	if err := os.MkdirAll(sessionsDir, 0755); err != nil {
+		return fmt.Errorf("creating sessions dir: %w", err)
+	}
+
+	date := time.Now().Format("2006-01-02")
+	archiveName := domain + "-" + date + ".json"
+	archivePath := filepath.Join(sessionsDir, archiveName)
+
+	data, err := json.MarshalIndent(s, "", "  ")
+	if err != nil {
+		return fmt.Errorf("marshaling state for archive: %w", err)
+	}
+
+	if err := os.WriteFile(archivePath, data, 0644); err != nil {
+		return fmt.Errorf("writing archive: %w", err)
+	}
+
+	return nil
+}
+
+// StateDir returns the absolute path to the state directory.
+// If cfg.Paths.StateDir is absolute, it is returned as-is.
+// Otherwise, it is joined with projectRoot.
+func StateDir(projectRoot string, cfg ForgeConfig) string {
+	if filepath.IsAbs(cfg.Paths.StateDir) {
+		return cfg.Paths.StateDir
+	}
+	return filepath.Join(projectRoot, cfg.Paths.StateDir)
 }
 
 func fileExists(path string) bool {

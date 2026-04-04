@@ -132,7 +132,7 @@
   ║  │   - Fix deficiencies   │                                         │  ║
   ║  │   - Run tests          │                                         │  ║
   ║  │   - No --message       │                                         │  ║
-  ║  │   - No auto-commit     │                                         │  ║
+  ║  │   - No auto-commit     │                                        │  ║
   ║  │                        │                                         │  ║
   ║  │   forgectl advance     │                                         │  ║
   ║  │       │                │                                         │  ║

@@ -930,6 +930,60 @@ Calling `set-roots` for a domain that already has roots overwrites the previous 
 - **When:** `advance --verdict PASS --eval-report .eval/cross-reference-r2.md`
 - **Then:** State is ORIENT or DONE (not CROSS_REFERENCE_REVIEW).
 
+### ACCEPT triggers CROSS_REFERENCE when domain complete
+- **Verifies:** Domain completion enters cross-reference before next domain.
+- **Given:** ACCEPT, last batch for optimizer domain. Queue has portal specs remaining.
+- **When:** `advance`
+- **Then:** State is CROSS_REFERENCE. Domain is optimizer.
+
+### ACCEPT triggers ORIENT when domain has more batches
+- **Verifies:** Intra-domain batching continues without cross-reference.
+- **Given:** ACCEPT, optimizer domain has 2 more specs in queue.
+- **When:** `advance`
+- **Then:** State is ORIENT.
+
+### CROSS_REFERENCE lists all domain specs
+- **Verifies:** Cross-reference discovers session and existing specs.
+- **Given:** CROSS_REFERENCE for optimizer. Session completed 3 specs. `optimizer/specs/` also contains 2 existing specs not in queue.
+- **When:** `status`
+- **Then:** Output shows 3 session specs and 2 existing specs.
+
+### CROSS_REFERENCE_EVAL PASS advances to next domain
+- **Verifies:** Successful cross-reference continues to next domain.
+- **Given:** CROSS_REFERENCE_EVAL, `specifying.cross_reference.min_rounds: 1`, round 1. Queue has portal specs.
+- **When:** `advance --verdict PASS --eval-report .eval/cross-reference-r1.md`
+- **Then:** State is ORIENT. Next batch is from portal domain.
+
+### CROSS_REFERENCE_EVAL FAIL below max retries
+- **Verifies:** Failed cross-reference loops back.
+- **Given:** CROSS_REFERENCE_EVAL, `specifying.cross_reference.max_rounds: 2`, round 1.
+- **When:** `advance --verdict FAIL --eval-report .eval/cross-reference-r1.md`
+- **Then:** State is CROSS_REFERENCE.
+
+### CROSS_REFERENCE_EVAL FAIL at max forces acceptance
+- **Verifies:** Max rounds forces cross-reference acceptance.
+- **Given:** CROSS_REFERENCE_EVAL, `specifying.cross_reference.max_rounds: 2`, round 2.
+- **When:** `advance --verdict FAIL --eval-report .eval/cross-reference-r2.md`
+- **Then:** State is ORIENT (or DONE if queue empty). Forced acceptance.
+
+### CROSS_REFERENCE_REVIEW fires on first pass with user_review true
+- **Verifies:** Domain checkpoint with user review prompt.
+- **Given:** CROSS_REFERENCE_EVAL, `specifying.cross_reference.user_review: true`, round 1, verdict PASS.
+- **When:** `advance --verdict PASS --eval-report .eval/cross-reference-r1.md`
+- **Then:** State is CROSS_REFERENCE_REVIEW. Action includes "STOP please review and discuss with user before continuing."
+
+### CROSS_REFERENCE_REVIEW fires on first pass with user_review false
+- **Verifies:** Domain checkpoint fires regardless of user_review.
+- **Given:** CROSS_REFERENCE_EVAL, `specifying.cross_reference.user_review: false`, round 1, verdict PASS.
+- **When:** `advance --verdict PASS --eval-report .eval/cross-reference-r1.md`
+- **Then:** State is CROSS_REFERENCE_REVIEW. Action includes "Domain cross-reference complete." No user review prompt.
+
+### CROSS_REFERENCE_REVIEW does not fire on subsequent rounds
+- **Verifies:** Domain checkpoint only fires once per domain.
+- **Given:** CROSS_REFERENCE_EVAL, round 2, verdict PASS.
+- **When:** `advance --verdict PASS --eval-report .eval/cross-reference-r2.md`
+- **Then:** State is ORIENT or DONE (not CROSS_REFERENCE_REVIEW).
+
 ### DONE transitions to reconciliation
 - **Verifies:** Queue exhaustion triggers reconciliation phase.
 - **Given:** All specs accepted, all domains cross-referenced, state is DONE. Queue is empty.

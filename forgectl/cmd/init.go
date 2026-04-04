@@ -13,22 +13,18 @@ import (
 var (
 	initFrom  string
 	initPhase string
-	initGuided   bool
-	initNoGuided bool
 )
 
 var initCmd = &cobra.Command{
 	Use:   "init",
 	Short: "Initialize a scaffold session",
-	Long:  "Creates a state file from a validated input file.",
+	Long:  "Creates a state file from a validated input file and project config.",
 	RunE:  runInit,
 }
 
 func init() {
 	initCmd.Flags().StringVar(&initFrom, "from", "", "Path to input file (required)")
 	initCmd.Flags().StringVar(&initPhase, "phase", "specifying", "Starting phase: specifying, planning, implementing")
-	initCmd.Flags().BoolVar(&initGuided, "guided", false, "Enable guided mode")
-	initCmd.Flags().BoolVar(&initNoGuided, "no-guided", false, "Disable guided mode")
 	_ = initCmd.MarkFlagRequired("from")
 	rootCmd.AddCommand(initCmd)
 }
@@ -44,47 +40,19 @@ func runInit(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("--phase must be specifying, planning, or implementing")
 	}
 
-	// Discover project root starting from --dir (or cwd).
-	startDir := stateDir
-	if startDir == "" || startDir == "." {
-		var err error
-		startDir, err = os.Getwd()
-		if err != nil {
-			return fmt.Errorf("getting working directory: %w", err)
-		}
-	}
-
-	projectRoot, err := state.FindProjectRoot(startDir)
+	// Discover project root, load and validate config.
+	projectRoot, stateDir, cfg, err := resolveSession()
 	if err != nil {
-		return fmt.Errorf("%w", err)
+		return err
 	}
 
-	// Load and validate config.
-	cfg, err := state.LoadConfig(projectRoot)
-	if err != nil {
-		return fmt.Errorf("loading config: %w", err)
-	}
-
-	// Apply guided mode override from flags.
-	if initNoGuided {
-		cfg.General.UserGuided = false
-	}
-	if initGuided {
-		cfg.General.UserGuided = true
-	}
-
-	configErrs := state.ValidateConfig(cfg)
-	if len(configErrs) > 0 {
-		out := cmd.OutOrStdout()
-		fmt.Fprintln(out, "Config validation errors:")
-		for _, e := range configErrs {
-			fmt.Fprintf(out, "  %s\n", e)
+	violations := state.ValidateConfig(cfg)
+	if len(violations) > 0 {
+		for _, v := range violations {
+			fmt.Fprintln(cmd.OutOrStdout(), v)
 		}
 		return fmt.Errorf("config validation failed")
 	}
-
-	// State is saved to projectRoot (stateDir is updated for Save call).
-	stateDir = projectRoot
 
 	if state.Exists(stateDir) {
 		return fmt.Errorf("State file already exists. Delete it to reinitialize.")
@@ -163,9 +131,9 @@ func runInit(cmd *cobra.Command, args []string) error {
 				ID:              1,
 				Name:            entry.Name,
 				Domain:          entry.Domain,
-				Topic:           entry.Topic,
 				File:            entry.File,
 				Specs:           entry.Specs,
+				SpecCommits:     entry.SpecCommits,
 				CodeSearchRoots: entry.CodeSearchRoots,
 			}
 		}
@@ -181,13 +149,11 @@ func runInit(cmd *cobra.Command, args []string) error {
 			return fmt.Errorf("parsing plan: %w", err)
 		}
 
-		// Add passes and rounds to items.
 		for i := range plan.Items {
 			plan.Items[i].Passes = "pending"
 			plan.Items[i].Rounds = 0
 		}
 
-		// Write updated plan back.
 		planData, err := json.MarshalIndent(plan, "", "  ")
 		if err != nil {
 			return fmt.Errorf("marshaling plan: %w", err)
@@ -206,48 +172,48 @@ func runInit(cmd *cobra.Command, args []string) error {
 		}
 	}
 
+	if err := os.MkdirAll(stateDir, 0755); err != nil {
+		return fmt.Errorf("creating state dir: %w", err)
+	}
+
 	if err := state.Save(stateDir, s); err != nil {
 		return fmt.Errorf("saving state: %w", err)
 	}
 
-	// Write activity log entry (best-effort).
-	if s.Config.Logs.Enabled {
-		state.PruneLogFiles(state.LogDir(), s.Config.Logs.RetentionDays, s.Config.Logs.MaxFiles)
-		detail := buildInitLogDetail(s)
-		state.WriteLogEntry(s.SessionID, string(s.StartedAtPhase), state.LogEntry{
-			Ts:     state.NowTS(),
-			Cmd:    "init",
-			Phase:  string(s.Phase),
-			State:  string(s.State),
-			Detail: detail,
-		})
-	}
+	// Activity logging — prune first, then create file, then write init entry.
+	state.PruneLogs(cfg.Logs)
+	logger := state.NewLogger(cfg.Logs, phase, sessionID)
+	batchSize, minRounds, maxRounds := phaseRoundConfig(cfg, phase)
+	logger.Write(state.LogEntry{
+		TS:    state.LogNow(),
+		Cmd:   "init",
+		Phase: string(phase),
+		State: string(s.State),
+		Detail: map[string]interface{}{
+			"from":       initFrom,
+			"batch_size": batchSize,
+			"rounds":     fmt.Sprintf("%d-%d", minRounds, maxRounds),
+			"guided":     cfg.General.UserGuided,
+		},
+	})
 
-	state.PrintAdvanceOutput(out, s, stateDir)
+	state.PrintAdvanceOutput(out, s, projectRoot)
 
 	return nil
 }
 
-// buildInitLogDetail builds the detail map for an init log entry.
-func buildInitLogDetail(s *state.ForgeState) map[string]any {
-	detail := map[string]any{
-		"guided": s.Config.General.UserGuided,
-	}
-	switch s.Phase {
+// phaseRoundConfig returns batch size and min/max rounds for the given phase.
+func phaseRoundConfig(cfg state.ForgeConfig, phase state.PhaseName) (batchSize, minRounds, maxRounds int) {
+	switch phase {
 	case state.PhaseSpecifying:
-		ec := s.Config.Specifying.Eval
-		detail["batch"] = s.Config.Specifying.Batch
-		detail["rounds"] = fmt.Sprintf("%d-%d", ec.MinRounds, ec.MaxRounds)
+		return cfg.Specifying.Batch, cfg.Specifying.Eval.MinRounds, cfg.Specifying.Eval.MaxRounds
 	case state.PhasePlanning:
-		ec := s.Config.Planning.Eval
-		detail["batch"] = s.Config.Planning.Batch
-		detail["rounds"] = fmt.Sprintf("%d-%d", ec.MinRounds, ec.MaxRounds)
+		return cfg.Planning.Batch, cfg.Planning.Eval.MinRounds, cfg.Planning.Eval.MaxRounds
 	case state.PhaseImplementing:
-		ec := s.Config.Implementing.Eval
-		detail["batch"] = s.Config.Implementing.Batch
-		detail["rounds"] = fmt.Sprintf("%d-%d", ec.MinRounds, ec.MaxRounds)
+		return cfg.Implementing.Batch, cfg.Implementing.Eval.MinRounds, cfg.Implementing.Eval.MaxRounds
+	default:
+		return 0, 0, 0
 	}
-	return detail
 }
 
 func printValidationErrors(w interface{ Write([]byte) (int, error) }, errs []string) {

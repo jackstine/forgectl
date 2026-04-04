@@ -35,7 +35,7 @@ All 6 fields are required on every entry. No extra fields allowed.
 
 - Top-level must have exactly one key: `"plans"`.
 - `plans` array must be non-empty.
-- Each entry must have exactly the 6 fields listed — no more, no fewer.
+- Each entry must have exactly the 6 fields listed — no more, no fewer. (Note: `topic` was removed; `spec_commits` was added.)
 - All field names and values are case-sensitive.
 
 ---

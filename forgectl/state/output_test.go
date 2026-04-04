@@ -42,8 +42,8 @@ func TestOutputCommitNoCommitsShowsAdvance(t *testing.T) {
 	advanceImplToCommit(t, s, dir)
 
 	out := outputOf(s, dir)
-	if !strings.Contains(out, "Advance to continue.") {
-		t.Errorf("expected 'Advance to continue.' in COMMIT output with enable_commits=false, got:\n%s", out)
+	if !strings.Contains(out, "advance to continue") {
+		t.Errorf("expected 'advance to continue' in COMMIT output with enable_commits=false, got:\n%s", out)
 	}
 	if strings.Contains(out, "--message") {
 		t.Errorf("unexpected --message in COMMIT output with enable_commits=false, got:\n%s", out)

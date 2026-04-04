@@ -63,9 +63,9 @@ func TestValidatePlanQueue_Valid(t *testing.T) {
 			{
 				Name:            "Test Plan",
 				Domain:          "test",
-				Topic:           "A test plan",
 				File:            "test/plan.json",
 				Specs:           []string{"spec.md"},
+				SpecCommits:     []string{},
 				CodeSearchRoots: []string{"test/"},
 			},
 		},

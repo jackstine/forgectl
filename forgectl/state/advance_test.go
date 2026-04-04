@@ -1,9 +1,11 @@
 package state
 
 import (
+	"bytes"
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -36,7 +38,7 @@ func TestInitAtPlanningPhase(t *testing.T) {
 		State:          StateOrient,
 		StartedAtPhase: PhasePlanning,
 		Planning: NewPlanningState([]PlanQueueEntry{
-			{Name: "Plan1", Domain: "test", Topic: "t", File: "plan.json", Specs: []string{}, CodeSearchRoots: []string{}},
+			{Name: "Plan1", Domain: "test", File: "plan.json", Specs: []string{}, SpecCommits: []string{}, CodeSearchRoots: []string{}},
 		}),
 	}
 
@@ -49,6 +51,18 @@ func TestInitAtPlanningPhase(t *testing.T) {
 }
 
 // --- Specifying Phase Tests ---
+
+func makeTestConfig(batchSize, minRounds, maxRounds int) ForgeConfig {
+	cfg := DefaultForgeConfig()
+	cfg.Implementing.Batch = batchSize
+	cfg.Implementing.Eval.MinRounds = minRounds
+	cfg.Implementing.Eval.MaxRounds = maxRounds
+	cfg.Specifying.Eval.MinRounds = minRounds
+	cfg.Specifying.Eval.MaxRounds = maxRounds
+	cfg.Planning.Eval.MinRounds = minRounds
+	cfg.Planning.Eval.MaxRounds = maxRounds
+	return cfg
+}
 
 func newSpecifyingState(numSpecs int) *ForgeState {
 	var specs []SpecQueueEntry
@@ -187,7 +201,8 @@ func TestSpecifyingPassAtMinRoundsGoesToAccept(t *testing.T) {
 	}
 }
 
-func TestSpecifyingPassRequiresMessage(t *testing.T) {
+func TestSpecifyingPassMessageNotRequiredWithoutEnableCommits(t *testing.T) {
+	// enable_commits defaults to false — message should not be required.
 	s := newSpecifyingState(1)
 	advanceToEvaluate(t, s)
 
@@ -196,20 +211,455 @@ func TestSpecifyingPassRequiresMessage(t *testing.T) {
 	os.WriteFile(evalFile, []byte("eval"), 0644)
 
 	err := Advance(s, AdvanceInput{Verdict: "PASS", EvalReport: evalFile}, "")
+	if err != nil {
+		t.Errorf("expected no error without enable_commits, got: %v", err)
+	}
+}
+
+func TestSpecifyingPassRequiresMessageWhenEnableCommits(t *testing.T) {
+	// Per spec, --message is required at COMPLETE (not EVALUATE) when enable_commits=true.
+	// At EVALUATE, PASS with eval-report should succeed and advance to ACCEPT.
+	s := newSpecifyingState(1)
+	s.Config.General.EnableCommits = true
+	s.Config.Specifying.Eval.EnableEvalOutput = true
+	advanceToEvaluate(t, s)
+
+	dir := t.TempDir()
+	evalFile := filepath.Join(dir, "eval.md")
+	os.WriteFile(evalFile, []byte("eval"), 0644)
+
+	err := Advance(s, AdvanceInput{Verdict: "PASS", EvalReport: evalFile}, "")
+	if err != nil {
+		t.Errorf("EVALUATE PASS with eval-report should succeed: %v", err)
+	}
+	if s.State != StateAccept {
+		t.Errorf("expected ACCEPT after PASS at min_rounds, got %s", s.State)
+	}
+}
+
+func TestSpecifyingAcceptGoesToCrossReference(t *testing.T) {
+	s := newSpecifyingState(1)
+	advanceToAccept(t, s)
+
+	// ACCEPT → CROSS_REFERENCE (domain done, queue empty)
+	Advance(s, AdvanceInput{}, "")
+	if s.State != StateCrossReference {
+		t.Fatalf("expected CROSS_REFERENCE, got %s", s.State)
+	}
+}
+
+// --- Batch Processing Tests ---
+
+func newSpecifyingStateWithSpecs(specs []SpecQueueEntry) *ForgeState {
+	return &ForgeState{
+		Phase:      PhaseSpecifying,
+		State:      StateOrient,
+		Config:     makeTestConfig(2, 1, 3),
+		Specifying: NewSpecifyingState(specs),
+	}
+}
+
+func TestBatchSelectionSameDomain(t *testing.T) {
+	// With batch_size=2 and 3 same-domain specs, ORIENT selects first 2.
+	specs := []SpecQueueEntry{
+		{Name: "A", Domain: "test", Topic: "t", File: "a.md"},
+		{Name: "B", Domain: "test", Topic: "t", File: "b.md"},
+		{Name: "C", Domain: "test", Topic: "t", File: "c.md"},
+	}
+	s := newSpecifyingStateWithSpecs(specs)
+	s.Config.Specifying.Batch = 2
+
+	if err := Advance(s, AdvanceInput{}, ""); err != nil {
+		t.Fatal(err)
+	}
+	if s.State != StateSelect {
+		t.Fatalf("expected SELECT, got %s", s.State)
+	}
+	if len(s.Specifying.CurrentSpecs) != 2 {
+		t.Errorf("expected 2 specs in batch, got %d", len(s.Specifying.CurrentSpecs))
+	}
+	if len(s.Specifying.Queue) != 1 {
+		t.Errorf("expected 1 spec remaining in queue, got %d", len(s.Specifying.Queue))
+	}
+	if s.Specifying.BatchNumber != 1 {
+		t.Errorf("expected BatchNumber=1, got %d", s.Specifying.BatchNumber)
+	}
+}
+
+func TestBatchSelectionStopsAtDomainBoundary(t *testing.T) {
+	// Batch stops at domain boundary — specs from "other" stay in queue.
+	specs := []SpecQueueEntry{
+		{Name: "A", Domain: "test", Topic: "t", File: "a.md"},
+		{Name: "B", Domain: "other", Topic: "t", File: "b.md"},
+		{Name: "C", Domain: "test", Topic: "t", File: "c.md"},
+	}
+	s := newSpecifyingStateWithSpecs(specs)
+	s.Config.Specifying.Batch = 3
+
+	if err := Advance(s, AdvanceInput{}, ""); err != nil {
+		t.Fatal(err)
+	}
+	if len(s.Specifying.CurrentSpecs) != 1 {
+		t.Errorf("expected 1 spec in batch (contiguous boundary), got %d", len(s.Specifying.CurrentSpecs))
+	}
+	if s.Specifying.CurrentSpecs[0].Name != "A" {
+		t.Errorf("expected spec A in batch, got %s", s.Specifying.CurrentSpecs[0].Name)
+	}
+	if len(s.Specifying.Queue) != 2 {
+		t.Errorf("expected 2 specs in queue, got %d", len(s.Specifying.Queue))
+	}
+}
+
+func TestBatchEvalRecordAppliedToAllSpecs(t *testing.T) {
+	// EVALUATE applies eval record to ALL specs in batch.
+	specs := []SpecQueueEntry{
+		{Name: "A", Domain: "test", Topic: "t", File: "a.md"},
+		{Name: "B", Domain: "test", Topic: "t", File: "b.md"},
+	}
+	s := newSpecifyingStateWithSpecs(specs)
+	s.Config.Specifying.Batch = 2
+
+	advanceToEvaluate(t, s)
+
+	dir := t.TempDir()
+	evalFile := filepath.Join(dir, "eval.md")
+	os.WriteFile(evalFile, []byte("eval"), 0644)
+
+	if err := Advance(s, AdvanceInput{Verdict: "FAIL", EvalReport: evalFile}, ""); err != nil {
+		t.Fatal(err)
+	}
+
+	for i, cs := range s.Specifying.CurrentSpecs {
+		if len(cs.Evals) != 1 {
+			t.Errorf("spec[%d] expected 1 eval record, got %d", i, len(cs.Evals))
+		}
+	}
+}
+
+func TestBatchAcceptMovesAllSpecsToCompleted(t *testing.T) {
+	// ACCEPT moves all current_specs to completed.
+	specs := []SpecQueueEntry{
+		{Name: "A", Domain: "test", Topic: "t", File: "a.md"},
+		{Name: "B", Domain: "test", Topic: "t", File: "b.md"},
+	}
+	s := newSpecifyingStateWithSpecs(specs)
+	s.Config.Specifying.Batch = 2
+
+	advanceToAccept(t, s)
+	if len(s.Specifying.CurrentSpecs) != 2 {
+		t.Fatalf("expected 2 specs in batch before accept advance")
+	}
+
+	// ACCEPT → CROSS_REFERENCE
+	if err := Advance(s, AdvanceInput{}, ""); err != nil {
+		t.Fatal(err)
+	}
+	if len(s.Specifying.Completed) != 2 {
+		t.Errorf("expected 2 completed specs, got %d", len(s.Specifying.Completed))
+	}
+	if s.Specifying.CurrentSpecs != nil {
+		t.Errorf("expected current_specs to be nil after accept")
+	}
+	for i, c := range s.Specifying.Completed {
+		if c.BatchNumber != 1 {
+			t.Errorf("completed[%d] expected BatchNumber=1, got %d", i, c.BatchNumber)
+		}
+	}
+}
+
+func TestBatchAcceptSameDomainRemainingGoesToOrient(t *testing.T) {
+	// When same domain has more queued specs, ACCEPT transitions to ORIENT.
+	specs := []SpecQueueEntry{
+		{Name: "A", Domain: "test", Topic: "t", File: "a.md"},
+		{Name: "B", Domain: "test", Topic: "t", File: "b.md"},
+	}
+	s := newSpecifyingStateWithSpecs(specs)
+	s.Config.Specifying.Batch = 1 // batch of 1, so B stays queued
+
+	advanceToAccept(t, s)
+	// ACCEPT → ORIENT (same domain still in queue)
+	if err := Advance(s, AdvanceInput{}, ""); err != nil {
+		t.Fatal(err)
+	}
+	if s.State != StateOrient {
+		t.Errorf("expected ORIENT (same domain in queue), got %s", s.State)
+	}
+}
+
+func TestCrossReferenceFlow(t *testing.T) {
+	// Full CROSS_REFERENCE → CROSS_REFERENCE_EVAL → CROSS_REFERENCE_REVIEW → DONE.
+	s := newSpecifyingState(1)
+	advanceToAccept(t, s)
+
+	dir := t.TempDir()
+	crEvalFile := filepath.Join(dir, "cr-eval.md")
+	os.WriteFile(crEvalFile, []byte("cross-ref eval"), 0644)
+
+	// ACCEPT → CROSS_REFERENCE
+	if err := Advance(s, AdvanceInput{}, ""); err != nil {
+		t.Fatal(err)
+	}
+	if s.State != StateCrossReference {
+		t.Fatalf("expected CROSS_REFERENCE, got %s", s.State)
+	}
+
+	// CROSS_REFERENCE → CROSS_REFERENCE_EVAL
+	if err := Advance(s, AdvanceInput{}, ""); err != nil {
+		t.Fatal(err)
+	}
+	if s.State != StateCrossReferenceEval {
+		t.Fatalf("expected CROSS_REFERENCE_EVAL, got %s", s.State)
+	}
+
+	// CROSS_REFERENCE_EVAL PASS → CROSS_REFERENCE_REVIEW
+	if err := Advance(s, AdvanceInput{Verdict: "PASS", EvalReport: crEvalFile}, ""); err != nil {
+		t.Fatal(err)
+	}
+	if s.State != StateCrossReferenceReview {
+		t.Fatalf("expected CROSS_REFERENCE_REVIEW, got %s", s.State)
+	}
+
+	// CROSS_REFERENCE_REVIEW → DONE (queue empty)
+	if err := Advance(s, AdvanceInput{}, ""); err != nil {
+		t.Fatal(err)
+	}
+	if s.State != StateDone {
+		t.Errorf("expected DONE, got %s", s.State)
+	}
+}
+
+func TestCrossReferenceEvalRequiresVerdictAndReport(t *testing.T) {
+	// CROSS_REFERENCE_EVAL must reject advance without verdict.
+	// eval-report is required only when enable_eval_output=true.
+	s := newSpecifyingState(1)
+	s.Config.Specifying.Eval.EnableEvalOutput = true
+	advanceToAccept(t, s)
+	Advance(s, AdvanceInput{}, "")  // ACCEPT → CROSS_REFERENCE
+	Advance(s, AdvanceInput{}, "")  // CROSS_REFERENCE → CROSS_REFERENCE_EVAL
+
+	// Missing both.
+	err := Advance(s, AdvanceInput{}, "")
 	if err == nil {
-		t.Error("expected error for missing --message with PASS")
+		t.Error("expected error for missing --verdict in CROSS_REFERENCE_EVAL")
+	}
+
+	// Verdict present but missing eval-report (enable_eval_output=true).
+	err = Advance(s, AdvanceInput{Verdict: "PASS"}, "")
+	if err == nil {
+		t.Error("expected error for missing --eval-report in CROSS_REFERENCE_EVAL when enable_eval_output=true")
+	}
+}
+
+func TestCrossReferenceFailBelowMaxGoesBackToRef(t *testing.T) {
+	// CROSS_REFERENCE_EVAL FAIL below max_rounds returns to CROSS_REFERENCE.
+	s := newSpecifyingState(1)
+	s.Config.Specifying.CrossReference.MaxRounds = 2
+	advanceToAccept(t, s)
+
+	dir := t.TempDir()
+	crEvalFile := filepath.Join(dir, "cr-eval.md")
+	os.WriteFile(crEvalFile, []byte("cross-ref eval"), 0644)
+
+	Advance(s, AdvanceInput{}, "") // ACCEPT → CROSS_REFERENCE
+	Advance(s, AdvanceInput{}, "") // CROSS_REFERENCE → CROSS_REFERENCE_EVAL (round 1)
+
+	// FAIL at round 1 (below max=2) → back to CROSS_REFERENCE
+	if err := Advance(s, AdvanceInput{Verdict: "FAIL", EvalReport: crEvalFile}, ""); err != nil {
+		t.Fatal(err)
+	}
+	if s.State != StateCrossReference {
+		t.Errorf("expected CROSS_REFERENCE after FAIL below max, got %s", s.State)
+	}
+}
+
+func TestCrossReferenceEvalPassAtRound1GoesToReview(t *testing.T) {
+	// CROSS_REFERENCE_EVAL PASS at round 1 with min_rounds=1 transitions to CROSS_REFERENCE_REVIEW.
+	s := newSpecifyingState(1)
+	s.Config.Specifying.CrossReference.MinRounds = 1
+	advanceToAccept(t, s)
+
+	dir := t.TempDir()
+	crEvalFile := filepath.Join(dir, "cr-eval.md")
+	os.WriteFile(crEvalFile, []byte("cross-ref eval"), 0644)
+
+	Advance(s, AdvanceInput{}, "") // ACCEPT → CROSS_REFERENCE
+	Advance(s, AdvanceInput{}, "") // CROSS_REFERENCE → CROSS_REFERENCE_EVAL (round 1)
+
+	if err := Advance(s, AdvanceInput{Verdict: "PASS", EvalReport: crEvalFile}, ""); err != nil {
+		t.Fatal(err)
+	}
+	if s.State != StateCrossReferenceReview {
+		t.Errorf("expected CROSS_REFERENCE_REVIEW, got %s", s.State)
+	}
+}
+
+func TestCrossReferenceEvalPassBelowMinRoundsLoopsBack(t *testing.T) {
+	// CROSS_REFERENCE_EVAL PASS below min_rounds loops back to CROSS_REFERENCE.
+	s := newSpecifyingState(1)
+	s.Config.Specifying.CrossReference.MinRounds = 2
+	advanceToAccept(t, s)
+
+	dir := t.TempDir()
+	crEvalFile := filepath.Join(dir, "cr-eval.md")
+	os.WriteFile(crEvalFile, []byte("cross-ref eval"), 0644)
+
+	Advance(s, AdvanceInput{}, "") // ACCEPT → CROSS_REFERENCE
+	Advance(s, AdvanceInput{}, "") // CROSS_REFERENCE → CROSS_REFERENCE_EVAL (round 1)
+
+	// PASS at round 1 with min_rounds=2 → not enough, loop back.
+	if err := Advance(s, AdvanceInput{Verdict: "PASS", EvalReport: crEvalFile}, ""); err != nil {
+		t.Fatal(err)
+	}
+	if s.State != StateCrossReference {
+		t.Errorf("expected CROSS_REFERENCE (below min rounds), got %s", s.State)
+	}
+}
+
+func TestCrossReferenceEvalPassRound2SkipsReview(t *testing.T) {
+	// CROSS_REFERENCE_EVAL PASS at round>1 with min_rounds met skips CROSS_REFERENCE_REVIEW,
+	// going directly to DONE (queue empty) or ORIENT (queue non-empty).
+	s := newSpecifyingState(1)
+	s.Config.Specifying.CrossReference.MinRounds = 1
+	s.Config.Specifying.CrossReference.MaxRounds = 3
+	advanceToAccept(t, s)
+
+	dir := t.TempDir()
+	crEvalFile := filepath.Join(dir, "cr-eval.md")
+	os.WriteFile(crEvalFile, []byte("cross-ref eval"), 0644)
+
+	Advance(s, AdvanceInput{}, "")                                             // ACCEPT → CROSS_REFERENCE
+	Advance(s, AdvanceInput{}, "")                                             // CROSS_REFERENCE → CROSS_REFERENCE_EVAL (round 1)
+	Advance(s, AdvanceInput{Verdict: "FAIL", EvalReport: crEvalFile}, "")     // FAIL at round 1 → CROSS_REFERENCE
+	Advance(s, AdvanceInput{}, "")                                             // CROSS_REFERENCE → CROSS_REFERENCE_EVAL (round 2)
+
+	// PASS at round 2 (round>1, min_rounds met) → skip review, go to DONE (queue empty).
+	if err := Advance(s, AdvanceInput{Verdict: "PASS", EvalReport: crEvalFile}, ""); err != nil {
+		t.Fatal(err)
+	}
+	if s.State != StateDone {
+		t.Errorf("expected DONE (skipped review at round>1), got %s", s.State)
+	}
+}
+
+func TestCrossReferenceEvalForcedAtRound1GoesToReview(t *testing.T) {
+	// CROSS_REFERENCE_EVAL FAIL at max_rounds (forced) on round 1 enters CROSS_REFERENCE_REVIEW.
+	s := newSpecifyingState(1)
+	s.Config.Specifying.CrossReference.MaxRounds = 1
+	advanceToAccept(t, s)
+
+	dir := t.TempDir()
+	crEvalFile := filepath.Join(dir, "cr-eval.md")
+	os.WriteFile(crEvalFile, []byte("cross-ref eval"), 0644)
+
+	Advance(s, AdvanceInput{}, "") // ACCEPT → CROSS_REFERENCE
+	Advance(s, AdvanceInput{}, "") // CROSS_REFERENCE → CROSS_REFERENCE_EVAL (round 1)
+
+	// FAIL at round 1 with max_rounds=1 → forced accept, round==1 → CROSS_REFERENCE_REVIEW.
+	if err := Advance(s, AdvanceInput{Verdict: "FAIL", EvalReport: crEvalFile}, ""); err != nil {
+		t.Fatal(err)
+	}
+	if s.State != StateCrossReferenceReview {
+		t.Errorf("expected CROSS_REFERENCE_REVIEW (forced at round 1), got %s", s.State)
+	}
+}
+
+func TestCrossReferenceReviewEmptyQueueToDone(t *testing.T) {
+	// CROSS_REFERENCE_REVIEW with empty queue advances to DONE.
+	s := newSpecifyingState(1)
+	advanceToAccept(t, s)
+
+	dir := t.TempDir()
+	crEvalFile := filepath.Join(dir, "cr-eval.md")
+	os.WriteFile(crEvalFile, []byte("cross-ref eval"), 0644)
+
+	Advance(s, AdvanceInput{}, "")                                          // ACCEPT → CROSS_REFERENCE
+	Advance(s, AdvanceInput{}, "")                                          // CROSS_REFERENCE → CROSS_REFERENCE_EVAL
+	Advance(s, AdvanceInput{Verdict: "PASS", EvalReport: crEvalFile}, "")  // → CROSS_REFERENCE_REVIEW
+
+	if err := Advance(s, AdvanceInput{}, ""); err != nil {
+		t.Fatal(err)
+	}
+	if s.State != StateDone {
+		t.Errorf("expected DONE (empty queue), got %s", s.State)
+	}
+}
+
+func TestCrossReferenceReviewOutputUserReviewTrue(t *testing.T) {
+	// CROSS_REFERENCE_REVIEW output shows STOP when user_review=true.
+	s := newSpecifyingState(1)
+	s.Config.Specifying.CrossReference.UserReview = true
+	advanceToAccept(t, s)
+
+	dir := t.TempDir()
+	crEvalFile := filepath.Join(dir, "cr-eval.md")
+	os.WriteFile(crEvalFile, []byte("cross-ref eval"), 0644)
+
+	Advance(s, AdvanceInput{}, "")
+	Advance(s, AdvanceInput{}, "")
+	Advance(s, AdvanceInput{Verdict: "PASS", EvalReport: crEvalFile}, "") // → CROSS_REFERENCE_REVIEW
+
+	var buf bytes.Buffer
+	PrintAdvanceOutput(&buf, s, "")
+	out := buf.String()
+	if !strings.Contains(out, "STOP") {
+		t.Errorf("expected 'STOP' in CROSS_REFERENCE_REVIEW output when user_review=true, got:\n%s", out)
+	}
+}
+
+func TestCrossReferenceReviewOutputUserReviewFalse(t *testing.T) {
+	// CROSS_REFERENCE_REVIEW output shows 'Domain cross-reference complete' when user_review=false.
+	s := newSpecifyingState(1)
+	s.Config.Specifying.CrossReference.UserReview = false
+	advanceToAccept(t, s)
+
+	dir := t.TempDir()
+	crEvalFile := filepath.Join(dir, "cr-eval.md")
+	os.WriteFile(crEvalFile, []byte("cross-ref eval"), 0644)
+
+	Advance(s, AdvanceInput{}, "")
+	Advance(s, AdvanceInput{}, "")
+	Advance(s, AdvanceInput{Verdict: "PASS", EvalReport: crEvalFile}, "") // → CROSS_REFERENCE_REVIEW
+
+	var buf bytes.Buffer
+	PrintAdvanceOutput(&buf, s, "")
+	out := buf.String()
+	if !strings.Contains(out, "Domain cross-reference complete") {
+		t.Errorf("expected 'Domain cross-reference complete' in output when user_review=false, got:\n%s", out)
+	}
+}
+
+func TestLastDomainCrossReferenceReviewToDone(t *testing.T) {
+	// After the last domain's CROSS_REFERENCE_REVIEW, advancing transitions to DONE.
+	s := newSpecifyingState(1)
+	// Queue is empty after accept (single spec, single domain).
+	advanceToAccept(t, s)
+	if len(s.Specifying.Queue) != 0 {
+		t.Skip("test requires empty queue after accept")
+	}
+
+	dir := t.TempDir()
+	crEvalFile := filepath.Join(dir, "cr-eval.md")
+	os.WriteFile(crEvalFile, []byte("cross-ref eval"), 0644)
+
+	Advance(s, AdvanceInput{}, "")
+	Advance(s, AdvanceInput{}, "")
+	Advance(s, AdvanceInput{Verdict: "PASS", EvalReport: crEvalFile}, "") // → CROSS_REFERENCE_REVIEW
+
+	if s.State != StateCrossReferenceReview {
+		t.Fatalf("expected CROSS_REFERENCE_REVIEW, got %s", s.State)
+	}
+
+	if err := Advance(s, AdvanceInput{}, ""); err != nil {
+		t.Fatal(err)
+	}
+	if s.State != StateDone {
+		t.Errorf("expected DONE after last domain's CROSS_REFERENCE_REVIEW, got %s", s.State)
 	}
 }
 
 func TestSpecifyingDoneToReconcile(t *testing.T) {
 	s := newSpecifyingState(1)
-	advanceToAccept(t, s)
-
-	// ACCEPT → DONE (queue empty)
-	Advance(s, AdvanceInput{}, "")
-	if s.State != StateDone {
-		t.Fatalf("expected DONE, got %s", s.State)
-	}
+	advanceToDone(t, s)
 
 	// DONE → RECONCILE
 	Advance(s, AdvanceInput{}, "")
@@ -219,20 +669,30 @@ func TestSpecifyingDoneToReconcile(t *testing.T) {
 }
 
 func TestReconcileFlowPass(t *testing.T) {
+	// RECONCILE_EVAL PASS at round 1 (min_rounds=0) → RECONCILE_REVIEW → COMPLETE (empty queue).
 	s := newSpecifyingState(1)
 	advanceToDone(t, s)
 
-	// DONE → RECONCILE
-	Advance(s, AdvanceInput{}, "")
-	// RECONCILE → RECONCILE_EVAL
-	Advance(s, AdvanceInput{}, "")
+	dir := t.TempDir()
+	evalFile := filepath.Join(dir, "reconcile-eval.md")
+	os.WriteFile(evalFile, []byte("reconcile eval"), 0644)
+
+	Advance(s, AdvanceInput{}, "") // DONE → RECONCILE
+	Advance(s, AdvanceInput{}, "") // RECONCILE → RECONCILE_EVAL
 	if s.State != StateReconcileEval {
 		t.Fatalf("expected RECONCILE_EVAL, got %s", s.State)
 	}
 
-	// RECONCILE_EVAL PASS → COMPLETE
-	err := Advance(s, AdvanceInput{Verdict: "PASS", Message: "reconcile"}, "")
-	if err != nil {
+	// PASS at round 1 with min_rounds=0 → RECONCILE_REVIEW.
+	if err := Advance(s, AdvanceInput{Verdict: "PASS", EvalReport: evalFile}, ""); err != nil {
+		t.Fatal(err)
+	}
+	if s.State != StateReconcileReview {
+		t.Fatalf("expected RECONCILE_REVIEW, got %s", s.State)
+	}
+
+	// RECONCILE_REVIEW with empty queue → COMPLETE.
+	if err := Advance(s, AdvanceInput{}, ""); err != nil {
 		t.Fatal(err)
 	}
 	if s.State != StateComplete {
@@ -241,25 +701,328 @@ func TestReconcileFlowPass(t *testing.T) {
 }
 
 func TestReconcileFlowFailThenFix(t *testing.T) {
+	// FAIL below max_rounds → RECONCILE; then PASS at round 2 → COMPLETE (skips REVIEW).
+	s := newSpecifyingState(1)
+	s.Config.Specifying.Reconciliation.MaxRounds = 3
+	advanceToDone(t, s)
+
+	dir := t.TempDir()
+	evalFile := filepath.Join(dir, "reconcile-eval.md")
+	os.WriteFile(evalFile, []byte("reconcile eval"), 0644)
+
+	Advance(s, AdvanceInput{}, "") // DONE → RECONCILE
+	Advance(s, AdvanceInput{}, "") // RECONCILE → RECONCILE_EVAL (round 1)
+
+	// FAIL at round 1 (below max=3) → RECONCILE.
+	if err := Advance(s, AdvanceInput{Verdict: "FAIL", EvalReport: evalFile}, ""); err != nil {
+		t.Fatal(err)
+	}
+	if s.State != StateReconcile {
+		t.Fatalf("expected RECONCILE after FAIL below max, got %s", s.State)
+	}
+
+	Advance(s, AdvanceInput{}, "") // RECONCILE → RECONCILE_EVAL (round 2)
+
+	// PASS at round 2 (round>1) → COMPLETE (skips REVIEW).
+	if err := Advance(s, AdvanceInput{Verdict: "PASS", EvalReport: evalFile}, ""); err != nil {
+		t.Fatal(err)
+	}
+	if s.State != StateComplete {
+		t.Errorf("expected COMPLETE (round>1 skips review), got %s", s.State)
+	}
+}
+
+func TestReconcileEvalRequiresEvalReport(t *testing.T) {
+	// RECONCILE_EVAL must reject advance without --eval-report when enable_eval_output=true.
+	s := newSpecifyingState(1)
+	s.Config.Specifying.Eval.EnableEvalOutput = true
+	advanceToDone(t, s)
+	Advance(s, AdvanceInput{}, "") // DONE → RECONCILE
+	Advance(s, AdvanceInput{}, "") // RECONCILE → RECONCILE_EVAL
+
+	// Missing eval-report with enable_eval_output=true.
+	err := Advance(s, AdvanceInput{Verdict: "PASS"}, "")
+	if err == nil {
+		t.Error("expected error for missing --eval-report in RECONCILE_EVAL when enable_eval_output=true")
+	}
+}
+
+func TestReconcileEvalRequiresVerdict(t *testing.T) {
+	// RECONCILE_EVAL must reject advance without --verdict.
 	s := newSpecifyingState(1)
 	advanceToDone(t, s)
+	Advance(s, AdvanceInput{}, "") // DONE → RECONCILE
+	Advance(s, AdvanceInput{}, "") // RECONCILE → RECONCILE_EVAL
+
+	err := Advance(s, AdvanceInput{}, "")
+	if err == nil {
+		t.Error("expected error for missing --verdict in RECONCILE_EVAL")
+	}
+}
+
+func TestReconcileEvalPassAtRound1GoesToReview(t *testing.T) {
+	// PASS at round 1 with min_rounds=0 → RECONCILE_REVIEW.
+	s := newSpecifyingState(1)
+	advanceToDone(t, s)
+
+	dir := t.TempDir()
+	evalFile := filepath.Join(dir, "re-eval.md")
+	os.WriteFile(evalFile, []byte("reconcile eval"), 0644)
+
+	Advance(s, AdvanceInput{}, "") // DONE → RECONCILE
+	Advance(s, AdvanceInput{}, "") // RECONCILE → RECONCILE_EVAL (round 1)
+
+	if err := Advance(s, AdvanceInput{Verdict: "PASS", EvalReport: evalFile}, ""); err != nil {
+		t.Fatal(err)
+	}
+	if s.State != StateReconcileReview {
+		t.Errorf("expected RECONCILE_REVIEW at round 1, got %s", s.State)
+	}
+}
+
+func TestReconcileEvalPassBelowMinRoundsLoopsBack(t *testing.T) {
+	// PASS below min_rounds loops back to RECONCILE.
+	s := newSpecifyingState(1)
+	s.Config.Specifying.Reconciliation.MinRounds = 2
+	advanceToDone(t, s)
+
+	dir := t.TempDir()
+	evalFile := filepath.Join(dir, "re-eval.md")
+	os.WriteFile(evalFile, []byte("reconcile eval"), 0644)
+
+	Advance(s, AdvanceInput{}, "") // DONE → RECONCILE
+	Advance(s, AdvanceInput{}, "") // RECONCILE → RECONCILE_EVAL (round 1)
+
+	// PASS at round 1 with min_rounds=2 → not enough, loop back.
+	if err := Advance(s, AdvanceInput{Verdict: "PASS", EvalReport: evalFile}, ""); err != nil {
+		t.Fatal(err)
+	}
+	if s.State != StateReconcile {
+		t.Errorf("expected RECONCILE (below min rounds), got %s", s.State)
+	}
+}
+
+func TestReconcileEvalPassAtRound2SkipsReview(t *testing.T) {
+	// PASS at round>1 with min_rounds met skips RECONCILE_REVIEW → COMPLETE.
+	s := newSpecifyingState(1)
+	s.Config.Specifying.Reconciliation.MaxRounds = 3
+	advanceToDone(t, s)
+
+	dir := t.TempDir()
+	evalFile := filepath.Join(dir, "re-eval.md")
+	os.WriteFile(evalFile, []byte("reconcile eval"), 0644)
+
+	Advance(s, AdvanceInput{}, "")                                        // DONE → RECONCILE
+	Advance(s, AdvanceInput{}, "")                                        // RECONCILE → RECONCILE_EVAL (round 1)
+	Advance(s, AdvanceInput{Verdict: "FAIL", EvalReport: evalFile}, "")  // FAIL → RECONCILE
+	Advance(s, AdvanceInput{}, "")                                        // RECONCILE → RECONCILE_EVAL (round 2)
+
+	// PASS at round 2 → skip REVIEW → COMPLETE.
+	if err := Advance(s, AdvanceInput{Verdict: "PASS", EvalReport: evalFile}, ""); err != nil {
+		t.Fatal(err)
+	}
+	if s.State != StateComplete {
+		t.Errorf("expected COMPLETE (skipped review at round>1), got %s", s.State)
+	}
+}
+
+func TestReconcileEvalFailBelowMaxLoopsBack(t *testing.T) {
+	// FAIL below max_rounds loops back to RECONCILE.
+	s := newSpecifyingState(1)
+	s.Config.Specifying.Reconciliation.MaxRounds = 2
+	advanceToDone(t, s)
+
+	dir := t.TempDir()
+	evalFile := filepath.Join(dir, "re-eval.md")
+	os.WriteFile(evalFile, []byte("reconcile eval"), 0644)
+
+	Advance(s, AdvanceInput{}, "") // DONE → RECONCILE
+	Advance(s, AdvanceInput{}, "") // RECONCILE → RECONCILE_EVAL (round 1)
+
+	if err := Advance(s, AdvanceInput{Verdict: "FAIL", EvalReport: evalFile}, ""); err != nil {
+		t.Fatal(err)
+	}
+	if s.State != StateReconcile {
+		t.Errorf("expected RECONCILE after FAIL below max, got %s", s.State)
+	}
+}
+
+func TestReconcileEvalForcedAtRound1GoesToReview(t *testing.T) {
+	// FAIL at max_rounds (forced) at round 1 → RECONCILE_REVIEW.
+	s := newSpecifyingState(1)
+	s.Config.Specifying.Reconciliation.MaxRounds = 1
+	advanceToDone(t, s)
+
+	dir := t.TempDir()
+	evalFile := filepath.Join(dir, "re-eval.md")
+	os.WriteFile(evalFile, []byte("reconcile eval"), 0644)
+
+	Advance(s, AdvanceInput{}, "") // DONE → RECONCILE
+	Advance(s, AdvanceInput{}, "") // RECONCILE → RECONCILE_EVAL (round 1)
+
+	// FAIL at round 1 with max_rounds=1 → forced → RECONCILE_REVIEW.
+	if err := Advance(s, AdvanceInput{Verdict: "FAIL", EvalReport: evalFile}, ""); err != nil {
+		t.Fatal(err)
+	}
+	if s.State != StateReconcileReview {
+		t.Errorf("expected RECONCILE_REVIEW (forced at round 1), got %s", s.State)
+	}
+}
+
+func TestReconcileEvalForcedAtRound2GoesToComplete(t *testing.T) {
+	// FAIL at max_rounds (forced) at round>1 → COMPLETE (skips REVIEW).
+	s := newSpecifyingState(1)
+	s.Config.Specifying.Reconciliation.MaxRounds = 2
+	advanceToDone(t, s)
+
+	dir := t.TempDir()
+	evalFile := filepath.Join(dir, "re-eval.md")
+	os.WriteFile(evalFile, []byte("reconcile eval"), 0644)
+
+	Advance(s, AdvanceInput{}, "")                                        // DONE → RECONCILE
+	Advance(s, AdvanceInput{}, "")                                        // RECONCILE → RECONCILE_EVAL (round 1)
+	Advance(s, AdvanceInput{Verdict: "FAIL", EvalReport: evalFile}, "")  // FAIL at round 1 (below max=2) → RECONCILE
+	Advance(s, AdvanceInput{}, "")                                        // RECONCILE → RECONCILE_EVAL (round 2)
+
+	// FAIL at round 2 with max_rounds=2 → forced → round>1 → COMPLETE.
+	if err := Advance(s, AdvanceInput{Verdict: "FAIL", EvalReport: evalFile}, ""); err != nil {
+		t.Fatal(err)
+	}
+	if s.State != StateComplete {
+		t.Errorf("expected COMPLETE (forced at round>1), got %s", s.State)
+	}
+}
+
+func TestReconcileReviewEmptyQueueToComplete(t *testing.T) {
+	// RECONCILE_REVIEW with empty queue → COMPLETE.
+	s := newSpecifyingState(1)
+	advanceToDone(t, s)
+
+	dir := t.TempDir()
+	evalFile := filepath.Join(dir, "re-eval.md")
+	os.WriteFile(evalFile, []byte("reconcile eval"), 0644)
+
+	Advance(s, AdvanceInput{}, "")
+	Advance(s, AdvanceInput{}, "")
+	Advance(s, AdvanceInput{Verdict: "PASS", EvalReport: evalFile}, "") // → RECONCILE_REVIEW
+
+	if err := Advance(s, AdvanceInput{}, ""); err != nil {
+		t.Fatal(err)
+	}
+	if s.State != StateComplete {
+		t.Errorf("expected COMPLETE (empty queue), got %s", s.State)
+	}
+}
+
+func TestReconcileReviewNonEmptyQueueToDone(t *testing.T) {
+	// RECONCILE_REVIEW with non-empty queue → DONE (re-enter for new specs).
+	s := newSpecifyingState(1)
+	advanceToDone(t, s)
+
+	// Add a spec to the queue.
+	s.Specifying.Queue = append(s.Specifying.Queue, SpecQueueEntry{
+		Name: "New Spec", Domain: "test", Topic: "t", File: "test/specs/new.md",
+	})
+
+	dir := t.TempDir()
+	evalFile := filepath.Join(dir, "re-eval.md")
+	os.WriteFile(evalFile, []byte("reconcile eval"), 0644)
+
+	Advance(s, AdvanceInput{}, "")
+	Advance(s, AdvanceInput{}, "")
+	Advance(s, AdvanceInput{Verdict: "PASS", EvalReport: evalFile}, "") // → RECONCILE_REVIEW
+
+	if err := Advance(s, AdvanceInput{}, ""); err != nil {
+		t.Fatal(err)
+	}
+	if s.State != StateDone {
+		t.Errorf("expected DONE (non-empty queue re-enters DONE), got %s", s.State)
+	}
+}
+
+func TestReconcileEvalMessageRequiredWhenEnableCommits(t *testing.T) {
+	// Per spec, --message is required at COMPLETE (not RECONCILE_EVAL) when enable_commits=true.
+	// RECONCILE_EVAL PASS should succeed without --message.
+	s := newSpecifyingState(1)
+	s.Config.General.EnableCommits = true
+	s.Config.Specifying.Eval.EnableEvalOutput = true
+	advanceToDone(t, s)
+
+	dir := t.TempDir()
+	evalFile := filepath.Join(dir, "re-eval.md")
+	os.WriteFile(evalFile, []byte("reconcile eval"), 0644)
 
 	Advance(s, AdvanceInput{}, "") // DONE → RECONCILE
 	Advance(s, AdvanceInput{}, "") // RECONCILE → RECONCILE_EVAL
 
-	// FAIL → RECONCILE_REVIEW
-	Advance(s, AdvanceInput{Verdict: "FAIL"}, "")
-	if s.State != StateReconcileReview {
-		t.Fatalf("expected RECONCILE_REVIEW, got %s", s.State)
-	}
-
-	// FAIL → RECONCILE
-	err := Advance(s, AdvanceInput{Verdict: "FAIL"}, "")
+	// PASS with eval-report should succeed (--message not required at RECONCILE_EVAL).
+	err := Advance(s, AdvanceInput{Verdict: "PASS", EvalReport: evalFile}, "")
 	if err != nil {
-		t.Fatal(err)
+		t.Errorf("RECONCILE_EVAL PASS should not require --message: %v", err)
 	}
-	if s.State != StateReconcile {
-		t.Errorf("expected RECONCILE, got %s", s.State)
+}
+
+func TestReconcileEvalMessageNotRequiredWithoutEnableCommits(t *testing.T) {
+	// --message NOT required at RECONCILE_EVAL PASS when enable_commits=false (default).
+	s := newSpecifyingState(1)
+	s.Config.General.EnableCommits = false
+	advanceToDone(t, s)
+
+	dir := t.TempDir()
+	evalFile := filepath.Join(dir, "re-eval.md")
+	os.WriteFile(evalFile, []byte("reconcile eval"), 0644)
+
+	Advance(s, AdvanceInput{}, "") // DONE → RECONCILE
+	Advance(s, AdvanceInput{}, "") // RECONCILE → RECONCILE_EVAL
+
+	// PASS without --message should succeed when enable_commits=false.
+	err := Advance(s, AdvanceInput{Verdict: "PASS", EvalReport: evalFile}, "")
+	if err != nil {
+		t.Errorf("expected no error without --message when enable_commits=false: %v", err)
+	}
+}
+
+func TestReconcileReviewOutputUserReviewTrue(t *testing.T) {
+	// RECONCILE_REVIEW output shows STOP when user_review=true.
+	s := newSpecifyingState(1)
+	s.Config.Specifying.Reconciliation.UserReview = true
+	advanceToDone(t, s)
+
+	dir := t.TempDir()
+	evalFile := filepath.Join(dir, "re-eval.md")
+	os.WriteFile(evalFile, []byte("reconcile eval"), 0644)
+
+	Advance(s, AdvanceInput{}, "")
+	Advance(s, AdvanceInput{}, "")
+	Advance(s, AdvanceInput{Verdict: "PASS", EvalReport: evalFile}, "") // → RECONCILE_REVIEW
+
+	var buf bytes.Buffer
+	PrintAdvanceOutput(&buf, s, "")
+	out := buf.String()
+	if !strings.Contains(out, "STOP") {
+		t.Errorf("expected 'STOP' in RECONCILE_REVIEW output when user_review=true, got:\n%s", out)
+	}
+}
+
+func TestReconcileReviewOutputUserReviewFalse(t *testing.T) {
+	// RECONCILE_REVIEW output shows 'Reconciliation review complete' when user_review=false.
+	s := newSpecifyingState(1)
+	s.Config.Specifying.Reconciliation.UserReview = false
+	advanceToDone(t, s)
+
+	dir := t.TempDir()
+	evalFile := filepath.Join(dir, "re-eval.md")
+	os.WriteFile(evalFile, []byte("reconcile eval"), 0644)
+
+	Advance(s, AdvanceInput{}, "")
+	Advance(s, AdvanceInput{}, "")
+	Advance(s, AdvanceInput{Verdict: "PASS", EvalReport: evalFile}, "") // → RECONCILE_REVIEW
+
+	var buf bytes.Buffer
+	PrintAdvanceOutput(&buf, s, "")
+	out := buf.String()
+	if !strings.Contains(out, "Reconciliation review complete") {
+		t.Errorf("expected 'Reconciliation review complete' when user_review=false, got:\n%s", out)
 	}
 }
 
@@ -311,7 +1074,7 @@ func TestPhaseShiftSpecifyingWithFromSkipsGenqueue(t *testing.T) {
 	queueFile := filepath.Join(dir, "plans-queue.json")
 	input := PlanQueueInput{
 		Plans: []PlanQueueEntry{
-			{Name: "Plan1", Domain: "test", Topic: "t", File: "plan.json", Specs: []string{"spec.md"}, CodeSearchRoots: []string{"test/"}},
+			{Name: "Plan1", Domain: "test", File: "plan.json", Specs: []string{"spec.md"}, SpecCommits: []string{}, CodeSearchRoots: []string{"test/"}},
 		},
 	}
 	data, _ := json.Marshal(input)
@@ -358,7 +1121,7 @@ func TestPhaseShiftGuidedSetting(t *testing.T) {
 	queueFile := filepath.Join(dir, "plans-queue.json")
 	input := PlanQueueInput{
 		Plans: []PlanQueueEntry{
-			{Name: "Plan1", Domain: "test", Topic: "t", File: "plan.json", Specs: []string{}, CodeSearchRoots: []string{}},
+			{Name: "Plan1", Domain: "test", File: "plan.json", Specs: []string{}, SpecCommits: []string{}, CodeSearchRoots: []string{}},
 		},
 	}
 	data, _ := json.Marshal(input)
@@ -458,7 +1221,7 @@ func TestGenqueuePhaseShiftToPlanningWithFromOverride(t *testing.T) {
 	overrideFile := filepath.Join(dir, "override-queue.json")
 	input := PlanQueueInput{
 		Plans: []PlanQueueEntry{
-			{Name: "Override Plan", Domain: "override", Topic: "override", File: "override/plan.json", Specs: []string{"s.md"}, CodeSearchRoots: []string{"override/"}},
+			{Name: "Override Plan", Domain: "override", File: "override/plan.json", Specs: []string{"s.md"}, CodeSearchRoots: []string{"override/"}},
 		},
 	}
 	data, _ := json.Marshal(input)
@@ -564,7 +1327,7 @@ func writeValidPlanQueue(t *testing.T, dir, relPath string) {
 	os.MkdirAll(filepath.Dir(fullPath), 0755)
 	input := PlanQueueInput{
 		Plans: []PlanQueueEntry{
-			{Name: "Test Plan", Domain: "test", Topic: "t", File: "test/plan.json", Specs: []string{"spec.md"}, CodeSearchRoots: []string{"test/"}},
+			{Name: "Test Plan", Domain: "test", File: "test/plan.json", Specs: []string{"spec.md"}, CodeSearchRoots: []string{"test/"}},
 		},
 	}
 	data, _ := json.Marshal(input)
@@ -890,6 +1653,33 @@ func TestPlanningAcceptInterleavedGoesToImplementing(t *testing.T) {
 	}
 }
 
+func TestPlanningAcceptNoMessageRequiredWithoutEnableCommits(t *testing.T) {
+	dir := t.TempDir()
+	s := newPlanningStateWithDir(dir)
+	// enable_commits defaults to false
+	advancePlanningToAccept(t, s, dir)
+
+	err := Advance(s, AdvanceInput{}, dir) // no --message
+	if err != nil {
+		t.Errorf("expected no error in planning ACCEPT without enable_commits, got: %v", err)
+	}
+	if s.State != StatePhaseShift {
+		t.Errorf("expected PHASE_SHIFT, got %s", s.State)
+	}
+}
+
+func TestPlanningAcceptRequiresMessageWhenEnableCommits(t *testing.T) {
+	dir := t.TempDir()
+	s := newPlanningStateWithDir(dir)
+	s.Config.General.EnableCommits = true
+	advancePlanningToAccept(t, s, dir)
+
+	err := Advance(s, AdvanceInput{}, dir) // no --message
+	if err == nil {
+		t.Error("expected error in planning ACCEPT when enable_commits=true and no --message")
+	}
+}
+
 func TestPlanningAcceptAllFirstWithQueueGoesToPlanningPlanning(t *testing.T) {
 	dir := t.TempDir()
 	s := newPlanningStateWithTwoPlans(dir)
@@ -1072,7 +1862,7 @@ func TestImplementingDoneNoPlansIsTerminal(t *testing.T) {
 func newPlanningStateWithTwoPlans(dir string) *ForgeState {
 	s := newPlanningStateWithDir(dir) // plan1 as CurrentPlan
 	s.Planning.Queue = []PlanQueueEntry{
-		{Name: "Plan2", Domain: "test2", Topic: "t2", File: "impl2/plan.json", Specs: []string{"spec2.md"}, CodeSearchRoots: []string{"test2/"}},
+		{Name: "Plan2", Domain: "test2", File: "impl2/plan.json", Specs: []string{"spec2.md"}, CodeSearchRoots: []string{"test2/"}},
 	}
 	return s
 }
@@ -1082,7 +1872,7 @@ func newImplementingStateWithPlanningQueue(dir string, numItems, batchSize int) 
 	s := newImplementingState(dir, numItems, batchSize)
 	// Preserve Planning.CurrentPlan, just add to the Queue.
 	s.Planning.Queue = []PlanQueueEntry{
-		{Name: "Next Plan", Domain: "next", Topic: "t", File: "next/plan.json", Specs: []string{"s.md"}, CodeSearchRoots: []string{"next/"}},
+		{Name: "Next Plan", Domain: "next", File: "next/plan.json", Specs: []string{"s.md"}, CodeSearchRoots: []string{"next/"}},
 	}
 	return s
 }
@@ -1187,16 +1977,29 @@ func TestImplementLastItemGoesToEvaluate(t *testing.T) {
 	}
 }
 
-func TestFirstRoundImplementRequiresMessage(t *testing.T) {
+func TestFirstRoundImplementRequiresMessageWhenEnableCommits(t *testing.T) {
 	dir := t.TempDir()
 	s := newImplementingState(dir, 1, 1)
-	s.Config.General.EnableCommits = true // require message when commits enabled
+	s.Config.General.EnableCommits = true
 
 	Advance(s, AdvanceInput{}, dir) // ORIENT → IMPLEMENT
 
 	err := Advance(s, AdvanceInput{}, dir) // no --message
 	if err == nil {
-		t.Error("expected error for missing --message in first-round IMPLEMENT")
+		t.Error("expected error for missing --message in first-round IMPLEMENT when enable_commits=true")
+	}
+}
+
+func TestFirstRoundImplementNoMessageRequiredWithoutEnableCommits(t *testing.T) {
+	dir := t.TempDir()
+	s := newImplementingState(dir, 1, 1)
+	// enable_commits defaults to false
+
+	Advance(s, AdvanceInput{}, dir) // ORIENT → IMPLEMENT
+
+	err := Advance(s, AdvanceInput{}, dir) // no --message — should succeed
+	if err != nil {
+		t.Errorf("expected no error without enable_commits, got: %v", err)
 	}
 }
 
@@ -1269,6 +2072,32 @@ func TestCommitToOrientMoreItems(t *testing.T) {
 	}
 	if s.State != StateOrient {
 		t.Errorf("expected ORIENT (more items), got %s", s.State)
+	}
+}
+
+func TestCommitNoMessageRequiredWithoutEnableCommits(t *testing.T) {
+	dir := t.TempDir()
+	s := newImplementingState(dir, 1, 1)
+	// enable_commits defaults to false
+
+	advanceImplToCommit(t, s, dir)
+
+	err := Advance(s, AdvanceInput{}, dir) // no --message
+	if err != nil {
+		t.Errorf("expected no error in COMMIT without enable_commits, got: %v", err)
+	}
+}
+
+func TestCommitRequiresMessageWhenEnableCommits(t *testing.T) {
+	dir := t.TempDir()
+	s := newImplementingState(dir, 1, 1)
+	s.Config.General.EnableCommits = true
+
+	advanceImplToCommit(t, s, dir)
+
+	err := Advance(s, AdvanceInput{}, dir) // no --message
+	if err == nil {
+		t.Error("expected error in COMMIT when enable_commits=true and no --message")
 	}
 }
 
@@ -1369,15 +2198,28 @@ func advanceToAccept(t *testing.T, s *ForgeState) {
 func advanceToDone(t *testing.T, s *ForgeState) {
 	t.Helper()
 	advanceToAccept(t, s)
-	Advance(s, AdvanceInput{}, "") // ACCEPT → DONE
+
+	dir := t.TempDir()
+	crEvalFile := filepath.Join(dir, "cr-eval.md")
+	os.WriteFile(crEvalFile, []byte("cross-ref eval"), 0644)
+
+	Advance(s, AdvanceInput{}, "")                                             // ACCEPT → CROSS_REFERENCE
+	Advance(s, AdvanceInput{}, "")                                             // CROSS_REFERENCE → CROSS_REFERENCE_EVAL
+	Advance(s, AdvanceInput{Verdict: "PASS", EvalReport: crEvalFile}, "")      // CROSS_REFERENCE_EVAL → CROSS_REFERENCE_REVIEW
+	Advance(s, AdvanceInput{}, "")                                             // CROSS_REFERENCE_REVIEW → DONE (queue empty)
 }
 
 func advanceToComplete(t *testing.T, s *ForgeState) {
 	t.Helper()
+	dir := t.TempDir()
+	reEvalFile := filepath.Join(dir, "reconcile-eval.md")
+	os.WriteFile(reEvalFile, []byte("reconcile eval"), 0644)
+
 	advanceToDone(t, s)
-	Advance(s, AdvanceInput{}, "")                                    // DONE → RECONCILE
-	Advance(s, AdvanceInput{}, "")                                    // RECONCILE → RECONCILE_EVAL
-	Advance(s, AdvanceInput{Verdict: "PASS", Message: "reconcile"}, "") // RECONCILE_EVAL → COMPLETE
+	Advance(s, AdvanceInput{}, "")                                                // DONE → RECONCILE
+	Advance(s, AdvanceInput{}, "")                                                // RECONCILE → RECONCILE_EVAL
+	Advance(s, AdvanceInput{Verdict: "PASS", EvalReport: reEvalFile}, "")        // RECONCILE_EVAL PASS → RECONCILE_REVIEW
+	Advance(s, AdvanceInput{}, "")                                                // RECONCILE_REVIEW → COMPLETE (empty queue)
 }
 
 // newSpecifyingStateWithConfig creates a specifying state with paths config so auto-generation can write files.

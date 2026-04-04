@@ -68,6 +68,11 @@ The `--guided` / `--no-guided` flags are accepted at phase shifts and update `co
 State:   PHASE_SHIFT
 From:    specifying → generate_planning_queue
 
+Domains:  2 (optimizer, portal)
+Specs:    5 completed
+Roots:    optimizer → optimizer/, lib/shared/
+          portal → portal/ (default)
+
 Stop and refresh your context, please.
 When ready:
   forgectl advance                            # generate plan queue from completed specs
@@ -241,6 +246,12 @@ Advancing from PHASE_SHIFT:
 1. Read and validate the plan queue at `--from`.
 2. If validation fails: print errors. State remains PHASE_SHIFT.
 3. If validation passes: same steps as without `--from`, using the override file.
+
+**Override mode (`--from` provided):**
+
+1. Read and validate the plans queue at `--from`.
+2. If validation fails: print errors. State remains PHASE_SHIFT.
+3. If validation passes: same steps as auto-generation step 4.
 
 ### Planning → Implementing
 

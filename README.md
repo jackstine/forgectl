@@ -89,7 +89,7 @@ JSON schema documentation for all files forgectl reads, writes, and validates ar
 
 
 ## Thanks and References
-- Clayton Farr and Geoffery Huntley for implementation of a spec driven development workflow https://github.com/ClaytonFarr/ralph-playbook for the ralph playbook, and helping me harness AI potential.  https://github.com/ghuntley/how-to-ralph-wiggum .
+- [Clayton Farr](https://x.com/ClaytonFarr) and [Geoffery Huntley](https://x.com/GeoffreyHuntley) for implementation of a spec driven development workflow [ralph playbook](https://github.com/ClaytonFarr/ralph-playbook), and helping me harness AI potential. [how-to-ralph-wiggum](https://github.com/ghuntley/how-to-ralph-wiggum)
 - Jack Clark at Anthropic for helping me understand Anthropics work on scaffolding in late December that started this search for AI improvements. https://jack-clark.net/ .
 
 

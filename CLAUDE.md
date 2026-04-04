@@ -8,7 +8,7 @@ Spec-driven development harness. Compiles planning documents into production cod
 - [go-yaml](https://context7.com/goccy/go-yaml)
 - [golangci-lint](https://context7.com/golangci/golangci-lint)
 - [go-git](https://context7.com/go-git/go-git) Version 5 only (Version 6 is in pre-release at this moment)
-
+- [toml] (https://context7.com/burntsushi/toml)
 
 
 ## Skills

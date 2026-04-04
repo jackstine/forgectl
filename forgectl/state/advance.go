@@ -57,8 +57,6 @@ func advanceSpecifying(s *ForgeState, in AdvanceInput, dir string) error {
 		}
 		spec.BatchNumber++
 		spec.CurrentDomain = firstDomain
-		spec.BatchRound = 0
-		spec.BatchEvals = nil
 
 		batch := make([]*ActiveSpec, taken)
 		for i, entry := range spec.Queue[:taken] {
@@ -80,32 +78,40 @@ func advanceSpecifying(s *ForgeState, in AdvanceInput, dir string) error {
 		s.State = StateDraft
 
 	case StateDraft:
-		spec.BatchRound = 1
 		for _, cs := range spec.CurrentSpecs {
 			cs.Round = 1
 		}
 		s.State = StateEvaluate
 
 	case StateEvaluate:
+		cs := spec.CurrentSpecs[0]
 		if in.Verdict == "" {
 			return fmt.Errorf("--verdict is required in EVALUATE state")
 		}
-		if in.EvalReport == "" {
-			return fmt.Errorf("--eval-report is required in EVALUATE state")
+		// Per spec-lifecycle.md, EVALUATE only accepts --verdict and --eval-report.
+		// Gating on enable_eval_output for --eval-report.
+		enableEvalOutput := s.Config.Specifying.Eval.EnableEvalOutput
+		if enableEvalOutput && in.EvalReport == "" {
+			return fmt.Errorf("--eval-report is required in EVALUATE state when enable_eval_output is true")
+		}
+		if !enableEvalOutput && in.EvalReport != "" {
+			// Warn but proceed — consistent with spec warning pattern.
+			fmt.Fprintf(os.Stderr, "warning: --eval-report is ignored, eval output is not enabled\n")
 		}
 		if in.Verdict != "PASS" && in.Verdict != "FAIL" {
 			return fmt.Errorf("--verdict must be PASS or FAIL")
 		}
-		if err := checkEvalReportExists(in.EvalReport); err != nil {
-			return err
+		if in.EvalReport != "" {
+			if err := checkEvalReportExists(in.EvalReport); err != nil {
+				return err
+			}
 		}
 
 		eval := EvalRecord{
-			Round:      spec.BatchRound,
+			Round:      cs.Round,
 			Verdict:    in.Verdict,
 			EvalReport: in.EvalReport,
 		}
-		spec.BatchEvals = append(spec.BatchEvals, eval)
 		for _, bcs := range spec.CurrentSpecs {
 			bcs.Evals = append(bcs.Evals, eval)
 		}
@@ -114,16 +120,13 @@ func advanceSpecifying(s *ForgeState, in AdvanceInput, dir string) error {
 		maxRounds := s.Config.Specifying.Eval.MaxRounds
 
 		if in.Verdict == "PASS" {
-			if spec.BatchRound >= minRounds {
-				if in.Message == "" {
-					return fmt.Errorf("--message is required when --verdict is PASS")
-				}
+			if cs.Round >= minRounds {
 				s.State = StateAccept
 			} else {
 				s.State = StateRefine
 			}
 		} else {
-			if spec.BatchRound >= maxRounds {
+			if cs.Round >= maxRounds {
 				s.State = StateAccept
 			} else {
 				s.State = StateRefine
@@ -131,13 +134,13 @@ func advanceSpecifying(s *ForgeState, in AdvanceInput, dir string) error {
 		}
 
 	case StateRefine:
-		spec.BatchRound++
 		for _, cs := range spec.CurrentSpecs {
 			cs.Round++
 		}
 		s.State = StateEvaluate
 
 	case StateAccept:
+		currentDomain := spec.CurrentDomain
 		for _, cs := range spec.CurrentSpecs {
 			completed := CompletedSpec{
 				ID:          cs.ID,
@@ -145,18 +148,31 @@ func advanceSpecifying(s *ForgeState, in AdvanceInput, dir string) error {
 				Domain:      cs.Domain,
 				File:        cs.File,
 				BatchNumber: spec.BatchNumber,
-				RoundsTaken: spec.BatchRound,
+				RoundsTaken: cs.Round,
 				Evals:       cs.Evals,
 			}
 			spec.Completed = append(spec.Completed, completed)
 		}
 		spec.CurrentSpecs = nil
 
-		// Check if there are more queued specs.
-		if len(spec.Queue) > 0 {
+		// Check if the same domain has more queued specs.
+		hasSameDomain := false
+		for _, q := range spec.Queue {
+			if q.Domain == currentDomain {
+				hasSameDomain = true
+				break
+			}
+		}
+
+		if hasSameDomain {
 			s.State = StateOrient
 		} else {
-			s.State = StateDone
+			// Domain exhausted — start cross-reference.
+			if spec.CrossReference == nil {
+				spec.CrossReference = make(map[string]*CrossReferenceState)
+			}
+			spec.CrossReference[currentDomain] = &CrossReferenceState{Domain: currentDomain}
+			s.State = StateCrossReference
 		}
 
 	case StateCrossReference:
@@ -170,6 +186,14 @@ func advanceSpecifying(s *ForgeState, in AdvanceInput, dir string) error {
 		}
 		if in.Verdict != "PASS" && in.Verdict != "FAIL" {
 			return fmt.Errorf("--verdict must be PASS or FAIL")
+		}
+		// Gating on enable_eval_output for --eval-report.
+		enableEvalOutput := s.Config.Specifying.Eval.EnableEvalOutput
+		if enableEvalOutput && in.EvalReport == "" {
+			return fmt.Errorf("--eval-report is required in CROSS_REFERENCE_EVAL state when enable_eval_output is true")
+		}
+		if !enableEvalOutput && in.EvalReport != "" {
+			fmt.Fprintf(os.Stderr, "warning: --eval-report is ignored, eval output is not enabled\n")
 		}
 		if in.EvalReport != "" {
 			if err := checkEvalReportExists(in.EvalReport); err != nil {
@@ -193,6 +217,7 @@ func advanceSpecifying(s *ForgeState, in AdvanceInput, dir string) error {
 		passed := in.Verdict == "PASS" && cr.Round >= minRounds
 		if passed || forced {
 			// CROSS_REFERENCE_REVIEW fires once — only on the first passing eval (round==1).
+			// Subsequent passing evals skip review and go directly to next domain or DONE.
 			if cr.Round == 1 {
 				s.State = StateCrossReferenceReview
 			} else {
@@ -220,6 +245,14 @@ func advanceSpecifying(s *ForgeState, in AdvanceInput, dir string) error {
 		if in.Verdict != "PASS" && in.Verdict != "FAIL" {
 			return fmt.Errorf("--verdict must be PASS or FAIL")
 		}
+		// Gating on enable_eval_output for --eval-report.
+		enableEvalOutput := s.Config.Specifying.Eval.EnableEvalOutput
+		if enableEvalOutput && in.EvalReport == "" {
+			return fmt.Errorf("--eval-report is required in RECONCILE_EVAL state when enable_eval_output is true")
+		}
+		if !enableEvalOutput && in.EvalReport != "" {
+			fmt.Fprintf(os.Stderr, "warning: --eval-report is ignored, eval output is not enabled\n")
+		}
 		if in.EvalReport != "" {
 			if err := checkEvalReportExists(in.EvalReport); err != nil {
 				return err
@@ -234,25 +267,29 @@ func advanceSpecifying(s *ForgeState, in AdvanceInput, dir string) error {
 		spec.Reconcile.Evals = append(spec.Reconcile.Evals, eval)
 
 		minRounds := s.Config.Specifying.Reconciliation.MinRounds
+		maxRounds := s.Config.Specifying.Reconciliation.MaxRounds
 
+		forced := in.Verdict == "FAIL" && spec.Reconcile.Round >= maxRounds
 		passed := in.Verdict == "PASS" && spec.Reconcile.Round >= minRounds
-		if passed {
-			if s.Config.General.EnableCommits && in.Message == "" {
-				return fmt.Errorf("--message is required when --verdict is PASS and enable_commits is true")
+		if passed || forced {
+			// RECONCILE_REVIEW fires once — only on the first passing (or forced) eval (round==1).
+			if spec.Reconcile.Round == 1 {
+				s.State = StateReconcileReview
+			} else {
+				s.State = StateComplete
 			}
-			s.State = StateComplete
-		} else if in.Verdict == "FAIL" {
-			// FAIL always enters review (for user to decide whether to re-reconcile or accept).
-			s.State = StateReconcileReview
 		} else {
-			// PASS but min rounds not met — re-evaluate.
 			s.State = StateReconcile
 		}
 
 	case StateReconcileReview:
-		// Always go back to RECONCILE for another eval round.
-		// (Additional specs can be added before advancing.)
-		s.State = StateReconcile
+		// No flags — transition is queue-based only.
+		// Non-empty queue re-enters DONE so new specs can be drafted before reconciliation restarts.
+		if len(spec.Queue) > 0 {
+			s.State = StateDone
+		} else {
+			s.State = StateComplete
+		}
 
 	case StateComplete:
 		if s.Config.General.EnableCommits {
@@ -272,7 +309,6 @@ func advanceSpecifying(s *ForgeState, in AdvanceInput, dir string) error {
 			}
 			if hash != "" {
 				for i := range spec.Completed {
-					spec.Completed[i].CommitHash = hash
 					spec.Completed[i].CommitHashes = append(spec.Completed[i].CommitHashes, hash)
 				}
 			}
@@ -338,7 +374,6 @@ func populatePlanningFromQueue(s *ForgeState) {
 			ID:              1,
 			Name:            entry.Name,
 			Domain:          entry.Domain,
-			Topic:           entry.Topic,
 			File:            entry.File,
 			Specs:           entry.Specs,
 			SpecCommits:     entry.SpecCommits,
@@ -417,14 +452,6 @@ func advancePlanning(s *ForgeState, in AdvanceInput, dir string) error {
 	case StateSelfReview:
 		return advancePlanningFromSelfReview(s, dir)
 
-	case StateDone:
-		if in.Verdict != "" || in.EvalReport != "" || in.Message != "" {
-			return fmt.Errorf("DONE is a pass-through state. No flags accepted.")
-		}
-		// Pass-through: advance to phase shift.
-		s.State = StatePhaseShift
-		s.PhaseShift = &PhaseShiftInfo{From: PhasePlanning, To: PhaseImplementing}
-
 	case StateAccept:
 		if s.Config.General.EnableCommits && in.Message == "" {
 			return fmt.Errorf("--message is required in planning ACCEPT state when enable_commits is true")
@@ -448,7 +475,6 @@ func advancePlanning(s *ForgeState, in AdvanceInput, dir string) error {
 				ID:              s.Planning.CurrentPlan.ID + 1,
 				Name:            entry.Name,
 				Domain:          entry.Domain,
-				Topic:           entry.Topic,
 				File:            entry.File,
 				Specs:           entry.Specs,
 				SpecCommits:     entry.SpecCommits,
@@ -460,6 +486,14 @@ func advancePlanning(s *ForgeState, in AdvanceInput, dir string) error {
 			s.State = StatePhaseShift
 			s.PhaseShift = &PhaseShiftInfo{From: PhasePlanning, To: PhaseImplementing}
 		}
+
+	case StateDone:
+		if in.Verdict != "" || in.EvalReport != "" || in.Message != "" {
+			return fmt.Errorf("DONE is a pass-through state. No flags accepted.")
+		}
+		// Pass-through: advance to phase shift.
+		s.State = StatePhaseShift
+		s.PhaseShift = &PhaseShiftInfo{From: PhasePlanning, To: PhaseImplementing}
 
 	default:
 		return fmt.Errorf("cannot advance from state %q in planning phase", s.State)
@@ -664,7 +698,7 @@ func advanceImplFromImplement(s *ForgeState, in AdvanceInput, dir string) error 
 		return err
 	}
 
-	// First round requires --message when commits are enabled.
+	// First round requires --message when enable_commits is true.
 	if batch.EvalRound == 0 && s.Config.General.EnableCommits && in.Message == "" {
 		return fmt.Errorf("--message is required for first-round implementation when enable_commits is true")
 	}
@@ -920,7 +954,6 @@ func advancePhaseShift(s *ForgeState, in AdvanceInput, dir string) error {
 				ID:              s.Planning.CurrentPlan.ID + 1,
 				Name:            entry.Name,
 				Domain:          entry.Domain,
-				Topic:           entry.Topic,
 				File:            entry.File,
 				Specs:           entry.Specs,
 				SpecCommits:     entry.SpecCommits,
@@ -968,14 +1001,9 @@ func autoGeneratePlanQueue(s *ForgeState, dir string) (string, error) {
 			specFiles = append(specFiles, cs.File)
 		}
 
-		// Determine code search roots: DomainRoots takes precedence over Domains.
+		// Determine code search roots from Domains metadata.
 		var roots []string
-		if spec.DomainRoots != nil {
-			if r, ok := spec.DomainRoots[domain]; ok && len(r) > 0 {
-				roots = r
-			}
-		}
-		if len(roots) == 0 && spec.Domains != nil {
+		if spec.Domains != nil {
 			if meta, ok := spec.Domains[domain]; ok {
 				roots = meta.CodeSearchRoots
 			}
@@ -994,10 +1022,6 @@ func autoGeneratePlanQueue(s *ForgeState, dir string) (string, error) {
 					commits = append(commits, h)
 				}
 			}
-			if cs.CommitHash != "" && !seen[cs.CommitHash] {
-				seen[cs.CommitHash] = true
-				commits = append(commits, cs.CommitHash)
-			}
 		}
 
 		// Capitalize first letter of domain for display name.
@@ -1009,8 +1033,7 @@ func autoGeneratePlanQueue(s *ForgeState, dir string) (string, error) {
 		entries = append(entries, PlanQueueEntry{
 			Name:            displayName + " Implementation Plan",
 			Domain:          domain,
-			Topic:           "Implementation of " + domain,
-			File:            domain + "/.workspace/implementation_plan/plan.json",
+			File:            domain + "/.forge_workspace/implementation_plan/plan.json",
 			Specs:           specFiles,
 			SpecCommits:     commits,
 			CodeSearchRoots: roots,

@@ -36,6 +36,10 @@ func init() {
 }
 
 func runAdvance(cmd *cobra.Command, args []string) error {
+	projectRoot, stateDir, _, err := resolveSession()
+	if err != nil {
+		return err
+	}
 	s, err := state.Load(stateDir)
 	if err != nil {
 		return err
@@ -69,12 +73,11 @@ func runAdvance(cmd *cobra.Command, args []string) error {
 		Guided:     guided,
 	}
 
-	// Capture state snapshot before advancing for logging.
+	// Snapshot state before transition for logging.
 	prevState := string(s.State)
-	prevPhase := s.Phase
-	prevSnap := snapshotForLog(s)
+	prevPhase := string(s.Phase)
 
-	err = state.Advance(s, in, stateDir)
+	err = state.Advance(s, in, projectRoot)
 	if err != nil {
 		// Check if it's a validation error — still save state if VALIDATE was entered.
 		if ve, ok := err.(*state.ValidationError); ok {
@@ -82,7 +85,7 @@ func runAdvance(cmd *cobra.Command, args []string) error {
 				return fmt.Errorf("saving state: %w", err2)
 			}
 			fmt.Fprintln(out)
-			state.PrintAdvanceOutput(out, s, stateDir)
+			state.PrintAdvanceOutput(out, s, projectRoot)
 			fmt.Fprintln(out)
 			fmt.Fprintf(out, "FAIL: %d errors in plan.json\n\n", len(ve.Errors))
 			for _, e := range ve.Errors {
@@ -97,105 +100,69 @@ func runAdvance(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("saving state: %w", err)
 	}
 
-	// Write activity log entry (best-effort).
-	if s.Config.Logs.Enabled {
-		detail := buildAdvanceLogDetail(s, prevState, prevPhase, prevSnap, in)
-		state.WriteLogEntry(s.SessionID, string(s.StartedAtPhase), state.LogEntry{
-			Ts:        state.NowTS(),
-			Cmd:       "advance",
-			Phase:     string(s.Phase),
-			PrevState: prevState,
-			State:     string(s.State),
-			Detail:    detail,
-		})
+	// Activity logging.
+	detail := buildAdvanceDetail(in)
+	logger := state.NewLogger(s.Config.Logs, s.StartedAtPhase, s.SessionID)
+	logger.Write(state.LogEntry{
+		TS:        state.LogNow(),
+		Cmd:       "advance",
+		Phase:     prevPhase,
+		PrevState: prevState,
+		State:     string(s.State),
+		Detail:    detail,
+	})
+
+	// Archive session at terminal states.
+	if isTerminalState(s) {
+		domain := sessionDomain(s)
+		if archErr := state.ArchiveSession(stateDir, domain, s); archErr != nil {
+			fmt.Fprintf(out, "Warning: failed to archive session: %v\n", archErr)
+		}
 	}
 
-	state.PrintAdvanceOutput(out, s, stateDir)
+	state.PrintAdvanceOutput(out, s, projectRoot)
 
 	return nil
 }
 
-// advanceSnapshot captures pre-advance state fields needed for post-advance logging.
-type advanceSnapshot struct {
-	// implementing fields
-	layerID     string
-	batchItems  []string
-	batchNumber int
-	// specifying fields
-	specRound int
-}
-
-// snapshotForLog captures fields from the state needed for post-advance logging.
-func snapshotForLog(s *state.ForgeState) advanceSnapshot {
-	snap := advanceSnapshot{}
-	if s.Implementing != nil {
-		if s.Implementing.CurrentLayer != nil {
-			snap.layerID = s.Implementing.CurrentLayer.ID
-		}
-		if s.Implementing.CurrentBatch != nil {
-			snap.batchItems = append([]string{}, s.Implementing.CurrentBatch.Items...)
-		}
-		snap.batchNumber = s.Implementing.BatchNumber
-	}
-	if s.Specifying != nil && len(s.Specifying.CurrentSpecs) > 0 {
-		snap.specRound = s.Specifying.CurrentSpecs[0].Round
-	}
-	return snap
-}
-
-// countPendingInLayer returns the number of pending items in the current layer
-// after advancing (used for ORIENT logging).
-func countPendingInLayer(s *state.ForgeState) int {
-	if s.Implementing == nil || s.Implementing.CurrentLayer == nil || s.Implementing.CurrentBatch == nil {
-		return 0
-	}
-	// After ORIENT advance, CurrentBatch.Items holds the unblocked batch.
-	// Pending = remaining items in the layer minus the ones just unblocked.
-	// We don't have access to the full plan here, so we return 0 as a best-effort.
-	return 0
-}
-
-// buildAdvanceLogDetail builds the detail map for an advance log entry.
-func buildAdvanceLogDetail(s *state.ForgeState, prevState string, prevPhase state.PhaseName, prev advanceSnapshot, in state.AdvanceInput) map[string]any {
-	detail := map[string]any{}
-
-	switch {
-	case prevPhase == state.PhaseSpecifying && prevState == string(state.StateEvaluate):
-		detail["round"] = prev.specRound
+// buildAdvanceDetail builds the log detail map from advance flags.
+func buildAdvanceDetail(in state.AdvanceInput) map[string]interface{} {
+	detail := map[string]interface{}{}
+	if in.Verdict != "" {
 		detail["verdict"] = in.Verdict
-		if s.Config.General.EnableEvalOutput && in.EvalReport != "" {
-			detail["eval_report"] = in.EvalReport
-		}
-
-	case prevPhase == state.PhaseImplementing && prevState == string(state.StateOrient):
-		// After ORIENT we're now in IMPLEMENT with a new batch.
-		if s.Implementing != nil {
-			if s.Implementing.CurrentLayer != nil {
-				detail["layer"] = s.Implementing.CurrentLayer.ID
-			}
-			if s.Implementing.CurrentBatch != nil {
-				detail["unblocked"] = len(s.Implementing.CurrentBatch.Items)
-			}
-			detail["remaining"] = countPendingInLayer(s)
-		}
-
-	case prevPhase == state.PhaseImplementing && prevState == string(state.StateCommit):
-		detail["layer"] = prev.layerID
-		detail["batch"] = prev.batchNumber
-		detail["items"] = prev.batchItems
-
-	case (prevPhase == state.PhasePlanning || prevPhase == state.PhaseImplementing) &&
-		prevState == string(state.StateEvaluate):
-		detail["verdict"] = in.Verdict
-		if s.Config.General.EnableEvalOutput && in.EvalReport != "" {
-			detail["eval_report"] = in.EvalReport
-		}
 	}
-
-	if len(detail) == 0 {
-		return nil
+	if in.EvalReport != "" {
+		detail["eval_report"] = in.EvalReport
 	}
 	return detail
+}
+
+// isTerminalState returns true when the session has reached a terminal point
+// that warrants archiving.
+func isTerminalState(s *state.ForgeState) bool {
+	// Implementing phase complete.
+	if s.Phase == state.PhaseImplementing && s.State == state.StateDone {
+		return true
+	}
+	// Specifying phase complete (phase shifting to planning, started at specifying).
+	if s.State == state.StatePhaseShift &&
+		s.PhaseShift != nil &&
+		s.PhaseShift.From == state.PhaseSpecifying &&
+		s.StartedAtPhase == state.PhaseSpecifying {
+		return true
+	}
+	return false
+}
+
+// sessionDomain returns the domain name for archive file naming.
+func sessionDomain(s *state.ForgeState) string {
+	if s.Planning != nil && s.Planning.CurrentPlan != nil {
+		return s.Planning.CurrentPlan.Domain
+	}
+	if s.Specifying != nil && len(s.Specifying.Completed) > 0 {
+		return s.Specifying.Completed[0].Domain
+	}
+	return "unknown"
 }
 
 func validateAdvanceFlags(s *state.ForgeState) error {
@@ -204,15 +171,15 @@ func validateAdvanceFlags(s *state.ForgeState) error {
 		return fmt.Errorf("--file is only valid in specifying DRAFT state (current: %s %s)", s.Phase, s.State)
 	}
 
-	// --verdict only valid in EVALUATE, RECONCILE_EVAL, RECONCILE_REVIEW.
+	// --verdict only valid in eval states.
 	if advanceVerdict != "" {
 		validStates := map[state.StateName]bool{
-			state.StateEvaluate:        true,
-			state.StateReconcileEval:   true,
-			state.StateReconcileReview: true,
+			state.StateEvaluate:           true,
+			state.StateReconcileEval:      true,
+			state.StateCrossReferenceEval: true,
 		}
 		if !validStates[s.State] {
-			return fmt.Errorf("--verdict is only valid in EVALUATE, RECONCILE_EVAL, or RECONCILE_REVIEW state (current: %s)", s.State)
+			return fmt.Errorf("--verdict is only valid in EVALUATE, RECONCILE_EVAL, or CROSS_REFERENCE_EVAL state (current: %s)", s.State)
 		}
 	}
 

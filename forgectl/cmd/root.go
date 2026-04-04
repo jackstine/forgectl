@@ -4,10 +4,10 @@ import (
 	"fmt"
 	"os"
 
+	"forgectl/state"
+
 	"github.com/spf13/cobra"
 )
-
-var stateDir string
 
 var version = "v0.0.1"
 
@@ -27,6 +27,22 @@ func Execute() {
 	}
 }
 
-func init() {
-	rootCmd.PersistentFlags().StringVar(&stateDir, "dir", ".", "Directory containing the state file")
+// resolveSession discovers the project root, loads config, and returns
+// (projectRoot, stateDir, cfg). projectRoot resolves relative paths in state;
+// stateDir is used for Load/Save/Exists; cfg is the loaded project configuration.
+func resolveSession() (projectRoot, stateDir string, cfg state.ForgeConfig, err error) {
+	cwd, err := os.Getwd()
+	if err != nil {
+		return
+	}
+	projectRoot, err = state.FindProjectRoot(cwd)
+	if err != nil {
+		return
+	}
+	cfg, err = state.LoadConfig(projectRoot)
+	if err != nil {
+		return
+	}
+	stateDir = state.StateDir(projectRoot, cfg)
+	return
 }

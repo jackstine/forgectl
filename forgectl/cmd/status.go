@@ -20,11 +20,15 @@ func init() {
 }
 
 func runStatus(cmd *cobra.Command, args []string) error {
+	projectRoot, stateDir, _, err := resolveSession()
+	if err != nil {
+		return err
+	}
 	s, err := state.Load(stateDir)
 	if err != nil {
 		return err
 	}
 
-	state.PrintStatus(cmd.OutOrStdout(), s, stateDir, statusVerbose)
+	state.PrintStatus(cmd.OutOrStdout(), s, projectRoot, statusVerbose)
 	return nil
 }

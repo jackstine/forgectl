@@ -92,7 +92,7 @@ func ValidatePlanQueue(data []byte) []string {
 		return append(errs, "\"plans\" array must not be empty")
 	}
 
-	requiredFields := []string{"name", "domain", "topic", "file", "specs", "code_search_roots"}
+	requiredFields := []string{"name", "domain", "file", "specs", "spec_commits", "code_search_roots"}
 
 	for i, planRaw := range plans {
 		var entry map[string]json.RawMessage
@@ -106,7 +106,7 @@ func ValidatePlanQueue(data []byte) []string {
 			}
 		}
 		allowedFields := map[string]bool{
-			"name": true, "domain": true, "topic": true,
+			"name": true, "domain": true,
 			"file": true, "specs": true, "spec_commits": true, "code_search_roots": true,
 		}
 		for k := range entry {
@@ -353,9 +353,9 @@ func PlanQueueSchema() string {
     {
       "name": "<string>",
       "domain": "<string>",
-      "topic": "<string>",
       "file": "<string>",
       "specs": ["<string>", ...],
+      "spec_commits": ["<string>", ...],
       "code_search_roots": ["<string>", ...]
     }
   ]

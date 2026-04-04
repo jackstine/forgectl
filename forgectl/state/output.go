@@ -10,26 +10,13 @@ import (
 	"forgectl/evaluators"
 )
 
-// phaseEvalConfig returns (batch, minRounds, maxRounds) for the current phase.
-func phaseEvalConfig(s *ForgeState) (int, int, int) {
-	switch s.Phase {
-	case PhaseSpecifying:
-		c := s.Config.Specifying
-		return c.Batch, c.Eval.MinRounds, c.Eval.MaxRounds
-	case PhasePlanning:
-		c := s.Config.Planning
-		return c.Batch, c.Eval.MinRounds, c.Eval.MaxRounds
-	default:
-		c := s.Config.Implementing
-		return c.Batch, c.Eval.MinRounds, c.Eval.MaxRounds
-	}
-}
-
 // PrintAdvanceOutput prints the action description for the new state after advance.
 func PrintAdvanceOutput(w io.Writer, s *ForgeState, dir string) {
 	switch s.Phase {
 	case PhaseSpecifying:
 		printSpecifyingOutput(w, s, dir)
+	case PhaseGeneratePlanningQueue:
+		printGeneratePlanningQueueOutput(w, s)
 	case PhasePlanning:
 		printPlanningOutput(w, s, dir)
 	case PhaseImplementing:
@@ -107,13 +94,13 @@ func printSpecifyingOutput(w io.Writer, s *ForgeState, dir string) {
 		fmt.Fprintf(w, "         After completion of the above, advance to begin evaluation.\n")
 
 	case StateEvaluate:
-		evalFile := batchEvalFile(cs.Domain, spec.BatchNumber, spec.BatchRound)
+		evalFile := batchEvalFile(cs.Domain, spec.BatchNumber, cs.Round)
 		fmt.Fprintf(w, "State:   EVALUATE\n")
 		fmt.Fprintf(w, "Phase:   specifying\n")
 		fmt.Fprintf(w, "Domain:  %s\n", cs.Domain)
 		fmt.Fprintf(w, "Path:    %s\n", domainPath(cs.Domain))
 		fmt.Fprintf(w, "Batch:   %d specs\n", len(spec.CurrentSpecs))
-		fmt.Fprintf(w, "Round:   %d/%d\n", spec.BatchRound, s.Config.Specifying.Eval.MaxRounds)
+		fmt.Fprintf(w, "Round:   %d/%d\n", cs.Round, s.Config.Specifying.Eval.MaxRounds)
 		fmt.Fprintf(w, "Specs:\n")
 		for i, bcs := range spec.CurrentSpecs {
 			fmt.Fprintf(w, "  [%d] %s\n", i+1, bcs.File)
@@ -128,13 +115,13 @@ func printSpecifyingOutput(w io.Writer, s *ForgeState, dir string) {
 		}
 
 	case StateRefine:
-		evalFile := batchEvalFile(cs.Domain, spec.BatchNumber, spec.BatchRound)
+		evalFile := batchEvalFile(cs.Domain, spec.BatchNumber, cs.Round)
 		fmt.Fprintf(w, "State:   REFINE\n")
 		fmt.Fprintf(w, "Phase:   specifying\n")
 		fmt.Fprintf(w, "Domain:  %s\n", cs.Domain)
 		fmt.Fprintf(w, "Path:    %s\n", domainPath(cs.Domain))
 		fmt.Fprintf(w, "Batch:   %d specs\n", len(spec.CurrentSpecs))
-		fmt.Fprintf(w, "Round:   %d/%d\n", spec.BatchRound, s.Config.Specifying.Eval.MaxRounds)
+		fmt.Fprintf(w, "Round:   %d/%d\n", cs.Round, s.Config.Specifying.Eval.MaxRounds)
 		fmt.Fprintf(w, "Specs:\n")
 		for i, bcs := range spec.CurrentSpecs {
 			fmt.Fprintf(w, "  [%d] %s\n", i+1, bcs.File)
@@ -154,17 +141,19 @@ func printSpecifyingOutput(w io.Writer, s *ForgeState, dir string) {
 		fmt.Fprintf(w, "Path:    %s\n", domainPath(spec.CurrentDomain))
 		if cs != nil {
 			fmt.Fprintf(w, "Batch:   %d specs accepted\n", len(spec.CurrentSpecs))
-			fmt.Fprintf(w, "Round:   %d/%d\n", spec.BatchRound, s.Config.Specifying.Eval.MaxRounds)
+			fmt.Fprintf(w, "Round:   %d/%d\n", cs.Round, s.Config.Specifying.Eval.MaxRounds)
 		}
 		fmt.Fprintf(w, "Action:  Batch accepted.\n")
 		fmt.Fprintf(w, "         After completion of the above, advance to continue.\n")
 
 	case StateCrossReference:
 		currentDomain := spec.CurrentDomain
+		cr := spec.CrossReference[currentDomain]
 		fmt.Fprintf(w, "State:   CROSS_REFERENCE\n")
 		fmt.Fprintf(w, "Phase:   specifying\n")
 		fmt.Fprintf(w, "Domain:  %s\n", currentDomain)
 		fmt.Fprintf(w, "Path:    %s\n", domainPath(currentDomain))
+		fmt.Fprintf(w, "Round:   %d/%d\n", cr.Round, s.Config.Specifying.CrossReference.MaxRounds)
 		fmt.Fprintln(w)
 		fmt.Fprintf(w, "Specs in domain:\n")
 
@@ -268,15 +257,19 @@ func printSpecifyingOutput(w io.Writer, s *ForgeState, dir string) {
 		fmt.Fprintf(w, "         After completion of the above, advance to begin evaluation.\n")
 
 	case StateReconcileEval:
+		domains := uniqueDomains(spec.Completed)
 		maxRounds := s.Config.Specifying.Reconciliation.MaxRounds
 		fmt.Fprintf(w, "State:   RECONCILE_EVAL\n")
 		fmt.Fprintf(w, "Phase:   specifying\n")
 		fmt.Fprintf(w, "Round:   %d/%d\n", spec.Reconcile.Round, maxRounds)
+		fmt.Fprintf(w, "Specs:   %d completed across %d domains\n", len(spec.Completed), len(domains))
 		fmt.Fprintf(w, "Action:  Please spawn 1 opus sub-agent to evaluate cross-domain reconciliation.\n")
 		fmt.Fprintf(w, "         The sub-agent should run: forgectl eval\n")
-		fmt.Fprintf(w, "         After completion of the above, advance with --verdict PASS|FAIL --eval-report <path>\n")
 		if s.Config.General.EnableCommits {
+			fmt.Fprintf(w, "         After completion of the above, advance with --verdict PASS|FAIL --eval-report <path>\n")
 			fmt.Fprintf(w, "           (--message <commit msg> required with PASS)\n")
+		} else {
+			fmt.Fprintf(w, "         After completion of the above, advance with --verdict PASS|FAIL --eval-report <path>\n")
 		}
 
 	case StateReconcileReview:
@@ -518,7 +511,7 @@ func printPlanningOutput(w io.Writer, s *ForgeState, dir string) {
 		fmt.Fprintf(w, "Domain:  %s\n", cp.Domain)
 		fmt.Fprintf(w, "File:    %s\n", cp.File)
 		fmt.Fprintf(w, "Round:   %d/%d\n", plan.Round, s.Config.Planning.Eval.MaxRounds)
-		if s.Config.General.EnableEvalOutput {
+		if s.Config.Planning.Eval.EnableEvalOutput {
 			if lastEval.Verdict == "FAIL" {
 				fmt.Fprintf(w, "Action:  Study the eval file %q\n", evalFile)
 				fmt.Fprintf(w, "         and implement any corrections as needed.\n")
@@ -728,8 +721,12 @@ func printImplementingOutput(w io.Writer, s *ForgeState, dir string) {
 				actionContinue = "advance to select next batch."
 			}
 
-			fmt.Fprintf(w, "Action:   STOP please review and discuss with user before continuing.\n")
-			fmt.Fprintf(w, "          After completion of the above, %s\n", actionContinue)
+			if s.Config.General.UserGuided {
+				fmt.Fprintf(w, "Action:   STOP please review and discuss with user before continuing.\n")
+				fmt.Fprintf(w, "          After completion of the above, %s\n", actionContinue)
+			} else {
+				fmt.Fprintf(w, "Action:   After completion of the above, %s\n", actionContinue)
+			}
 		}
 
 	case StateImplement:
@@ -820,7 +817,7 @@ func printImplementingOutput(w io.Writer, s *ForgeState, dir string) {
 			evalDir := filepath.Join(planDir, "evals")
 			lastEval := batch.Evals[len(batch.Evals)-1]
 			evalFile := filepath.Join(evalDir, fmt.Sprintf("batch-%d-round-%d.md", impl.BatchNumber, lastEval.Round))
-			if s.Config.General.EnableEvalOutput {
+			if s.Config.Implementing.Eval.EnableEvalOutput {
 				fmt.Fprintf(w, "Action:  Study the eval file %q\n", evalFile)
 				fmt.Fprintf(w, "         and implement any corrections as needed.\n")
 				fmt.Fprintf(w, "         Apply \"fresh\" eyes and a tightened lens when reviewing the work,\n")
@@ -835,7 +832,7 @@ func printImplementingOutput(w io.Writer, s *ForgeState, dir string) {
 			}
 		} else {
 			fmt.Fprintf(w, "Action:  Implement this item.\n")
-			fmt.Fprintf(w, "         When complete, run: forgectl advance --message <commit msg>\n")
+			fmt.Fprintf(w, "         After completion of the above, advance to continue.\n")
 		}
 
 	case StateEvaluate:
@@ -899,7 +896,8 @@ func printImplementingOutput(w io.Writer, s *ForgeState, dir string) {
 		if s.Config.General.EnableCommits {
 			fmt.Fprintf(w, "Action:  Advance with --message \"your commit message\" to commit and continue.\n")
 		} else {
-			fmt.Fprintf(w, "Action:  Advance to continue.\n")
+			fmt.Fprintf(w, "Action:  Commit your changes before continuing.\n")
+			fmt.Fprintf(w, "         After completion of the above, advance to continue.\n")
 		}
 
 	case StateDone:
@@ -959,23 +957,59 @@ func printPhaseShiftOutput(w io.Writer, s *ForgeState) {
 	fmt.Fprintf(w, "State:   PHASE_SHIFT\n")
 	fmt.Fprintf(w, "From:    %s → %s\n", ps.From, ps.To)
 
-	if ps.From == PhasePlanning && ps.To == PhaseImplementing {
+	if ps.From == PhaseSpecifying && ps.To == PhasePlanning {
+		if s.Specifying != nil {
+			// Collect domain order and per-domain roots.
+			var domainOrder []string
+			domainSeen := make(map[string]bool)
+			for _, cs := range s.Specifying.Completed {
+				if !domainSeen[cs.Domain] {
+					domainSeen[cs.Domain] = true
+					domainOrder = append(domainOrder, cs.Domain)
+				}
+			}
+			fmt.Fprintf(w, "\nDomains:  %d (%s)\n", len(domainOrder), strings.Join(domainOrder, ", "))
+			fmt.Fprintf(w, "Specs:    %d completed\n", len(s.Specifying.Completed))
+			for i, domain := range domainOrder {
+				var roots []string
+				isDefault := false
+				if meta, ok := s.Specifying.Domains[domain]; ok && len(meta.CodeSearchRoots) > 0 {
+					roots = meta.CodeSearchRoots
+				} else {
+					roots = []string{domain + "/"}
+					isDefault = true
+				}
+				rootStr := strings.Join(roots, ", ")
+				if isDefault {
+					rootStr += " (default)"
+				}
+				if i == 0 {
+					fmt.Fprintf(w, "Roots:    %s → %s\n", domain, rootStr)
+				} else {
+					fmt.Fprintf(w, "          %s → %s\n", domain, rootStr)
+				}
+			}
+		}
+		fmt.Fprintf(w, "\nStop and refresh your context, please.\n")
+		fmt.Fprintf(w, "When ready, run:\n")
+		fmt.Fprintf(w, "  forgectl advance                          # auto-generate plan queue from completed specs\n")
+		fmt.Fprintf(w, "  forgectl advance --from <plan-queue.json> # OR provide a custom plan queue\n")
+	} else if ps.From == PhasePlanning && ps.To == PhaseImplementing {
 		if s.Planning != nil && s.Planning.CurrentPlan != nil {
 			fmt.Fprintf(w, "Plan:    %s\n", s.Planning.CurrentPlan.Name)
 			fmt.Fprintf(w, "Domain:  %s\n", s.Planning.CurrentPlan.Domain)
 			fmt.Fprintf(w, "File:    %s\n", s.Planning.CurrentPlan.File)
 		}
-	}
-
-	switch {
-	case ps.From == PhaseSpecifying && ps.To == PhaseGeneratePlanningQueue:
+		fmt.Fprintf(w, "\nStop and refresh your context, please.\n")
+		fmt.Fprintf(w, "When ready, run: forgectl advance\n")
+	} else if ps.From == PhaseSpecifying && ps.To == PhaseGeneratePlanningQueue {
 		fmt.Fprintf(w, "\nStop and refresh your context, please.\n")
 		fmt.Fprintf(w, "When ready:\n")
 		fmt.Fprintf(w, "  forgectl advance                            # generate plan queue from completed specs\n")
 		fmt.Fprintf(w, "  forgectl advance --from <plan-queue.json>   # OR provide a plan queue (skips generation)\n")
-	case ps.From == PhaseGeneratePlanningQueue && ps.To == PhasePlanning:
+	} else if ps.From == PhaseGeneratePlanningQueue && ps.To == PhasePlanning {
 		fmt.Fprintf(w, "\nAdvance to continue.\n")
-	default:
+	} else {
 		fmt.Fprintf(w, "\nStop and refresh your context, please.\n")
 		fmt.Fprintf(w, "When ready, run: forgectl advance\n")
 	}
@@ -983,30 +1017,41 @@ func printPhaseShiftOutput(w io.Writer, s *ForgeState) {
 
 // --- Status ---
 
-// PrintStatus prints the session status. When verbose is true, appends detailed
-// queue, completed, and implementing sections after the standard output.
+// PrintStatus prints the session status. When verbose is true, full phase
+// sections are appended after the progress line.
 func PrintStatus(w io.Writer, s *ForgeState, dir string, verbose bool) {
-	// Header (always shown).
-	fmt.Fprintf(w, "Session: forgectl-state.json\n")
+	// Session path: prefer relative (cfg.Paths.StateDir/forgectl-state.json).
+	sessionLabel := filepath.Join(s.Config.Paths.StateDir, "forgectl-state.json")
+	fmt.Fprintf(w, "Session: %s\n", sessionLabel)
+
 	fmt.Fprintf(w, "Phase:   %s", s.Phase)
 	if s.StartedAtPhase != "" && s.StartedAtPhase == s.Phase && s.StartedAtPhase != PhaseSpecifying {
 		fmt.Fprintf(w, " (started here)")
 	}
 	fmt.Fprintln(w)
-	batch, min, max := phaseEvalConfig(s)
-	fmt.Fprintf(w, "Config:  batch=%d, rounds=%d-%d, guided=%v\n", batch, min, max, s.Config.General.UserGuided)
+
+	// Phase-appropriate config values.
+	batch, minRounds, maxRounds := phaseConfig(s)
+	fmt.Fprintf(w, "Config:  batch=%d, rounds=%d-%d, guided=%v\n", batch, minRounds, maxRounds, s.Config.General.UserGuided)
 	fmt.Fprintln(w)
 
-	// Current state (always shown).
+	// Current state + action.
 	fmt.Fprintf(w, "--- Current ---\n\n")
 	PrintAdvanceOutput(w, s, dir)
 	fmt.Fprintln(w)
+
+	// One-line progress summary.
+	printProgressLine(w, s, dir)
+	fmt.Fprintln(w)
+
 
 	if !verbose {
 		return
 	}
 
-	// Verbose: Specifying section.
+	// --- Verbose sections ---
+
+	// Specifying section.
 	if s.Specifying != nil {
 		fmt.Fprintf(w, "--- Specifying ---\n\n")
 		spec := s.Specifying
@@ -1109,6 +1154,56 @@ func PrintStatus(w io.Writer, s *ForgeState, dir string, verbose bool) {
 			}
 		}
 		fmt.Fprintln(w)
+	}
+}
+
+// phaseConfig returns the batch size and round bounds for the current phase.
+func phaseConfig(s *ForgeState) (batch, minRounds, maxRounds int) {
+	switch s.Phase {
+	case PhaseSpecifying:
+		return s.Config.Specifying.Batch, s.Config.Specifying.Eval.MinRounds, s.Config.Specifying.Eval.MaxRounds
+	case PhasePlanning:
+		return s.Config.Planning.Batch, s.Config.Planning.Eval.MinRounds, s.Config.Planning.Eval.MaxRounds
+	default: // implementing
+		return s.Config.Implementing.Batch, s.Config.Implementing.Eval.MinRounds, s.Config.Implementing.Eval.MaxRounds
+	}
+}
+
+// printProgressLine writes a one-line progress summary for the current phase.
+func printProgressLine(w io.Writer, s *ForgeState, dir string) {
+	switch s.Phase {
+	case PhaseSpecifying:
+		if s.Specifying == nil {
+			return
+		}
+		spec := s.Specifying
+		total := len(spec.Completed) + len(spec.Queue) + len(spec.CurrentSpecs)
+		fmt.Fprintf(w, "Progress: %d/%d specs completed, %d queued\n", len(spec.Completed), total, len(spec.Queue))
+
+	case PhasePlanning:
+		if s.Planning == nil {
+			return
+		}
+		fmt.Fprintf(w, "Progress: round %d of %d\n", s.Planning.Round, s.Config.Planning.Eval.MaxRounds)
+
+	case PhaseImplementing:
+		plan, _ := loadPlan(s, dir)
+		if plan == nil {
+			return
+		}
+		var passed, failed, remaining int
+		for i := range plan.Items {
+			switch plan.Items[i].Passes {
+			case "passed":
+				passed++
+			case "failed":
+				failed++
+			default:
+				remaining++
+			}
+		}
+		total := passed + failed + remaining
+		fmt.Fprintf(w, "Progress: %d/%d passed, %d failed, %d remaining\n", passed, total, failed, remaining)
 	}
 }
 

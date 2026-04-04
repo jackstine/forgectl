@@ -142,3 +142,74 @@ func TestLoadReturnsErrorWhenNoState(t *testing.T) {
 		t.Error("Load should return error when no state file")
 	}
 }
+
+func TestArchiveSessionCreatesFile(t *testing.T) {
+	dir := t.TempDir()
+	s := &ForgeState{
+		Phase: PhaseImplementing,
+		State: StateDone,
+	}
+
+	if err := ArchiveSession(dir, "myproject", s); err != nil {
+		t.Fatalf("ArchiveSession: %v", err)
+	}
+
+	entries, err := os.ReadDir(filepath.Join(dir, "sessions"))
+	if err != nil {
+		t.Fatalf("sessions dir: %v", err)
+	}
+	if len(entries) != 1 {
+		t.Fatalf("expected 1 archive file, got %d", len(entries))
+	}
+
+	name := entries[0].Name()
+	if len(name) < len("myproject-") || name[:len("myproject-")] != "myproject-" {
+		t.Errorf("archive name %q should start with domain prefix", name)
+	}
+}
+
+func TestArchiveSessionContainsValidJSON(t *testing.T) {
+	dir := t.TempDir()
+	s := &ForgeState{
+		Phase: PhaseImplementing,
+		State: StateDone,
+	}
+
+	if err := ArchiveSession(dir, "test", s); err != nil {
+		t.Fatalf("ArchiveSession: %v", err)
+	}
+
+	entries, _ := os.ReadDir(filepath.Join(dir, "sessions"))
+	archivePath := filepath.Join(dir, "sessions", entries[0].Name())
+	data, err := os.ReadFile(archivePath)
+	if err != nil {
+		t.Fatalf("reading archive: %v", err)
+	}
+
+	var loaded ForgeState
+	if err := json.Unmarshal(data, &loaded); err != nil {
+		t.Errorf("archive is not valid JSON: %v", err)
+	}
+	if loaded.Phase != PhaseImplementing {
+		t.Errorf("archived phase = %s, want implementing", loaded.Phase)
+	}
+}
+
+func TestArchiveSessionCreatesSessionsDir(t *testing.T) {
+	dir := t.TempDir()
+	s := &ForgeState{Phase: PhaseImplementing, State: StateDone}
+
+	// sessions/ does not exist yet — ArchiveSession must create it.
+	sessionsDir := filepath.Join(dir, "sessions")
+	if _, err := os.Stat(sessionsDir); !os.IsNotExist(err) {
+		t.Fatal("sessions dir should not exist before archive")
+	}
+
+	if err := ArchiveSession(dir, "domain", s); err != nil {
+		t.Fatalf("ArchiveSession: %v", err)
+	}
+
+	if _, err := os.Stat(sessionsDir); err != nil {
+		t.Errorf("sessions dir should exist after archive: %v", err)
+	}
+}

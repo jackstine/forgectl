@@ -138,8 +138,8 @@ func TestAutoCommitRegistersHashOnCompletedSpecs(t *testing.T) {
 		t.Fatalf("advanceSpecifying COMPLETE failed: %v", err)
 	}
 
-	if s.Specifying.Completed[0].CommitHash == "" {
-		t.Error("expected CommitHash to be registered on completed spec")
+	if len(s.Specifying.Completed[0].CommitHashes) == 0 {
+		t.Error("expected CommitHashes to be registered on completed spec")
 	}
 	if len(s.Specifying.Completed[0].CommitHashes) == 0 {
 		t.Error("expected CommitHashes to be non-empty")

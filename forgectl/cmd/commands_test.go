@@ -11,22 +11,38 @@ import (
 	"forgectl/state"
 )
 
-// setupProjectRoot creates a .forgectl/ directory with an empty config file in dir
-// so FindProjectRoot and LoadConfig succeed.
-func setupProjectRoot(t *testing.T, dir string) {
+// setupProjectDir creates a temp dir with .forgectl/ and an empty config,
+// changes cwd into it, and registers cleanup to restore cwd.
+func setupProjectDir(t *testing.T) string {
 	t.Helper()
-	forgectlDir := filepath.Join(dir, ".forgectl")
-	if err := os.MkdirAll(forgectlDir, 0755); err != nil {
-		t.Fatalf("creating .forgectl: %v", err)
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, ".forgectl"), 0755); err != nil {
+		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(forgectlDir, "config"), []byte(""), 0644); err != nil {
-		t.Fatalf("creating .forgectl/config: %v", err)
+	// Empty config — all defaults apply.
+	if err := os.WriteFile(filepath.Join(dir, ".forgectl", "config"), []byte(""), 0644); err != nil {
+		t.Fatal(err)
 	}
+
+	orig, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chdir(dir); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.Chdir(orig) })
+	return dir
+}
+
+// resolvedStateDir returns the expected state dir for a project root using DefaultForgeConfig.
+func resolvedStateDir(projectRoot string) string {
+	cfg := state.DefaultForgeConfig()
+	return state.StateDir(projectRoot, cfg)
 }
 
 func TestInitCommand(t *testing.T) {
-	dir := t.TempDir()
-	setupProjectRoot(t, dir)
+	dir := setupProjectDir(t)
 
 	// Write spec queue.
 	input := state.SpecQueueInput{
@@ -39,12 +55,8 @@ func TestInitCommand(t *testing.T) {
 	queueFile := filepath.Join(dir, "specs-queue.json")
 	os.WriteFile(queueFile, data, 0644)
 
-	// Run init.
-	stateDir = dir
 	initFrom = queueFile
 	initPhase = "specifying"
-	initGuided = true
-	initNoGuided = false
 
 	var buf bytes.Buffer
 	rootCmd.SetOut(&buf)
@@ -54,8 +66,9 @@ func TestInitCommand(t *testing.T) {
 		t.Fatalf("init: %v", err)
 	}
 
-	// Load state and verify.
-	s, err := state.Load(dir)
+	// Load state from the resolved state dir and verify.
+	sd := resolvedStateDir(dir)
+	s, err := state.Load(sd)
 	if err != nil {
 		t.Fatalf("load: %v", err)
 	}
@@ -70,19 +83,64 @@ func TestInitCommand(t *testing.T) {
 		t.Errorf("queue has %d specs, want 2", len(s.Specifying.Queue))
 	}
 	if s.SessionID == "" {
-		t.Error("session_id must be set after init")
+		t.Error("session_id should be set")
+	}
+}
+
+func TestInitLocksConfig(t *testing.T) {
+	dir := setupProjectDir(t)
+
+	// Write a custom config to verify it gets locked in.
+	customCfg := `[specifying]
+batch = 5
+
+[implementing]
+batch = 7
+`
+	os.WriteFile(filepath.Join(dir, ".forgectl", "config"), []byte(customCfg), 0644)
+
+	input := state.SpecQueueInput{
+		Specs: []state.SpecQueueEntry{
+			{Name: "Spec A", Domain: "test", Topic: "t", File: "a.md", PlanningSources: []string{}, DependsOn: []string{}},
+		},
+	}
+	data, _ := json.Marshal(input)
+	queueFile := filepath.Join(dir, "queue.json")
+	os.WriteFile(queueFile, data, 0644)
+
+	initFrom = queueFile
+	initPhase = "specifying"
+
+	err := runInit(initCmd, nil)
+	if err != nil {
+		t.Fatalf("init: %v", err)
+	}
+
+	sd := resolvedStateDir(dir)
+	s, err := state.Load(sd)
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+
+	if s.Config.Specifying.Batch != 5 {
+		t.Errorf("config.specifying.batch = %d, want 5", s.Config.Specifying.Batch)
+	}
+	if s.Config.Implementing.Batch != 7 {
+		t.Errorf("config.implementing.batch = %d, want 7", s.Config.Implementing.Batch)
 	}
 }
 
 func TestInitRejectsExistingState(t *testing.T) {
-	dir := t.TempDir()
-	setupProjectRoot(t, dir)
+	dir := setupProjectDir(t)
 
-	// Create existing state.
+	// Create existing state in the resolved state dir.
+	sd := resolvedStateDir(dir)
+	if err := os.MkdirAll(sd, 0755); err != nil {
+		t.Fatal(err)
+	}
 	s := &state.ForgeState{Phase: state.PhaseSpecifying, State: state.StateOrient}
-	state.Save(dir, s)
+	state.Save(sd, s)
 
-	stateDir = dir
 	initFrom = "dummy"
 	initPhase = "specifying"
 
@@ -93,10 +151,8 @@ func TestInitRejectsExistingState(t *testing.T) {
 }
 
 func TestInitRejectsGeneratePlanningQueuePhase(t *testing.T) {
-	dir := t.TempDir()
-	setupProjectRoot(t, dir)
+	setupProjectDir(t)
 
-	stateDir = dir
 	initFrom = "dummy"
 	initPhase = "generate_planning_queue"
 
@@ -110,10 +166,7 @@ func TestInitRejectsGeneratePlanningQueuePhase(t *testing.T) {
 }
 
 func TestInitRejectsInvalidPhase(t *testing.T) {
-	dir := t.TempDir()
-	setupProjectRoot(t, dir)
-
-	stateDir = dir
+	setupProjectDir(t)
 	initFrom = "dummy"
 	initPhase = "invalid"
 
@@ -123,75 +176,383 @@ func TestInitRejectsInvalidPhase(t *testing.T) {
 	}
 }
 
-func TestInitRejectsBadConfigMinMaxRounds(t *testing.T) {
-	dir := t.TempDir()
-	setupProjectRoot(t, dir)
+func TestInitRejectsInvalidConfig(t *testing.T) {
+	dir := setupProjectDir(t)
 
-	// Write a config with min > max.
-	tomlContent := `
-[implementing.eval]
+	// Write config with constraint violation.
+	badCfg := `[specifying.eval]
 min_rounds = 5
 max_rounds = 2
 `
-	os.WriteFile(filepath.Join(dir, ".forgectl", "config"), []byte(tomlContent), 0644)
+	os.WriteFile(filepath.Join(dir, ".forgectl", "config"), []byte(badCfg), 0644)
 
-	stateDir = dir
 	initFrom = "dummy"
 	initPhase = "specifying"
 
 	err := runInit(initCmd, nil)
 	if err == nil {
-		t.Error("expected error for min_rounds > max_rounds in config")
+		t.Error("expected error for invalid config")
 	}
 }
 
-func TestInitSetsSessionID(t *testing.T) {
-	dir := t.TempDir()
-	setupProjectRoot(t, dir)
+// --- add-queue-item tests ---
 
-	input := state.SpecQueueInput{
-		Specs: []state.SpecQueueEntry{
-			{Name: "Spec A", Domain: "x", Topic: "t", File: "specs/a.md", PlanningSources: []string{}, DependsOn: []string{}},
-		},
+// setupSpecifyingState saves a specifying state at the given state and returns the state dir.
+func setupSpecifyingState(t *testing.T, dir string, forgeState *state.ForgeState) string {
+	t.Helper()
+	sd := resolvedStateDir(dir)
+	if err := os.MkdirAll(sd, 0755); err != nil {
+		t.Fatal(err)
 	}
-	data, _ := json.Marshal(input)
-	queueFile := filepath.Join(dir, "queue.json")
-	os.WriteFile(queueFile, data, 0644)
+	if err := state.Save(sd, forgeState); err != nil {
+		t.Fatal(err)
+	}
+	return sd
+}
 
-	stateDir = dir
-	initFrom = queueFile
-	initPhase = "specifying"
-	initGuided = false
-	initNoGuided = false
+func newSpecifyingForgeState(st state.StateName) *state.ForgeState {
+	cfg := state.DefaultForgeConfig()
+	spec := state.NewSpecifyingState([]state.SpecQueueEntry{})
+	// Add one completed spec so set-roots can use the domain.
+	spec.Completed = append(spec.Completed, state.CompletedSpec{
+		ID: 1, Name: "Existing Spec", Domain: "test", File: "test/specs/existing.md",
+	})
+	spec.CurrentDomain = "test"
+	// Set up CurrentSpecs for DRAFT.
+	if st == state.StateDraft {
+		spec.CurrentSpecs = []*state.ActiveSpec{
+			{ID: 2, Name: "Current Spec", Domain: "test", File: "test/specs/current.md"},
+		}
+	}
+	return &state.ForgeState{
+		Phase:          state.PhaseSpecifying,
+		State:          st,
+		Config:         cfg,
+		StartedAtPhase: state.PhaseSpecifying,
+		Specifying:     spec,
+	}
+}
+
+func TestAddQueueItemInDraftState(t *testing.T) {
+	dir := setupProjectDir(t)
+	forgeState := newSpecifyingForgeState(state.StateDraft)
+	sd := setupSpecifyingState(t, dir, forgeState)
+
+	// Create the spec file.
+	specFile := filepath.Join(dir, "test", "specs", "new-spec.md")
+	os.MkdirAll(filepath.Dir(specFile), 0755)
+	os.WriteFile(specFile, []byte("# New Spec"), 0644)
+
+	addQueueItemName = "New Spec"
+	addQueueItemDomain = ""
+	addQueueItemTopic = "Some Topic"
+	addQueueItemFile = specFile
+	addQueueItemSources = nil
 
 	var buf bytes.Buffer
 	rootCmd.SetOut(&buf)
 
-	if err := runInit(initCmd, nil); err != nil {
-		t.Fatalf("init: %v", err)
+	if err := runAddQueueItem(addQueueItemCmd, nil); err != nil {
+		t.Fatalf("add-queue-item: %v", err)
 	}
 
-	s, _ := state.Load(dir)
-	if s.SessionID == "" {
-		t.Error("session_id not set")
+	s, _ := state.Load(sd)
+	if len(s.Specifying.Queue) != 1 {
+		t.Errorf("expected 1 queue item, got %d", len(s.Specifying.Queue))
+	}
+	if s.Specifying.Queue[0].Name != "New Spec" {
+		t.Errorf("expected queue item name 'New Spec', got %q", s.Specifying.Queue[0].Name)
+	}
+}
+
+func TestAddQueueItemInCrossReferenceReviewState(t *testing.T) {
+	dir := setupProjectDir(t)
+	forgeState := newSpecifyingForgeState(state.StateCrossReferenceReview)
+	sd := setupSpecifyingState(t, dir, forgeState)
+
+	specFile := filepath.Join(dir, "test", "specs", "another.md")
+	os.MkdirAll(filepath.Dir(specFile), 0755)
+	os.WriteFile(specFile, []byte("# Another Spec"), 0644)
+
+	addQueueItemName = "Another Spec"
+	addQueueItemDomain = ""
+	addQueueItemTopic = "Another Topic"
+	addQueueItemFile = specFile
+	addQueueItemSources = nil
+
+	if err := runAddQueueItem(addQueueItemCmd, nil); err != nil {
+		t.Fatalf("add-queue-item: %v", err)
+	}
+
+	s, _ := state.Load(sd)
+	if len(s.Specifying.Queue) != 1 {
+		t.Errorf("expected 1 queue item, got %d", len(s.Specifying.Queue))
+	}
+	if s.Specifying.Queue[0].Domain != "test" {
+		t.Errorf("expected domain 'test', got %q", s.Specifying.Queue[0].Domain)
+	}
+}
+
+func TestSetRootsInCrossReferenceReviewState(t *testing.T) {
+	dir := setupProjectDir(t)
+	forgeState := newSpecifyingForgeState(state.StateCrossReferenceReview)
+	sd := setupSpecifyingState(t, dir, forgeState)
+
+	setRootsDomain = ""
+
+	if err := runSetRoots(setRootsCmd, []string{"test/", "lib/"}); err != nil {
+		t.Fatalf("set-roots: %v", err)
+	}
+
+	s, _ := state.Load(sd)
+	meta, ok := s.Specifying.Domains["test"]
+	if !ok {
+		t.Fatal("expected domain 'test' in Domains map")
+	}
+	if len(meta.CodeSearchRoots) != 2 {
+		t.Errorf("expected 2 roots, got %d", len(meta.CodeSearchRoots))
+	}
+}
+
+func TestSetRootsInDoneState(t *testing.T) {
+	dir := setupProjectDir(t)
+	forgeState := newSpecifyingForgeState(state.StateDone)
+	sd := setupSpecifyingState(t, dir, forgeState)
+
+	setRootsDomain = "test"
+
+	if err := runSetRoots(setRootsCmd, []string{"test/"}); err != nil {
+		t.Fatalf("set-roots: %v", err)
+	}
+
+	s, _ := state.Load(sd)
+	meta, ok := s.Specifying.Domains["test"]
+	if !ok {
+		t.Fatal("expected domain 'test' in Domains map")
+	}
+	if meta.CodeSearchRoots[0] != "test/" {
+		t.Errorf("expected root 'test/', got %q", meta.CodeSearchRoots[0])
+	}
+}
+
+func TestAddQueueItemAtDoneWithDomain(t *testing.T) {
+	dir := setupProjectDir(t)
+	forgeState := newSpecifyingForgeState(state.StateDone)
+	sd := setupSpecifyingState(t, dir, forgeState)
+
+	specFile := filepath.Join(dir, "test", "specs", "done-spec.md")
+	os.MkdirAll(filepath.Dir(specFile), 0755)
+	os.WriteFile(specFile, []byte("# Done Spec"), 0644)
+
+	addQueueItemName = "Done Spec"
+	addQueueItemDomain = "test"
+	addQueueItemTopic = "Some Topic"
+	addQueueItemFile = specFile
+	addQueueItemSources = nil
+
+	if err := runAddQueueItem(addQueueItemCmd, nil); err != nil {
+		t.Fatalf("add-queue-item at DONE: %v", err)
+	}
+
+	s, _ := state.Load(sd)
+	if len(s.Specifying.Queue) != 1 {
+		t.Errorf("expected 1 queue item, got %d", len(s.Specifying.Queue))
+	}
+	if s.Specifying.Queue[0].Domain != "test" {
+		t.Errorf("expected domain 'test', got %q", s.Specifying.Queue[0].Domain)
+	}
+}
+
+// --- add-queue-item rejection tests ---
+
+func TestAddQueueItemRejectsWrongPhase(t *testing.T) {
+	dir := setupProjectDir(t)
+	sd := resolvedStateDir(dir)
+	os.MkdirAll(sd, 0755)
+	s := &state.ForgeState{
+		Phase: state.PhasePlanning, State: state.StateOrient, Config: state.DefaultForgeConfig(),
+		Planning: &state.PlanningState{CurrentPlan: &state.ActivePlan{Name: "p", Domain: "d", File: "plan.json"}},
+	}
+	state.Save(sd, s)
+
+	addQueueItemName = "X"
+	addQueueItemTopic = "t"
+	addQueueItemFile = "x.md"
+
+	err := runAddQueueItem(addQueueItemCmd, nil)
+	if err == nil || err.Error()[:len("add-queue-item is only valid in the specifying phase")] != "add-queue-item is only valid in the specifying phase" {
+		t.Errorf("expected phase error, got %v", err)
+	}
+}
+
+func TestAddQueueItemRejectsWrongState(t *testing.T) {
+	dir := setupProjectDir(t)
+	forgeState := newSpecifyingForgeState(state.StateEvaluate)
+	setupSpecifyingState(t, dir, forgeState)
+
+	addQueueItemName = "X"
+	addQueueItemTopic = "t"
+	addQueueItemFile = "x.md"
+
+	err := runAddQueueItem(addQueueItemCmd, nil)
+	if err == nil {
+		t.Error("expected error for wrong state")
+	}
+}
+
+func TestAddQueueItemRejectsMissingFile(t *testing.T) {
+	dir := setupProjectDir(t)
+	forgeState := newSpecifyingForgeState(state.StateDraft)
+	setupSpecifyingState(t, dir, forgeState)
+
+	addQueueItemName = "X"
+	addQueueItemTopic = "t"
+	addQueueItemFile = filepath.Join(dir, "nonexistent.md")
+
+	err := runAddQueueItem(addQueueItemCmd, nil)
+	if err == nil {
+		t.Error("expected error for missing file")
+	}
+}
+
+func TestAddQueueItemRejectsDuplicateNameInQueue(t *testing.T) {
+	dir := setupProjectDir(t)
+	forgeState := newSpecifyingForgeState(state.StateDraft)
+	// Pre-populate queue with duplicate name.
+	forgeState.Specifying.Queue = append(forgeState.Specifying.Queue, state.SpecQueueEntry{
+		Name: "Duplicate", Domain: "test", Topic: "t", File: "test/specs/dup.md",
+	})
+	setupSpecifyingState(t, dir, forgeState)
+
+	specFile := filepath.Join(dir, "test", "specs", "new.md")
+	os.MkdirAll(filepath.Dir(specFile), 0755)
+	os.WriteFile(specFile, []byte("spec"), 0644)
+
+	addQueueItemName = "Duplicate"
+	addQueueItemTopic = "t"
+	addQueueItemFile = specFile
+
+	err := runAddQueueItem(addQueueItemCmd, nil)
+	if err == nil {
+		t.Error("expected error for duplicate queue name")
+	}
+}
+
+func TestAddQueueItemRejectsDuplicateNameInCompleted(t *testing.T) {
+	dir := setupProjectDir(t)
+	forgeState := newSpecifyingForgeState(state.StateDraft)
+	// Completed already has "Existing Spec" from helper.
+	setupSpecifyingState(t, dir, forgeState)
+
+	specFile := filepath.Join(dir, "test", "specs", "new.md")
+	os.MkdirAll(filepath.Dir(specFile), 0755)
+	os.WriteFile(specFile, []byte("spec"), 0644)
+
+	addQueueItemName = "Existing Spec"
+	addQueueItemTopic = "t"
+	addQueueItemFile = specFile
+
+	err := runAddQueueItem(addQueueItemCmd, nil)
+	if err == nil {
+		t.Error("expected error for name already in completed specs")
+	}
+}
+
+func TestAddQueueItemRequiresDomainAtDone(t *testing.T) {
+	dir := setupProjectDir(t)
+	forgeState := newSpecifyingForgeState(state.StateDone)
+	setupSpecifyingState(t, dir, forgeState)
+
+	specFile := filepath.Join(dir, "test", "specs", "new.md")
+	os.MkdirAll(filepath.Dir(specFile), 0755)
+	os.WriteFile(specFile, []byte("spec"), 0644)
+
+	addQueueItemName = "Brand New"
+	addQueueItemDomain = "" // not set
+	addQueueItemTopic = "t"
+	addQueueItemFile = specFile
+
+	err := runAddQueueItem(addQueueItemCmd, nil)
+	if err == nil {
+		t.Error("expected error for missing --domain at DONE")
+	}
+}
+
+// --- set-roots rejection tests ---
+
+func TestSetRootsRejectsWrongPhase(t *testing.T) {
+	dir := setupProjectDir(t)
+	sd := resolvedStateDir(dir)
+	os.MkdirAll(sd, 0755)
+	s := &state.ForgeState{
+		Phase: state.PhasePlanning, State: state.StateOrient, Config: state.DefaultForgeConfig(),
+		Planning: &state.PlanningState{CurrentPlan: &state.ActivePlan{Name: "p", Domain: "d", File: "plan.json"}},
+	}
+	state.Save(sd, s)
+
+	setRootsDomain = "test"
+	err := runSetRoots(setRootsCmd, []string{"test/"})
+	if err == nil {
+		t.Error("expected error for wrong phase")
+	}
+}
+
+func TestSetRootsRejectsWrongState(t *testing.T) {
+	dir := setupProjectDir(t)
+	forgeState := newSpecifyingForgeState(state.StateDraft)
+	setupSpecifyingState(t, dir, forgeState)
+
+	setRootsDomain = "test"
+	err := runSetRoots(setRootsCmd, []string{"test/"})
+	if err == nil {
+		t.Error("expected error for wrong state")
+	}
+}
+
+func TestSetRootsRejectsNoPaths(t *testing.T) {
+	dir := setupProjectDir(t)
+	forgeState := newSpecifyingForgeState(state.StateCrossReferenceReview)
+	setupSpecifyingState(t, dir, forgeState)
+
+	setRootsDomain = "test"
+	err := runSetRoots(setRootsCmd, []string{}) // no paths
+	if err == nil {
+		t.Error("expected error for no path arguments")
+	}
+}
+
+func TestSetRootsRejectsDomainWithNoCompletedSpecs(t *testing.T) {
+	dir := setupProjectDir(t)
+	forgeState := newSpecifyingForgeState(state.StateCrossReferenceReview)
+	// Override current domain to one that has no completed specs.
+	forgeState.Specifying.CurrentDomain = "unknown-domain"
+	setupSpecifyingState(t, dir, forgeState)
+
+	setRootsDomain = ""
+	err := runSetRoots(setRootsCmd, []string{"unknown-domain/"})
+	if err == nil {
+		t.Error("expected error for domain with no completed specs")
 	}
 }
 
 func TestStatusCommand(t *testing.T) {
-	dir := t.TempDir()
+	dir := setupProjectDir(t)
+
+	// Save state to the resolved state dir.
+	sd := resolvedStateDir(dir)
+	if err := os.MkdirAll(sd, 0755); err != nil {
+		t.Fatal(err)
+	}
+	cfg := state.DefaultForgeConfig()
 	s := &state.ForgeState{
 		Phase:          state.PhaseSpecifying,
 		State:          state.StateOrient,
+		Config:         cfg,
 		StartedAtPhase: state.PhaseSpecifying,
-		Config: state.ForgeConfig{
-			General:    state.GeneralConfig{UserGuided: true},
-			Specifying: state.SpecifyingConfig{Batch: 1, CommitStrategy: "all-specs", Eval: state.EvalConfig{MinRounds: 1, MaxRounds: 3}},
-		},
-		Specifying: state.NewSpecifyingState([]state.SpecQueueEntry{}),
+		Specifying:     state.NewSpecifyingState([]state.SpecQueueEntry{}),
 	}
-	state.Save(dir, s)
+	state.Save(sd, s)
 
-	stateDir = dir
 	var buf bytes.Buffer
 	rootCmd.SetOut(&buf)
 
@@ -209,7 +570,10 @@ func TestStatusCommand(t *testing.T) {
 // TestStatusWithoutVerboseOmitsQueueAndCompletedSections verifies that status
 // without --verbose does not include queue or completed sections.
 func TestStatusWithoutVerboseOmitsQueueAndCompletedSections(t *testing.T) {
-	dir := t.TempDir()
+	dir := setupProjectDir(t)
+	sd := resolvedStateDir(dir)
+	os.MkdirAll(sd, 0755)
+
 	s := &state.ForgeState{
 		Phase:          state.PhaseSpecifying,
 		State:          state.StateOrient,
@@ -226,9 +590,8 @@ func TestStatusWithoutVerboseOmitsQueueAndCompletedSections(t *testing.T) {
 			},
 		},
 	}
-	state.Save(dir, s)
+	state.Save(sd, s)
 
-	stateDir = dir
 	statusVerbose = false
 	var buf bytes.Buffer
 	rootCmd.SetOut(&buf)
@@ -249,7 +612,10 @@ func TestStatusWithoutVerboseOmitsQueueAndCompletedSections(t *testing.T) {
 // TestStatusVerboseSpecifyingShowsCompletedWithEvalHistory verifies that
 // status --verbose in specifying phase shows completed specs with eval history.
 func TestStatusVerboseSpecifyingShowsCompletedWithEvalHistory(t *testing.T) {
-	dir := t.TempDir()
+	dir := setupProjectDir(t)
+	sd := resolvedStateDir(dir)
+	os.MkdirAll(sd, 0755)
+
 	s := &state.ForgeState{
 		Phase:          state.PhaseSpecifying,
 		State:          state.StateOrient,
@@ -260,11 +626,11 @@ func TestStatusVerboseSpecifyingShowsCompletedWithEvalHistory(t *testing.T) {
 		Specifying: &state.SpecifyingState{
 			Completed: []state.CompletedSpec{
 				{
-					ID:          1,
-					Name:        "repository-loading.md",
-					Domain:      "optimizer",
-					RoundsTaken: 2,
-					CommitHash:  "abc1234",
+					ID:           1,
+					Name:         "repository-loading.md",
+					Domain:       "optimizer",
+					RoundsTaken:  2,
+					CommitHashes: []string{"abc1234"},
 					Evals: []state.EvalRecord{
 						{Round: 1, Verdict: "FAIL"},
 						{Round: 2, Verdict: "PASS"},
@@ -273,9 +639,8 @@ func TestStatusVerboseSpecifyingShowsCompletedWithEvalHistory(t *testing.T) {
 			},
 		},
 	}
-	state.Save(dir, s)
+	state.Save(sd, s)
 
-	stateDir = dir
 	statusVerbose = true
 	defer func() { statusVerbose = false }()
 	var buf bytes.Buffer
@@ -303,7 +668,9 @@ func TestStatusVerboseSpecifyingShowsCompletedWithEvalHistory(t *testing.T) {
 // TestStatusVerboseImplementingShowsPerItemDetail verifies that status -v
 // in implementing phase shows per-item passes/rounds detail.
 func TestStatusVerboseImplementingShowsPerItemDetail(t *testing.T) {
-	dir := t.TempDir()
+	dir := setupProjectDir(t)
+	sd := resolvedStateDir(dir)
+	os.MkdirAll(sd, 0755)
 
 	planPath := filepath.Join(dir, "impl", "plan.json")
 	os.MkdirAll(filepath.Dir(planPath), 0755)
@@ -334,9 +701,8 @@ func TestStatusVerboseImplementingShowsPerItemDetail(t *testing.T) {
 		},
 		Implementing: state.NewImplementingState(),
 	}
-	state.Save(dir, s)
+	state.Save(sd, s)
 
-	stateDir = dir
 	statusVerbose = true
 	defer func() { statusVerbose = false }()
 	var buf bytes.Buffer
@@ -366,7 +732,10 @@ func TestStatusVerboseImplementingShowsPerItemDetail(t *testing.T) {
 // TestEvalCommandReconcileEvalOutputsReconciliationContext verifies that eval in
 // specifying RECONCILE_EVAL state outputs reconciliation context.
 func TestEvalCommandReconcileEvalOutputsReconciliationContext(t *testing.T) {
-	dir := t.TempDir()
+	dir := setupProjectDir(t)
+	sd := resolvedStateDir(dir)
+	os.MkdirAll(sd, 0755)
+
 	s := &state.ForgeState{
 		Phase: state.PhaseSpecifying,
 		State: state.StateReconcileEval,
@@ -382,9 +751,8 @@ func TestEvalCommandReconcileEvalOutputsReconciliationContext(t *testing.T) {
 			},
 		},
 	}
-	state.Save(dir, s)
+	state.Save(sd, s)
 
-	stateDir = dir
 	var buf bytes.Buffer
 	rootCmd.SetOut(&buf)
 
@@ -403,7 +771,10 @@ func TestEvalCommandReconcileEvalOutputsReconciliationContext(t *testing.T) {
 // TestEvalCommandCrossRefEvalOutputsCrossReferenceContext verifies that eval in
 // specifying CROSS_REFERENCE_EVAL state outputs cross-reference context.
 func TestEvalCommandCrossRefEvalOutputsCrossReferenceContext(t *testing.T) {
-	dir := t.TempDir()
+	dir := setupProjectDir(t)
+	sd := resolvedStateDir(dir)
+	os.MkdirAll(sd, 0755)
+
 	s := &state.ForgeState{
 		Phase: state.PhaseSpecifying,
 		State: state.StateCrossReferenceEval,
@@ -422,9 +793,8 @@ func TestEvalCommandCrossRefEvalOutputsCrossReferenceContext(t *testing.T) {
 			},
 		},
 	}
-	state.Save(dir, s)
+	state.Save(sd, s)
 
-	stateDir = dir
 	var buf bytes.Buffer
 	rootCmd.SetOut(&buf)
 
@@ -443,7 +813,10 @@ func TestEvalCommandCrossRefEvalOutputsCrossReferenceContext(t *testing.T) {
 // TestEvalCommandInDraftReturnsErrorNamingState verifies that eval in specifying
 // DRAFT state returns an error that names the current state.
 func TestEvalCommandInDraftReturnsErrorNamingState(t *testing.T) {
-	dir := t.TempDir()
+	dir := setupProjectDir(t)
+	sd := resolvedStateDir(dir)
+	os.MkdirAll(sd, 0755)
+
 	s := &state.ForgeState{
 		Phase: state.PhaseSpecifying,
 		State: state.StateDraft,
@@ -456,9 +829,8 @@ func TestEvalCommandInDraftReturnsErrorNamingState(t *testing.T) {
 			{Name: "Spec A", Domain: "test", Topic: "t", File: "spec-a.md"},
 		}),
 	}
-	state.Save(dir, s)
+	state.Save(sd, s)
 
-	stateDir = dir
 	var buf bytes.Buffer
 	rootCmd.SetOut(&buf)
 
@@ -635,8 +1007,8 @@ func TestValidateUnknownTypeFlag(t *testing.T) {
 	if err == nil {
 		t.Error("expected error for unknown --type flag")
 	}
-	if !strings.Contains(err.Error(), "unknown type") {
-		t.Errorf("expected 'unknown type' in error, got: %v", err)
+	if !strings.Contains(err.Error(), "--type must be") {
+		t.Errorf("expected '--type must be' in error, got: %v", err)
 	}
 }
 
@@ -646,21 +1018,16 @@ func TestValidateUndetectableJSON(t *testing.T) {
 	path := filepath.Join(dir, "weird.json")
 	os.WriteFile(path, data, 0644)
 
-	exited := false
-	origExit := osExit
-	osExit = func(code int) { exited = true }
-	defer func() { osExit = origExit }()
-
 	var buf bytes.Buffer
 	validateCmd.SetOut(&buf)
 	validateType = ""
 
 	err := runValidate(validateCmd, []string{path})
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
+	if err == nil {
+		t.Fatal("expected error for undetectable JSON type")
 	}
-	if !exited {
-		t.Error("expected osExit(1) for undetectable JSON type")
+	if !strings.Contains(err.Error(), "cannot detect file type") {
+		t.Errorf("expected 'cannot detect file type' in error, got: %v", err)
 	}
 	out := buf.String()
 	if !strings.Contains(out, "cannot detect file type") {
@@ -732,18 +1099,12 @@ func TestValidateInvalidSpecQueueShowsFailOutput(t *testing.T) {
 	validateCmd.SetOut(&buf)
 	validateType = ""
 
-	// Override osExit so the test process doesn't actually exit.
-	exited := false
-	origExit := osExit
-	osExit = func(code int) { exited = true }
-	defer func() { osExit = origExit }()
-
 	err := runValidate(validateCmd, []string{path})
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
+	if err == nil {
+		t.Fatal("expected error for invalid spec queue")
 	}
-	if !exited {
-		t.Error("expected osExit(1) to be called")
+	if !strings.Contains(err.Error(), "validation failed") {
+		t.Errorf("expected 'validation failed' in error, got: %v", err)
 	}
 	out := buf.String()
 	if !strings.Contains(out, "Error: validation failed with") {
@@ -765,11 +1126,12 @@ func TestValidateTypeOverrideConflictFails(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error for type/key mismatch")
 	}
-	if !strings.Contains(err.Error(), "--type plan expects") {
-		t.Errorf("expected '--type plan expects' in error, got: %v", err)
+	if !strings.Contains(err.Error(), "type mismatch") {
+		t.Errorf("expected 'type mismatch' in error, got: %v", err)
 	}
-	if !strings.Contains(err.Error(), "Hint: did you mean --type spec-queue") {
-		t.Errorf("expected hint about spec-queue, got: %v", err)
+	out := buf.String()
+	if !strings.Contains(out, "--type plan expects") {
+		t.Errorf("expected '--type plan expects' in output, got: %s", out)
 	}
 }
 
@@ -798,173 +1160,19 @@ func TestValidateEmptyObjectFailsAutoDetect(t *testing.T) {
 	path := filepath.Join(dir, "empty.json")
 	os.WriteFile(path, data, 0644)
 
-	exited := false
-	origExit := osExit
-	osExit = func(code int) { exited = true }
-	defer func() { osExit = origExit }()
-
 	var buf bytes.Buffer
 	validateCmd.SetOut(&buf)
 	validateType = ""
 
 	err := runValidate(validateCmd, []string{path})
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
+	if err == nil {
+		t.Fatal("expected error for empty {} object")
 	}
-	if !exited {
-		t.Error("expected osExit(1) for empty {} object")
+	if !strings.Contains(err.Error(), "cannot detect file type") {
+		t.Errorf("expected 'cannot detect file type' in error, got: %v", err)
 	}
 	out := buf.String()
 	if !strings.Contains(out, "cannot detect file type") {
 		t.Errorf("expected 'cannot detect file type' in output, got: %s", out)
-	}
-}
-
-// --- Logging integration tests ---
-
-// Test 7: Init command writes log entry with correct cmd/phase/state/detail.
-func TestInitLogDetail(t *testing.T) {
-	s := &state.ForgeState{
-		Phase:          state.PhaseSpecifying,
-		State:          state.StateOrient,
-		StartedAtPhase: state.PhaseSpecifying,
-		Config: state.ForgeConfig{
-			General:    state.GeneralConfig{UserGuided: true},
-			Specifying: state.SpecifyingConfig{Batch: 2, Eval: state.EvalConfig{MinRounds: 1, MaxRounds: 3}},
-			Logs:       state.LogsConfig{Enabled: true, RetentionDays: 90, MaxFiles: 50},
-		},
-	}
-	detail := buildInitLogDetail(s)
-
-	if detail["guided"] != true {
-		t.Errorf("detail[guided] = %v, want true", detail["guided"])
-	}
-	if detail["batch"] != 2 {
-		t.Errorf("detail[batch] = %v, want 2", detail["batch"])
-	}
-	if detail["rounds"] != "1-3" {
-		t.Errorf("detail[rounds] = %v, want 1-3", detail["rounds"])
-	}
-}
-
-// Test 8: Advance command writes log entry with prev_state set correctly.
-func TestAdvanceLogEntryPrevState(t *testing.T) {
-	s := &state.ForgeState{
-		Phase: state.PhaseSpecifying,
-		State: state.StateSelect, // after advance from ORIENT
-		Config: state.ForgeConfig{
-			General: state.GeneralConfig{EnableEvalOutput: false},
-		},
-		Specifying: &state.SpecifyingState{},
-	}
-	prevSnap := advanceSnapshot{}
-	in := state.AdvanceInput{}
-
-	detail := buildAdvanceLogDetail(s, "ORIENT", state.PhaseSpecifying, prevSnap, in)
-	// ORIENT in specifying has no specific detail case, so detail should be nil.
-	if detail != nil {
-		t.Errorf("expected nil detail for ORIENT advance, got %v", detail)
-	}
-}
-
-// Test 9: Advance from implementing ORIENT logs layer/unblocked/remaining.
-func TestAdvanceLogDetailImplOrient(t *testing.T) {
-	s := &state.ForgeState{
-		Phase: state.PhaseImplementing,
-		State: state.StateImplement, // after ORIENT → IMPLEMENT
-		Config: state.ForgeConfig{
-			General: state.GeneralConfig{EnableEvalOutput: false},
-		},
-		Implementing: &state.ImplementingState{
-			CurrentLayer: &state.LayerRef{ID: "L0", Name: "Foundation"},
-			CurrentBatch: &state.BatchState{
-				Items: []string{"item.a", "item.b"},
-			},
-		},
-	}
-	prevSnap := advanceSnapshot{} // before ORIENT, no batch yet
-	in := state.AdvanceInput{}
-
-	detail := buildAdvanceLogDetail(s, "ORIENT", state.PhaseImplementing, prevSnap, in)
-	if detail == nil {
-		t.Fatal("expected detail for ORIENT advance in implementing")
-	}
-	if detail["layer"] != "L0" {
-		t.Errorf("detail[layer] = %v, want L0", detail["layer"])
-	}
-	if detail["unblocked"] != 2 {
-		t.Errorf("detail[unblocked] = %v, want 2", detail["unblocked"])
-	}
-}
-
-// Test 10: Advance from implementing COMMIT logs layer/batch/items.
-func TestAdvanceLogDetailImplCommit(t *testing.T) {
-	s := &state.ForgeState{
-		Phase: state.PhaseImplementing,
-		State: state.StateOrient, // after COMMIT → ORIENT
-		Config: state.ForgeConfig{
-			General: state.GeneralConfig{EnableEvalOutput: false},
-		},
-		Implementing: &state.ImplementingState{},
-	}
-	prevSnap := advanceSnapshot{
-		layerID:     "L0",
-		batchNumber: 2,
-		batchItems:  []string{"item.a", "item.b"},
-	}
-	in := state.AdvanceInput{}
-
-	detail := buildAdvanceLogDetail(s, "COMMIT", state.PhaseImplementing, prevSnap, in)
-	if detail == nil {
-		t.Fatal("expected detail for COMMIT advance in implementing")
-	}
-	if detail["layer"] != "L0" {
-		t.Errorf("detail[layer] = %v, want L0", detail["layer"])
-	}
-	if detail["batch"] != 2 {
-		t.Errorf("detail[batch] = %v, want 2", detail["batch"])
-	}
-	items, ok := detail["items"].([]string)
-	if !ok {
-		t.Fatalf("detail[items] type = %T, want []string", detail["items"])
-	}
-	if len(items) != 2 || items[0] != "item.a" {
-		t.Errorf("detail[items] = %v, want [item.a item.b]", items)
-	}
-}
-
-// Test 11: Advance from specifying EVALUATE logs round/verdict with/without eval_report.
-func TestAdvanceLogDetailSpecifyingEvaluate(t *testing.T) {
-	// Without eval_report (EnableEvalOutput = false).
-	s := &state.ForgeState{
-		Phase: state.PhaseSpecifying,
-		State: state.StateAccept,
-		Config: state.ForgeConfig{
-			General: state.GeneralConfig{EnableEvalOutput: false},
-		},
-		Specifying: &state.SpecifyingState{},
-	}
-	prevSnap := advanceSnapshot{specRound: 2}
-	in := state.AdvanceInput{Verdict: "PASS", EvalReport: "report.md"}
-
-	detail := buildAdvanceLogDetail(s, "EVALUATE", state.PhaseSpecifying, prevSnap, in)
-	if detail == nil {
-		t.Fatal("expected detail for specifying EVALUATE advance")
-	}
-	if detail["round"] != 2 {
-		t.Errorf("detail[round] = %v, want 2", detail["round"])
-	}
-	if detail["verdict"] != "PASS" {
-		t.Errorf("detail[verdict] = %v, want PASS", detail["verdict"])
-	}
-	if _, ok := detail["eval_report"]; ok {
-		t.Error("detail[eval_report] should not be present when EnableEvalOutput=false")
-	}
-
-	// With eval_report (EnableEvalOutput = true).
-	s.Config.General.EnableEvalOutput = true
-	detail2 := buildAdvanceLogDetail(s, "EVALUATE", state.PhaseSpecifying, prevSnap, in)
-	if detail2["eval_report"] != "report.md" {
-		t.Errorf("detail[eval_report] = %v, want report.md", detail2["eval_report"])
 	}
 }

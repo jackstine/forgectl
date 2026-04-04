@@ -73,10 +73,10 @@ type tomlRefineConfig struct {
 
 // tomlPlanningConfig mirrors PlanningConfig for TOML decoding.
 type tomlPlanningConfig struct {
-	Batch                     int                `toml:"batch"`
-	CommitStrategy            string             `toml:"commit_strategy"`
-	SelfReview                *bool              `toml:"self_review"`
-	PlanAllBeforeImplementing *bool              `toml:"plan_all_before_implementing"`
+	Batch                     int                 `toml:"batch"`
+	CommitStrategy            string              `toml:"commit_strategy"`
+	SelfReview                *bool               `toml:"self_review"`
+	PlanAllBeforeImplementing *bool               `toml:"plan_all_before_implementing"`
 	StudyCode                 tomlStudyCodeConfig `toml:"study_code"`
 	Eval                      tomlEvalConfig      `toml:"eval"`
 	Refine                    tomlRefineConfig    `toml:"refine"`
@@ -110,9 +110,8 @@ type tomlLogsConfig struct {
 
 // tomlGeneralConfig mirrors GeneralConfig for TOML decoding.
 type tomlGeneralConfig struct {
-	EnableCommits    *bool `toml:"enable_commits"`
-	EnableEvalOutput *bool `toml:"enable_eval_output"`
-	UserGuided       *bool `toml:"user_guided"`
+	EnableCommits *bool `toml:"enable_commits"`
+	UserGuided    *bool `toml:"user_guided"`
 }
 
 // tomlForgeConfig is the intermediate struct for TOML decoding of .forgectl/config.
@@ -174,9 +173,6 @@ func mergeTomlConfig(cfg *ForgeConfig, raw *tomlForgeConfig) {
 	// General
 	if raw.General.EnableCommits != nil {
 		cfg.General.EnableCommits = *raw.General.EnableCommits
-	}
-	if raw.General.EnableEvalOutput != nil {
-		cfg.General.EnableEvalOutput = *raw.General.EnableEvalOutput
 	}
 	if raw.General.UserGuided != nil {
 		cfg.General.UserGuided = *raw.General.UserGuided
@@ -355,11 +351,11 @@ func ValidateConfig(cfg ForgeConfig) []string {
 	var errs []string
 
 	validStrategies := map[string]bool{
-		"strict":   true,
+		"strict":    true,
 		"all-specs": true,
-		"scoped":   true,
-		"tracked":  true,
-		"all":      true,
+		"scoped":    true,
+		"tracked":   true,
+		"all":       true,
 	}
 
 	if cfg.Specifying.CommitStrategy != "" && !validStrategies[cfg.Specifying.CommitStrategy] {

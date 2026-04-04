@@ -260,3 +260,32 @@ func TestValidateConfigNestedDomains(t *testing.T) {
 		t.Errorf("expected spec-format nesting error, got: %v", errs)
 	}
 }
+
+// TestValidateConfigBatchBelowOne verifies batch < 1 is rejected.
+func TestValidateConfigBatchBelowOne(t *testing.T) {
+	cfg := DefaultForgeConfig()
+	cfg.Specifying.Batch = 0
+	errs := ValidateConfig(cfg)
+	if len(errs) == 0 {
+		t.Error("expected violation for specifying.batch=0")
+	}
+	found := false
+	for _, e := range errs {
+		if strings.Contains(e, "specifying.batch") {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("expected specifying.batch violation, got: %v", errs)
+	}
+}
+
+// TestValidateConfigLogsRetentionDaysNegative verifies negative retention days are rejected.
+func TestValidateConfigLogsRetentionDaysNegative(t *testing.T) {
+	cfg := DefaultForgeConfig()
+	cfg.Logs.RetentionDays = -1
+	errs := ValidateConfig(cfg)
+	if len(errs) == 0 {
+		t.Error("expected violation for logs.retention_days=-1")
+	}
+}
