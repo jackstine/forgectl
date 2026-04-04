@@ -210,11 +210,11 @@ func ValidatePlanJSON(data []byte, baseDir string) []string {
 			}
 		}
 
-		// Notes file check.
-		if item.Ref != "" {
-			refPath := filepath.Join(baseDir, item.Ref)
+		// Notes file check (refs are validated on disk, relative to plan.json dir).
+		for _, ref := range item.Refs {
+			refPath := filepath.Join(baseDir, ref)
 			if _, err := os.Stat(refPath); err != nil {
-				errs = append(errs, fmt.Sprintf("items[%d] (%s): ref %q does not exist", i, item.ID, item.Ref))
+				errs = append(errs, fmt.Sprintf("items[%d] (%s): ref %q does not exist", i, item.ID, ref))
 			}
 		}
 	}

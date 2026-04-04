@@ -229,6 +229,7 @@ type PlanQueueEntry struct {
 	File            string   `json:"file"`
 	Specs           []string `json:"specs"`
 	CodeSearchRoots []string `json:"code_search_roots"`
+	SpecCommits     []string `json:"spec_commits,omitempty"` // deduplicated commit hashes from completed specs
 }
 
 // PlanQueueInput is the schema for --from at specifying→planning phase shift.
@@ -259,14 +260,14 @@ type PlanTest struct {
 
 // PlanItem is an item in the plan.
 type PlanItem struct {
-	ID          string   `json:"id"`
-	Name        string   `json:"name"`
-	Description string   `json:"description"`
-	DependsOn   []string `json:"depends_on"`
-	Steps       []string `json:"steps,omitempty"`
-	Files       []string `json:"files,omitempty"`
-	Spec        string   `json:"spec,omitempty"`
-	Ref         string   `json:"ref,omitempty"`
+	ID          string     `json:"id"`
+	Name        string     `json:"name"`
+	Description string     `json:"description"`
+	DependsOn   []string   `json:"depends_on"`
+	Steps       []string   `json:"steps,omitempty"`
+	Files       []string   `json:"files,omitempty"`
+	Specs       []string   `json:"specs,omitempty"` // spec refs, display only, #anchors OK, not validated on disk
+	Refs        []string   `json:"refs,omitempty"`  // notes refs, validated on disk, relative to plan.json dir
 	Tests       []PlanTest `json:"tests"`
 	// Added during implementing init:
 	Passes string `json:"passes,omitempty"`
@@ -286,6 +287,20 @@ type PlanJSON struct {
 	Refs    []PlanRef    `json:"refs,omitempty"`
 	Layers  []PlanLayerDef `json:"layers"`
 	Items   []PlanItem   `json:"items"`
+}
+
+// GeneratePlanningQueueState holds state for the generate_planning_queue phase.
+type GeneratePlanningQueueState struct {
+	PlanQueueFile string       `json:"plan_queue_file"`    // path to generated plan-queue.json
+	Evals         []EvalRecord `json:"evals,omitempty"`    // reserved for future use
+}
+
+// CompletedPlan is a plan that has been accepted in the planning phase.
+type CompletedPlan struct {
+	ID     int    `json:"id"`
+	Name   string `json:"name"`
+	Domain string `json:"domain"`
+	File   string `json:"file"`
 }
 
 // --- Eval records ---
@@ -332,10 +347,11 @@ type ReconcileState struct {
 
 // SpecifyingState holds specifying phase data.
 type SpecifyingState struct {
-	CurrentSpec *ActiveSpec     `json:"current_spec"`
+	CurrentSpec *ActiveSpec      `json:"current_spec"`
 	Queue       []SpecQueueEntry `json:"queue"`
 	Completed   []CompletedSpec  `json:"completed"`
 	Reconcile   *ReconcileState  `json:"reconcile,omitempty"`
+	DomainRoots map[string][]string `json:"domain_roots,omitempty"` // set-roots data used by genqueue
 }
 
 // --- Planning phase state ---
@@ -353,11 +369,11 @@ type ActivePlan struct {
 
 // PlanningState holds planning phase data.
 type PlanningState struct {
-	CurrentPlan *ActivePlan    `json:"current_plan"`
-	Round       int            `json:"round"`
-	Evals       []EvalRecord   `json:"evals,omitempty"`
+	CurrentPlan *ActivePlan      `json:"current_plan"`
+	Round       int              `json:"round"`
+	Evals       []EvalRecord     `json:"evals,omitempty"`
 	Queue       []PlanQueueEntry `json:"queue"`
-	Completed   []interface{}  `json:"completed"`
+	Completed   []CompletedPlan  `json:"completed"`
 }
 
 // --- Implementing phase state ---
@@ -392,10 +408,13 @@ type LayerHistory struct {
 
 // ImplementingState holds implementing phase data.
 type ImplementingState struct {
-	CurrentLayer *LayerRef      `json:"current_layer"`
-	BatchNumber  int            `json:"batch_number"`
-	CurrentBatch *BatchState    `json:"current_batch"`
-	LayerHistory []LayerHistory `json:"layer_history,omitempty"`
+	CurrentLayer      *LayerRef        `json:"current_layer"`
+	BatchNumber       int              `json:"batch_number"`
+	CurrentBatch      *BatchState      `json:"current_batch"`
+	LayerHistory      []LayerHistory   `json:"layer_history,omitempty"`
+	PlanQueue         []PlanQueueEntry `json:"plan_queue,omitempty"`          // multi-plan queue (plan_all_before_implementing mode)
+	CurrentPlanFile   string           `json:"current_plan_file,omitempty"`   // active plan.json path
+	CurrentPlanDomain string           `json:"current_plan_domain,omitempty"` // active plan domain
 }
 
 // --- Phase shift info ---
@@ -410,15 +429,16 @@ type PhaseShiftInfo struct {
 
 // ForgeState is the persistent state written to forgectl-state.json.
 type ForgeState struct {
-	Phase          PhaseName          `json:"phase"`
-	State          StateName          `json:"state"`
-	Config         ForgeConfig        `json:"config"`
-	SessionID      string             `json:"session_id,omitempty"`
-	StartedAtPhase PhaseName          `json:"started_at_phase"`
-	PhaseShift     *PhaseShiftInfo    `json:"phase_shift,omitempty"`
-	Specifying     *SpecifyingState   `json:"specifying"`
-	Planning       *PlanningState     `json:"planning"`
-	Implementing   *ImplementingState `json:"implementing"`
+	Phase                PhaseName                   `json:"phase"`
+	State                StateName                   `json:"state"`
+	Config               ForgeConfig                 `json:"config"`
+	SessionID            string                      `json:"session_id,omitempty"`
+	StartedAtPhase       PhaseName                   `json:"started_at_phase"`
+	PhaseShift           *PhaseShiftInfo             `json:"phase_shift,omitempty"`
+	GeneratePlanningQueue *GeneratePlanningQueueState `json:"generate_planning_queue,omitempty"`
+	Specifying           *SpecifyingState             `json:"specifying"`
+	Planning             *PlanningState               `json:"planning"`
+	Implementing         *ImplementingState            `json:"implementing"`
 }
 
 // AdvanceInput carries flags from the advance command.

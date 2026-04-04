@@ -154,7 +154,7 @@ func NewPlanningState(plans []PlanQueueEntry) *PlanningState {
 	copy(queue, plans)
 	return &PlanningState{
 		Queue:     queue,
-		Completed: []interface{}{},
+		Completed: []CompletedPlan{},
 	}
 }
 

@@ -104,7 +104,7 @@ func TestValidatePlanJSON_Valid(t *testing.T) {
 				Name:        "First Item",
 				Description: "Does the thing",
 				DependsOn:   []string{},
-				Ref:         "notes/config.md",
+				Refs:        []string{"notes/config.md"},
 				Tests: []PlanTest{
 					{Category: "functional", Description: "it works"},
 				},

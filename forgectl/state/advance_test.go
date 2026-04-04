@@ -820,7 +820,7 @@ func newPlanningState() *ForgeState {
 				CodeSearchRoots: []string{"test/"},
 			},
 			Queue:     []PlanQueueEntry{},
-			Completed: []interface{}{},
+			Completed: []CompletedPlan{},
 		},
 	}
 }
@@ -879,7 +879,7 @@ func createValidPlan(t *testing.T, dir, planFile string) {
 				Name:        "First Item",
 				Description: "Does the thing",
 				DependsOn:   []string{},
-				Ref:         "notes/config.md",
+				Refs:        []string{"notes/config.md"},
 				Tests: []PlanTest{
 					{Category: "functional", Description: "it works"},
 				},

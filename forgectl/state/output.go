@@ -430,11 +430,11 @@ func printImplementingOutput(w io.Writer, s *ForgeState, dir string) {
 		if len(item.Files) > 0 {
 			fmt.Fprintf(w, "Files:   %s\n", strings.Join(item.Files, ", "))
 		}
-		if item.Spec != "" {
-			fmt.Fprintf(w, "Spec:    %s\n", item.Spec)
+		if len(item.Specs) > 0 {
+			fmt.Fprintf(w, "Spec:    %s\n", strings.Join(item.Specs, ", "))
 		}
-		if item.Ref != "" {
-			fmt.Fprintf(w, "Ref:     %s\n", item.Ref)
+		if len(item.Refs) > 0 {
+			fmt.Fprintf(w, "Ref:     %s\n", strings.Join(item.Refs, ", "))
 		}
 
 		// Test summary.
@@ -836,11 +836,11 @@ func printImplementingEval(w io.Writer, s *ForgeState, dir string) error {
 
 		fmt.Fprintf(w, "[%d] %s — %s\n", i+1, item.ID, item.Name)
 		fmt.Fprintf(w, "    Description: %s\n", item.Description)
-		if item.Spec != "" {
-			fmt.Fprintf(w, "    Spec:        %s\n", item.Spec)
+		if len(item.Specs) > 0 {
+			fmt.Fprintf(w, "    Spec:        %s\n", strings.Join(item.Specs, ", "))
 		}
-		if item.Ref != "" {
-			fmt.Fprintf(w, "    Ref:         %s\n", item.Ref)
+		if len(item.Refs) > 0 {
+			fmt.Fprintf(w, "    Ref:         %s\n", strings.Join(item.Refs, ", "))
 		}
 		if len(item.Files) > 0 {
 			fmt.Fprintf(w, "    Files:       %s\n", strings.Join(item.Files, ", "))
