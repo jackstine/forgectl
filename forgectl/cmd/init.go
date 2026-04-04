@@ -11,13 +11,10 @@ import (
 )
 
 var (
-	initBatchSize int
-	initMinRounds int
-	initMaxRounds int
-	initFrom      string
-	initPhase     string
-	initGuided    bool
-	initNoGuided  bool
+	initFrom  string
+	initPhase string
+	initGuided   bool
+	initNoGuided bool
 )
 
 var initCmd = &cobra.Command{
@@ -28,34 +25,66 @@ var initCmd = &cobra.Command{
 }
 
 func init() {
-	initCmd.Flags().IntVar(&initBatchSize, "batch-size", 0, "Max items per batch (required)")
-	initCmd.Flags().IntVar(&initMinRounds, "min-rounds", 1, "Minimum evaluation rounds (default 1)")
-	initCmd.Flags().IntVar(&initMaxRounds, "max-rounds", 0, "Maximum evaluation rounds (required)")
 	initCmd.Flags().StringVar(&initFrom, "from", "", "Path to input file (required)")
 	initCmd.Flags().StringVar(&initPhase, "phase", "specifying", "Starting phase: specifying, planning, implementing")
-	initCmd.Flags().BoolVar(&initGuided, "guided", false, "Enable guided mode (default)")
+	initCmd.Flags().BoolVar(&initGuided, "guided", false, "Enable guided mode")
 	initCmd.Flags().BoolVar(&initNoGuided, "no-guided", false, "Disable guided mode")
 	_ = initCmd.MarkFlagRequired("from")
-	_ = initCmd.MarkFlagRequired("batch-size")
-	_ = initCmd.MarkFlagRequired("max-rounds")
 	rootCmd.AddCommand(initCmd)
 }
 
 func runInit(cmd *cobra.Command, args []string) error {
-	if initBatchSize < 1 {
-		return fmt.Errorf("--batch-size must be at least 1")
-	}
-	if initMinRounds < 1 {
-		return fmt.Errorf("--min-rounds must be at least 1")
-	}
-	if initMinRounds > initMaxRounds {
-		return fmt.Errorf("--min-rounds cannot exceed --max-rounds")
+	// Reject generate_planning_queue as an explicit --phase value.
+	if initPhase == string(state.PhaseGeneratePlanningQueue) {
+		return fmt.Errorf("generate_planning_queue requires a completed specifying phase. Use --phase specifying instead.")
 	}
 
 	validPhases := map[string]bool{"specifying": true, "planning": true, "implementing": true}
 	if !validPhases[initPhase] {
 		return fmt.Errorf("--phase must be specifying, planning, or implementing")
 	}
+
+	// Discover project root starting from --dir (or cwd).
+	startDir := stateDir
+	if startDir == "" || startDir == "." {
+		var err error
+		startDir, err = os.Getwd()
+		if err != nil {
+			return fmt.Errorf("getting working directory: %w", err)
+		}
+	}
+
+	projectRoot, err := state.FindProjectRoot(startDir)
+	if err != nil {
+		return fmt.Errorf("%w", err)
+	}
+
+	// Load and validate config.
+	cfg, err := state.LoadConfig(projectRoot)
+	if err != nil {
+		return fmt.Errorf("loading config: %w", err)
+	}
+
+	// Apply guided mode override from flags.
+	if initNoGuided {
+		cfg.General.UserGuided = false
+	}
+	if initGuided {
+		cfg.General.UserGuided = true
+	}
+
+	configErrs := state.ValidateConfig(cfg)
+	if len(configErrs) > 0 {
+		out := cmd.OutOrStdout()
+		fmt.Fprintln(out, "Config validation errors:")
+		for _, e := range configErrs {
+			fmt.Fprintf(out, "  %s\n", e)
+		}
+		return fmt.Errorf("config validation failed")
+	}
+
+	// State is saved to projectRoot (stateDir is updated for Save call).
+	stateDir = projectRoot
 
 	if state.Exists(stateDir) {
 		return fmt.Errorf("State file already exists. Delete it to reinitialize.")
@@ -69,36 +98,15 @@ func runInit(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("reading file: %w", err)
 	}
 
-	// Determine guided mode.
-	userGuided := true // default
-	if initNoGuided {
-		userGuided = false
-	}
-	if initGuided {
-		userGuided = true
-	}
-
+	sessionID := state.GenerateSessionID()
 	phase := state.PhaseName(initPhase)
 	out := cmd.OutOrStdout()
-
-	cfg := state.DefaultForgeConfig()
-	cfg.General.UserGuided = userGuided
-	// Populate phase-specific batch/eval settings from CLI flags.
-	// These will be superseded by TOML config loading in a future overhaul.
-	cfg.Specifying.Batch = initBatchSize
-	cfg.Specifying.Eval.MinRounds = initMinRounds
-	cfg.Specifying.Eval.MaxRounds = initMaxRounds
-	cfg.Planning.Batch = initBatchSize
-	cfg.Planning.Eval.MinRounds = initMinRounds
-	cfg.Planning.Eval.MaxRounds = initMaxRounds
-	cfg.Implementing.Batch = initBatchSize
-	cfg.Implementing.Eval.MinRounds = initMinRounds
-	cfg.Implementing.Eval.MaxRounds = initMaxRounds
 
 	s := &state.ForgeState{
 		Phase:          phase,
 		State:          state.StateOrient,
 		Config:         cfg,
+		SessionID:      sessionID,
 		StartedAtPhase: phase,
 	}
 
@@ -115,6 +123,24 @@ func runInit(cmd *cobra.Command, args []string) error {
 		if err := json.Unmarshal(data, &input); err != nil {
 			return fmt.Errorf("parsing input: %w", err)
 		}
+
+		// Validate domain config against spec queue when domains are configured.
+		if len(cfg.Domains) > 0 {
+			domainPaths := map[string]string{}
+			for _, d := range cfg.Domains {
+				domainPaths[d.Name] = d.Path
+			}
+			for i, spec := range input.Specs {
+				if _, ok := domainPaths[spec.Domain]; !ok {
+					return fmt.Errorf("specs[%d]: domain %q not found in config domains", i, spec.Domain)
+				}
+				expectedPrefix := domainPaths[spec.Domain] + "/specs/"
+				if len(spec.File) < len(expectedPrefix) || spec.File[:len(expectedPrefix)] != expectedPrefix {
+					return fmt.Errorf("specs[%d]: file %q must start with %s", i, spec.File, expectedPrefix)
+				}
+			}
+		}
+
 		s.Specifying = state.NewSpecifyingState(input.Specs)
 
 	case state.PhasePlanning:
@@ -145,7 +171,6 @@ func runInit(cmd *cobra.Command, args []string) error {
 		}
 
 	case state.PhaseImplementing:
-		// Validate as plan.json.
 		validationErrs := state.ValidatePlanJSON(data, stateDir)
 		if len(validationErrs) > 0 {
 			printValidationErrors(out, validationErrs)
@@ -172,8 +197,6 @@ func runInit(cmd *cobra.Command, args []string) error {
 		}
 
 		s.Implementing = state.NewImplementingState()
-		// We need a Planning reference for the plan file path.
-		// Populate name and domain from plan.json context.
 		s.Planning = &state.PlanningState{
 			CurrentPlan: &state.ActivePlan{
 				Name:   plan.Context.Module,

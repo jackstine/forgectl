@@ -8,6 +8,21 @@ import (
 	"strings"
 )
 
+// phaseEvalConfig returns (batch, minRounds, maxRounds) for the current phase.
+func phaseEvalConfig(s *ForgeState) (int, int, int) {
+	switch s.Phase {
+	case PhaseSpecifying:
+		c := s.Config.Specifying
+		return c.Batch, c.Eval.MinRounds, c.Eval.MaxRounds
+	case PhasePlanning:
+		c := s.Config.Planning
+		return c.Batch, c.Eval.MinRounds, c.Eval.MaxRounds
+	default:
+		c := s.Config.Implementing
+		return c.Batch, c.Eval.MinRounds, c.Eval.MaxRounds
+	}
+}
+
 // PrintAdvanceOutput prints the action description for the new state after advance.
 func PrintAdvanceOutput(w io.Writer, s *ForgeState, dir string) {
 	switch s.Phase {
@@ -293,7 +308,7 @@ func printImplementingOutput(w io.Writer, s *ForgeState, dir string) {
 			fmt.Fprintf(w, "Plan:    %s\n", s.Planning.CurrentPlan.Name)
 			fmt.Fprintf(w, "Domain:  %s\n", s.Planning.CurrentPlan.Domain)
 			fmt.Fprintf(w, "File:    %s\n", s.Planning.CurrentPlan.File)
-			fmt.Fprintf(w, "Config:  batch_size=%d, rounds=%d-%d\n", s.Config.Implementing.Batch, s.Config.Implementing.Eval.MinRounds, s.Config.Implementing.Eval.MaxRounds)
+			fmt.Fprintf(w, "Config:  batch=%d, rounds=%d-%d\n", s.Config.Implementing.Batch, s.Config.Implementing.Eval.MinRounds, s.Config.Implementing.Eval.MaxRounds)
 			fmt.Fprintf(w, "\nInitialized plan.json for implementation:\n")
 			fmt.Fprintf(w, "  Items:  %d (passes: pending, rounds: 0)\n", len(plan.Items))
 			fmt.Fprintf(w, "  Layers: %d", len(plan.Layers))
@@ -596,7 +611,8 @@ func PrintStatus(w io.Writer, s *ForgeState, dir string) {
 		fmt.Fprintf(w, " (started here)")
 	}
 	fmt.Fprintln(w)
-	fmt.Fprintf(w, "Config:  batch_size=%d, rounds=%d-%d, guided=%v\n", s.Config.Implementing.Batch, s.Config.Implementing.Eval.MinRounds, s.Config.Implementing.Eval.MaxRounds, s.Config.General.UserGuided)
+	batch, min, max := phaseEvalConfig(s)
+	fmt.Fprintf(w, "Config:  batch=%d, rounds=%d-%d, guided=%v\n", batch, min, max, s.Config.General.UserGuided)
 	fmt.Fprintln(w)
 
 	// Current state.

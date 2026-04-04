@@ -10,8 +10,17 @@ import (
 	"forgectl/state"
 )
 
+// setupProjectRoot creates a .forgectl/ directory in dir so FindProjectRoot succeeds.
+func setupProjectRoot(t *testing.T, dir string) {
+	t.Helper()
+	if err := os.MkdirAll(filepath.Join(dir, ".forgectl"), 0755); err != nil {
+		t.Fatalf("creating .forgectl: %v", err)
+	}
+}
+
 func TestInitCommand(t *testing.T) {
 	dir := t.TempDir()
+	setupProjectRoot(t, dir)
 
 	// Write spec queue.
 	input := state.SpecQueueInput{
@@ -27,9 +36,6 @@ func TestInitCommand(t *testing.T) {
 	// Run init.
 	stateDir = dir
 	initFrom = queueFile
-	initBatchSize = 2
-	initMinRounds = 1
-	initMaxRounds = 3
 	initPhase = "specifying"
 	initGuided = true
 	initNoGuided = false
@@ -57,10 +63,14 @@ func TestInitCommand(t *testing.T) {
 	if len(s.Specifying.Queue) != 2 {
 		t.Errorf("queue has %d specs, want 2", len(s.Specifying.Queue))
 	}
+	if s.SessionID == "" {
+		t.Error("session_id must be set after init")
+	}
 }
 
 func TestInitRejectsExistingState(t *testing.T) {
 	dir := t.TempDir()
+	setupProjectRoot(t, dir)
 
 	// Create existing state.
 	s := &state.ForgeState{Phase: state.PhaseSpecifying, State: state.StateOrient}
@@ -68,9 +78,6 @@ func TestInitRejectsExistingState(t *testing.T) {
 
 	stateDir = dir
 	initFrom = "dummy"
-	initBatchSize = 1
-	initMinRounds = 1
-	initMaxRounds = 3
 	initPhase = "specifying"
 
 	err := runInit(initCmd, nil)
@@ -79,45 +86,88 @@ func TestInitRejectsExistingState(t *testing.T) {
 	}
 }
 
-func TestInitRejectsInvalidConfig(t *testing.T) {
-	tests := []struct {
-		name      string
-		batchSize int
-		minRounds int
-		maxRounds int
-	}{
-		{"batch-size 0", 0, 1, 3},
-		{"min exceeds max", 2, 5, 2},
+func TestInitRejectsGeneratePlanningQueuePhase(t *testing.T) {
+	dir := t.TempDir()
+	setupProjectRoot(t, dir)
+
+	stateDir = dir
+	initFrom = "dummy"
+	initPhase = "generate_planning_queue"
+
+	err := runInit(initCmd, nil)
+	if err == nil {
+		t.Fatal("expected error for generate_planning_queue phase")
 	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			stateDir = t.TempDir()
-			initFrom = "dummy"
-			initBatchSize = tt.batchSize
-			initMinRounds = tt.minRounds
-			initMaxRounds = tt.maxRounds
-			initPhase = "specifying"
-
-			err := runInit(initCmd, nil)
-			if err == nil {
-				t.Error("expected error")
-			}
-		})
+	if err.Error() != "generate_planning_queue requires a completed specifying phase. Use --phase specifying instead." {
+		t.Errorf("unexpected error: %v", err)
 	}
 }
 
 func TestInitRejectsInvalidPhase(t *testing.T) {
-	stateDir = t.TempDir()
+	dir := t.TempDir()
+	setupProjectRoot(t, dir)
+
+	stateDir = dir
 	initFrom = "dummy"
-	initBatchSize = 1
-	initMinRounds = 1
-	initMaxRounds = 3
 	initPhase = "invalid"
 
 	err := runInit(initCmd, nil)
 	if err == nil {
 		t.Error("expected error for invalid phase")
+	}
+}
+
+func TestInitRejectsBadConfigMinMaxRounds(t *testing.T) {
+	dir := t.TempDir()
+	setupProjectRoot(t, dir)
+
+	// Write a config with min > max.
+	tomlContent := `
+[implementing.eval]
+min_rounds = 5
+max_rounds = 2
+`
+	os.WriteFile(filepath.Join(dir, ".forgectl", "config"), []byte(tomlContent), 0644)
+
+	stateDir = dir
+	initFrom = "dummy"
+	initPhase = "specifying"
+
+	err := runInit(initCmd, nil)
+	if err == nil {
+		t.Error("expected error for min_rounds > max_rounds in config")
+	}
+}
+
+func TestInitSetsSessionID(t *testing.T) {
+	dir := t.TempDir()
+	setupProjectRoot(t, dir)
+
+	input := state.SpecQueueInput{
+		Specs: []state.SpecQueueEntry{
+			{Name: "Spec A", Domain: "x", Topic: "t", File: "specs/a.md", PlanningSources: []string{}, DependsOn: []string{}},
+		},
+	}
+	data, _ := json.Marshal(input)
+	queueFile := filepath.Join(dir, "queue.json")
+	os.WriteFile(queueFile, data, 0644)
+
+	stateDir = dir
+	initFrom = queueFile
+	initPhase = "specifying"
+	initGuided = false
+	initNoGuided = false
+
+	var buf bytes.Buffer
+	rootCmd.SetOut(&buf)
+
+	if err := runInit(initCmd, nil); err != nil {
+		t.Fatalf("init: %v", err)
+	}
+
+	s, _ := state.Load(dir)
+	if s.SessionID == "" {
+		t.Error("session_id not set")
 	}
 }
 
@@ -128,7 +178,8 @@ func TestStatusCommand(t *testing.T) {
 		State:          state.StateOrient,
 		StartedAtPhase: state.PhaseSpecifying,
 		Config: state.ForgeConfig{
-			General: state.GeneralConfig{UserGuided: true},
+			General:    state.GeneralConfig{UserGuided: true},
+			Specifying: state.SpecifyingConfig{Batch: 1, CommitStrategy: "all-specs", Eval: state.EvalConfig{MinRounds: 1, MaxRounds: 3}},
 		},
 		Specifying: state.NewSpecifyingState([]state.SpecQueueEntry{}),
 	}
