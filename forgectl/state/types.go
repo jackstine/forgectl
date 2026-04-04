@@ -4,9 +4,10 @@ package state
 type PhaseName string
 
 const (
-	PhaseSpecifying   PhaseName = "specifying"
-	PhasePlanning     PhaseName = "planning"
-	PhaseImplementing PhaseName = "implementing"
+	PhaseSpecifying            PhaseName = "specifying"
+	PhasePlanning              PhaseName = "planning"
+	PhaseGeneratePlanningQueue PhaseName = "generate_planning_queue"
+	PhaseImplementing          PhaseName = "implementing"
 )
 
 // StateName represents the current state within a phase.
@@ -32,7 +33,176 @@ const (
 	StateValidate        StateName = "VALIDATE"
 	StateImplement       StateName = "IMPLEMENT"
 	StateCommit          StateName = "COMMIT"
+	StateSelfReview      StateName = "SELF_REVIEW"
 )
+
+// --- Configuration structs ---
+// Loaded from .forgectl/config TOML and locked into ForgeState at init time.
+
+// AgentConfig specifies which Claude model/agent type to use for a task.
+type AgentConfig struct {
+	Model string `json:"model"` // "opus", "haiku", "sonnet"
+	Type  string `json:"type"`  // "eval", "explore", "refine"
+	Count int    `json:"count"`
+}
+
+// EvalConfig configures evaluation rounds. AgentConfig fields are embedded
+// (promoted to the same JSON level) to match the flat schema in state-persistence.md.
+type EvalConfig struct {
+	MinRounds        int  `json:"min_rounds"`
+	MaxRounds        int  `json:"max_rounds"`
+	AgentConfig           // embedded: model, type, count at same JSON level
+	EnableEvalOutput bool `json:"enable_eval_output"`
+}
+
+// CrossRefConfig configures cross-reference evaluation.
+type CrossRefConfig struct {
+	MinRounds   int         `json:"min_rounds"`
+	MaxRounds   int         `json:"max_rounds"`
+	AgentConfig             // embedded: model, type, count at same JSON level
+	UserReview  bool        `json:"user_review"`
+	Eval        AgentConfig `json:"eval"` // separate eval agent for cross-ref
+}
+
+// ReconciliationConfig configures spec reconciliation.
+type ReconciliationConfig struct {
+	MinRounds   int  `json:"min_rounds"`
+	MaxRounds   int  `json:"max_rounds"`
+	AgentConfig      // embedded: model, type, count at same JSON level
+	UserReview  bool `json:"user_review"`
+}
+
+// SpecifyingConfig configures the specifying phase.
+type SpecifyingConfig struct {
+	Batch          int                  `json:"batch"`
+	CommitStrategy string               `json:"commit_strategy"`
+	Eval           EvalConfig           `json:"eval"`
+	CrossReference CrossRefConfig       `json:"cross_reference"`
+	Reconciliation ReconciliationConfig `json:"reconciliation"`
+}
+
+// StudyCodeConfig configures the code-study agent for planning.
+type StudyCodeConfig struct {
+	AgentConfig // embedded: model, type, count
+}
+
+// RefineConfig configures the plan-refinement agent.
+type RefineConfig struct {
+	AgentConfig // embedded: model, type, count
+}
+
+// PlanningConfig configures the planning phase.
+type PlanningConfig struct {
+	Batch                     int             `json:"batch"`
+	CommitStrategy            string          `json:"commit_strategy"`
+	SelfReview                bool            `json:"self_review"`
+	PlanAllBeforeImplementing bool            `json:"plan_all_before_implementing"`
+	StudyCode                 StudyCodeConfig `json:"study_code"`
+	Eval                      EvalConfig      `json:"eval"`
+	Refine                    RefineConfig    `json:"refine"`
+}
+
+// ImplementingConfig configures the implementing phase.
+type ImplementingConfig struct {
+	Batch          int        `json:"batch"`
+	CommitStrategy string     `json:"commit_strategy"`
+	Eval           EvalConfig `json:"eval"`
+}
+
+// DomainConfig identifies a domain within the project.
+type DomainConfig struct {
+	Name string `json:"name"`
+	Path string `json:"path"`
+}
+
+// PathsConfig configures directory locations.
+type PathsConfig struct {
+	StateDir     string `json:"state_dir"`
+	WorkspaceDir string `json:"workspace_dir"`
+}
+
+// LogsConfig configures activity log retention.
+type LogsConfig struct {
+	Enabled       bool `json:"enabled"`
+	RetentionDays int  `json:"retention_days"`
+	MaxFiles      int  `json:"max_files"`
+}
+
+// GeneralConfig holds top-level behavioral flags.
+type GeneralConfig struct {
+	EnableCommits bool `json:"enable_commits"`
+	UserGuided    bool `json:"user_guided"`
+}
+
+// ForgeConfig is the full project configuration loaded from .forgectl/config.
+// It is locked into ForgeState at init time so all commands use consistent settings.
+type ForgeConfig struct {
+	General      GeneralConfig      `json:"general"`
+	Domains      []DomainConfig     `json:"domains,omitempty"`
+	Specifying   SpecifyingConfig   `json:"specifying"`
+	Planning     PlanningConfig     `json:"planning"`
+	Implementing ImplementingConfig `json:"implementing"`
+	Paths        PathsConfig        `json:"paths"`
+	Logs         LogsConfig         `json:"logs"`
+}
+
+// DefaultForgeConfig returns a ForgeConfig with all spec-defined default values applied.
+func DefaultForgeConfig() ForgeConfig {
+	return ForgeConfig{
+		General: GeneralConfig{
+			EnableCommits: false,
+			UserGuided:    false,
+		},
+		Specifying: SpecifyingConfig{
+			Batch:          1,
+			CommitStrategy: "all-specs",
+			Eval: EvalConfig{
+				MinRounds: 1,
+				MaxRounds: 3,
+				AgentConfig: AgentConfig{
+					Model: "opus",
+					Type:  "eval",
+					Count: 1,
+				},
+			},
+		},
+		Planning: PlanningConfig{
+			Batch:          1,
+			CommitStrategy: "strict",
+			Eval: EvalConfig{
+				MinRounds: 1,
+				MaxRounds: 3,
+				AgentConfig: AgentConfig{
+					Model: "opus",
+					Type:  "eval",
+					Count: 1,
+				},
+			},
+		},
+		Implementing: ImplementingConfig{
+			Batch:          1,
+			CommitStrategy: "scoped",
+			Eval: EvalConfig{
+				MinRounds: 1,
+				MaxRounds: 3,
+				AgentConfig: AgentConfig{
+					Model: "opus",
+					Type:  "eval",
+					Count: 1,
+				},
+			},
+		},
+		Paths: PathsConfig{
+			StateDir:     ".forgectl/state",
+			WorkspaceDir: ".forge_workspace",
+		},
+		Logs: LogsConfig{
+			Enabled:       true,
+			RetentionDays: 90,
+			MaxFiles:      50,
+		},
+	}
+}
 
 // --- Input file schemas ---
 
@@ -242,10 +412,8 @@ type PhaseShiftInfo struct {
 type ForgeState struct {
 	Phase          PhaseName          `json:"phase"`
 	State          StateName          `json:"state"`
-	BatchSize      int                `json:"batch_size"`
-	MinRounds      int                `json:"min_rounds"`
-	MaxRounds      int                `json:"max_rounds"`
-	UserGuided     bool               `json:"user_guided"`
+	Config         ForgeConfig        `json:"config"`
+	SessionID      string             `json:"session_id,omitempty"`
 	StartedAtPhase PhaseName          `json:"started_at_phase"`
 	PhaseShift     *PhaseShiftInfo    `json:"phase_shift,omitempty"`
 	Specifying     *SpecifyingState   `json:"specifying"`

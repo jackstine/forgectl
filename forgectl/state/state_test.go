@@ -10,11 +10,8 @@ import (
 func TestAtomicSaveAndLoad(t *testing.T) {
 	dir := t.TempDir()
 	s := &ForgeState{
-		Phase:     PhaseSpecifying,
-		State:     StateOrient,
-		BatchSize: 2,
-		MinRounds: 1,
-		MaxRounds: 3,
+		Phase: PhaseSpecifying,
+		State: StateOrient,
 	}
 
 	if err := Save(dir, s); err != nil {

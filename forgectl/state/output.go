@@ -44,7 +44,7 @@ func printSpecifyingOutput(w io.Writer, s *ForgeState) {
 			fmt.Fprintf(w, "Sources: %s\n", strings.Join(cs.PlanningSources, ", "))
 		}
 		fmt.Fprintf(w, "Action:  Review topic and planning sources.\n")
-		if s.UserGuided {
+		if s.Config.General.UserGuided {
 			fmt.Fprintf(w, "         Stop and review and discuss with user before continuing.\n")
 		}
 		fmt.Fprintf(w, "         Advance to begin drafting.\n")
@@ -70,7 +70,7 @@ func printSpecifyingOutput(w io.Writer, s *ForgeState) {
 		fmt.Fprintf(w, "Spec:    %s\n", cs.Name)
 		fmt.Fprintf(w, "Domain:  %s\n", cs.Domain)
 		fmt.Fprintf(w, "File:    %s\n", cs.File)
-		fmt.Fprintf(w, "Round:   %d/%d\n", cs.Round, s.MaxRounds)
+		fmt.Fprintf(w, "Round:   %d/%d\n", cs.Round, s.Config.Specifying.Eval.MaxRounds)
 		fmt.Fprintf(w, "Action:  Spawn evaluation sub-agent against the spec.\n")
 		fmt.Fprintf(w, "         Eval output: %s\n", evalFile)
 		fmt.Fprintf(w, "         Advance with --verdict PASS --eval-report <path> --message <commit msg>\n")
@@ -87,7 +87,7 @@ func printSpecifyingOutput(w io.Writer, s *ForgeState) {
 		fmt.Fprintf(w, "Spec:    %s\n", cs.Name)
 		fmt.Fprintf(w, "Domain:  %s\n", cs.Domain)
 		fmt.Fprintf(w, "File:    %s\n", cs.File)
-		fmt.Fprintf(w, "Round:   %d/%d\n", cs.Round, s.MaxRounds)
+		fmt.Fprintf(w, "Round:   %d/%d\n", cs.Round, s.Config.Specifying.Eval.MaxRounds)
 		fmt.Fprintf(w, "Action:  Read the eval report and address any findings in the spec file.\n")
 		fmt.Fprintf(w, "         Eval report: %s\n", evalFile)
 		fmt.Fprintf(w, "         When changes are complete, run: forgectl advance\n")
@@ -99,7 +99,7 @@ func printSpecifyingOutput(w io.Writer, s *ForgeState) {
 		fmt.Fprintf(w, "Spec:    %s\n", cs.Name)
 		fmt.Fprintf(w, "Domain:  %s\n", cs.Domain)
 		fmt.Fprintf(w, "File:    %s\n", cs.File)
-		fmt.Fprintf(w, "Round:   %d/%d\n", cs.Round, s.MaxRounds)
+		fmt.Fprintf(w, "Round:   %d/%d\n", cs.Round, s.Config.Specifying.Eval.MaxRounds)
 		fmt.Fprintf(w, "Action:  Spec accepted. Advance to continue.\n")
 
 	case StateDone:
@@ -198,7 +198,7 @@ func printPlanningOutput(w io.Writer, s *ForgeState, dir string) {
 		fmt.Fprintf(w, "File:    %s\n", cp.File)
 		fmt.Fprintf(w, "Action:  Review study findings before drafting.\n")
 		fmt.Fprintf(w, "         Plan format: PLAN_FORMAT.md\n")
-		if s.UserGuided {
+		if s.Config.General.UserGuided {
 			fmt.Fprintf(w, "         Stop and review and discuss with user before continuing.\n")
 		}
 		fmt.Fprintf(w, "         Advance to begin drafting.\n")
@@ -230,8 +230,8 @@ func printPlanningOutput(w io.Writer, s *ForgeState, dir string) {
 		fmt.Fprintf(w, "Plan:    %s\n", cp.Name)
 		fmt.Fprintf(w, "Domain:  %s\n", cp.Domain)
 		fmt.Fprintf(w, "File:    %s\n", cp.File)
-		fmt.Fprintf(w, "Round:   %d/%d\n", plan.Round, s.MaxRounds)
-		fmt.Fprintf(w, "Action:  Run evaluation sub-agent against the plan (round %d/%d).\n", plan.Round, s.MaxRounds)
+		fmt.Fprintf(w, "Round:   %d/%d\n", plan.Round, s.Config.Planning.Eval.MaxRounds)
+		fmt.Fprintf(w, "Action:  Run evaluation sub-agent against the plan (round %d/%d).\n", plan.Round, s.Config.Planning.Eval.MaxRounds)
 		fmt.Fprintf(w, "         Sub-agent: forgectl eval\n")
 		fmt.Fprintf(w, "         Advance with --verdict PASS|FAIL --eval-report <path>.\n")
 
@@ -245,7 +245,7 @@ func printPlanningOutput(w io.Writer, s *ForgeState, dir string) {
 		fmt.Fprintf(w, "Plan:    %s\n", cp.Name)
 		fmt.Fprintf(w, "Domain:  %s\n", cp.Domain)
 		fmt.Fprintf(w, "File:    %s\n", cp.File)
-		fmt.Fprintf(w, "Round:   %d/%d\n", plan.Round, s.MaxRounds)
+		fmt.Fprintf(w, "Round:   %d/%d\n", plan.Round, s.Config.Planning.Eval.MaxRounds)
 		if lastEval.Verdict == "FAIL" {
 			fmt.Fprintf(w, "Action:  Evaluation found deficiencies. Spawn a sub-agent to update the plan and notes.\n")
 		} else {
@@ -260,9 +260,9 @@ func printPlanningOutput(w io.Writer, s *ForgeState, dir string) {
 		fmt.Fprintf(w, "Plan:    %s\n", cp.Name)
 		fmt.Fprintf(w, "Domain:  %s\n", cp.Domain)
 		fmt.Fprintf(w, "File:    %s\n", cp.File)
-		fmt.Fprintf(w, "Round:   %d/%d\n", plan.Round, s.MaxRounds)
+		fmt.Fprintf(w, "Round:   %d/%d\n", plan.Round, s.Config.Planning.Eval.MaxRounds)
 		lastEval := plan.Evals[len(plan.Evals)-1]
-		if lastEval.Verdict == "FAIL" && plan.Round >= s.MaxRounds {
+		if lastEval.Verdict == "FAIL" && plan.Round >= s.Config.Planning.Eval.MaxRounds {
 			fmt.Fprintf(w, "Action:  Plan accepted (max rounds reached).\n")
 		} else {
 			fmt.Fprintf(w, "Action:  Plan accepted.\n")
@@ -293,7 +293,7 @@ func printImplementingOutput(w io.Writer, s *ForgeState, dir string) {
 			fmt.Fprintf(w, "Plan:    %s\n", s.Planning.CurrentPlan.Name)
 			fmt.Fprintf(w, "Domain:  %s\n", s.Planning.CurrentPlan.Domain)
 			fmt.Fprintf(w, "File:    %s\n", s.Planning.CurrentPlan.File)
-			fmt.Fprintf(w, "Config:  batch_size=%d, rounds=%d-%d\n", s.BatchSize, s.MinRounds, s.MaxRounds)
+			fmt.Fprintf(w, "Config:  batch_size=%d, rounds=%d-%d\n", s.Config.Implementing.Batch, s.Config.Implementing.Eval.MinRounds, s.Config.Implementing.Eval.MaxRounds)
 			fmt.Fprintf(w, "\nInitialized plan.json for implementation:\n")
 			fmt.Fprintf(w, "  Items:  %d (passes: pending, rounds: 0)\n", len(plan.Items))
 			fmt.Fprintf(w, "  Layers: %d", len(plan.Layers))
@@ -322,7 +322,7 @@ func printImplementingOutput(w io.Writer, s *ForgeState, dir string) {
 					}
 				}
 				if len(failedItems) > 0 {
-					fmt.Fprintf(w, "          FORCE ACCEPT: %d items marked failed (max rounds %d/%d reached)\n", len(failedItems), s.MaxRounds, s.MaxRounds)
+					fmt.Fprintf(w, "          FORCE ACCEPT: %d items marked failed (max rounds %d/%d reached)\n", len(failedItems), s.Config.Implementing.Eval.MaxRounds, s.Config.Implementing.Eval.MaxRounds)
 					for _, item := range failedItems {
 						fmt.Fprintf(w, "          - [%s] %s\n", item.ID, item.Name)
 					}
@@ -360,7 +360,7 @@ func printImplementingOutput(w io.Writer, s *ForgeState, dir string) {
 
 		if impl.CurrentLayer == nil {
 			// Initial orient uses narrower alignment (matching State:   ).
-			if s.UserGuided {
+			if s.Config.General.UserGuided {
 				fmt.Fprintf(w, "Action:  Stop and review and discuss with user before continuing.\n")
 				fmt.Fprintf(w, "         Selecting first batch. Run: forgectl advance\n")
 			} else {
@@ -373,7 +373,7 @@ func printImplementingOutput(w io.Writer, s *ForgeState, dir string) {
 			if layerDef != nil && allLayerItemsTerminal(plan, *layerDef) {
 				actionText = "Advancing to next layer. Run: forgectl advance"
 			}
-			if s.UserGuided {
+			if s.Config.General.UserGuided {
 				fmt.Fprintf(w, "Action:   Stop and review and discuss with user before continuing.\n")
 				fmt.Fprintf(w, "          %s\n", actionText)
 			} else {
@@ -400,18 +400,18 @@ func printImplementingOutput(w io.Writer, s *ForgeState, dir string) {
 		fmt.Fprintf(w, "State:   IMPLEMENT\n")
 		fmt.Fprintf(w, "Phase:   implementing\n")
 		fmt.Fprintf(w, "Layer:   %s %s\n", impl.CurrentLayer.ID, impl.CurrentLayer.Name)
-		fmt.Fprintf(w, "Batch:   %d/%d\n", impl.BatchNumber, countTotalBatches(plan, s.BatchSize))
+		fmt.Fprintf(w, "Batch:   %d/%d\n", impl.BatchNumber, countTotalBatches(plan, s.Config.Implementing.Batch))
 
 		if batch.EvalRound > 0 {
-			fmt.Fprintf(w, "Round:   %d/%d\n", batch.EvalRound, s.MaxRounds)
+			fmt.Fprintf(w, "Round:   %d/%d\n", batch.EvalRound, s.Config.Implementing.Eval.MaxRounds)
 			if len(batch.Evals) > 0 {
 				lastEval := batch.Evals[len(batch.Evals)-1]
 				evalDir := filepath.Join(filepath.Dir(s.Planning.CurrentPlan.File), "evals")
 				evalFile := filepath.Join(evalDir, fmt.Sprintf("batch-%d-round-%d.md", impl.BatchNumber, lastEval.Round))
 				fmt.Fprintf(w, "Eval:    %s\n", evalFile)
 				note := fmt.Sprintf("%s recorded for round %d.", lastEval.Verdict, lastEval.Round)
-				if lastEval.Verdict == "PASS" && batch.EvalRound < s.MinRounds {
-					note += fmt.Sprintf(" Minimum rounds not yet met (%d/%d).", batch.EvalRound, s.MinRounds)
+				if lastEval.Verdict == "PASS" && batch.EvalRound < s.Config.Implementing.Eval.MinRounds {
+					note += fmt.Sprintf(" Minimum rounds not yet met (%d/%d).", batch.EvalRound, s.Config.Implementing.Eval.MinRounds)
 				}
 				fmt.Fprintf(w, "Note:    %s\n", note)
 			}
@@ -470,13 +470,13 @@ func printImplementingOutput(w io.Writer, s *ForgeState, dir string) {
 		plan, _ := loadPlan(s, dir)
 		totalBatches := 0
 		if plan != nil {
-			totalBatches = countTotalBatches(plan, s.BatchSize)
+			totalBatches = countTotalBatches(plan, s.Config.Implementing.Batch)
 		}
 		fmt.Fprintf(w, "State:    EVALUATE\n")
 		fmt.Fprintf(w, "Phase:    implementing\n")
 		fmt.Fprintf(w, "Layer:    %s %s\n", impl.CurrentLayer.ID, impl.CurrentLayer.Name)
 		fmt.Fprintf(w, "Batch:    %d/%d\n", impl.BatchNumber, totalBatches)
-		fmt.Fprintf(w, "Round:    %d/%d\n", batch.EvalRound+1, s.MaxRounds)
+		fmt.Fprintf(w, "Round:    %d/%d\n", batch.EvalRound+1, s.Config.Implementing.Eval.MaxRounds)
 		fmt.Fprintf(w, "Items:\n")
 
 		if plan != nil {
@@ -499,7 +499,7 @@ func printImplementingOutput(w io.Writer, s *ForgeState, dir string) {
 		plan, _ := loadPlan(s, dir)
 		totalBatches := 0
 		if plan != nil {
-			totalBatches = countTotalBatches(plan, s.BatchSize)
+			totalBatches = countTotalBatches(plan, s.Config.Implementing.Batch)
 		}
 		fmt.Fprintf(w, "State:   COMMIT\n")
 		fmt.Fprintf(w, "Phase:   implementing\n")
@@ -513,7 +513,7 @@ func printImplementingOutput(w io.Writer, s *ForgeState, dir string) {
 				if item != nil {
 					status := item.Passes
 					if item.Passes == "failed" {
-						status = fmt.Sprintf("failed (force-accept, %d/%d rounds)", item.Rounds, s.MaxRounds)
+						status = fmt.Sprintf("failed (force-accept, %d/%d rounds)", item.Rounds, s.Config.Implementing.Eval.MaxRounds)
 					}
 					fmt.Fprintf(w, "  - [%s] %s\n", item.ID, status)
 				}
@@ -596,7 +596,7 @@ func PrintStatus(w io.Writer, s *ForgeState, dir string) {
 		fmt.Fprintf(w, " (started here)")
 	}
 	fmt.Fprintln(w)
-	fmt.Fprintf(w, "Config:  batch_size=%d, rounds=%d-%d, guided=%v\n", s.BatchSize, s.MinRounds, s.MaxRounds, s.UserGuided)
+	fmt.Fprintf(w, "Config:  batch_size=%d, rounds=%d-%d, guided=%v\n", s.Config.Implementing.Batch, s.Config.Implementing.Eval.MinRounds, s.Config.Implementing.Eval.MaxRounds, s.Config.General.UserGuided)
 	fmt.Fprintln(w)
 
 	// Current state.
@@ -655,7 +655,7 @@ func PrintStatus(w io.Writer, s *ForgeState, dir string) {
 		plan := s.Planning
 		if len(plan.Evals) > 0 {
 			lastEval := plan.Evals[len(plan.Evals)-1]
-			if lastEval.Verdict == "PASS" && plan.Round >= s.MinRounds {
+			if lastEval.Verdict == "PASS" && plan.Round >= s.Config.Planning.Eval.MinRounds {
 				acceptLabel := "rounds"
 				if plan.Round == 1 {
 					acceptLabel = "round"
@@ -744,7 +744,7 @@ func printPlanningEval(w io.Writer, s *ForgeState, dir string) error {
 
 	plan := s.Planning
 
-	fmt.Fprintf(w, "=== PLAN EVALUATION ROUND %d/%d ===\n", plan.Round, s.MaxRounds)
+	fmt.Fprintf(w, "=== PLAN EVALUATION ROUND %d/%d ===\n", plan.Round, s.Config.Planning.Eval.MaxRounds)
 	fmt.Fprintf(w, "Plan:   %s\n", plan.CurrentPlan.Name)
 	fmt.Fprintf(w, "Domain: %s\n", plan.CurrentPlan.Domain)
 	fmt.Fprintf(w, "File:   %s\n", plan.CurrentPlan.File)
@@ -801,13 +801,13 @@ func printImplementingEval(w io.Writer, s *ForgeState, dir string) error {
 
 	evalRound := batch.EvalRound + 1
 
-	fmt.Fprintf(w, "=== IMPLEMENTATION EVALUATION ROUND %d/%d ===\n", evalRound, s.MaxRounds)
+	fmt.Fprintf(w, "=== IMPLEMENTATION EVALUATION ROUND %d/%d ===\n", evalRound, s.Config.Implementing.Eval.MaxRounds)
 	fmt.Fprintf(w, "Layer: %s %s\n", impl.CurrentLayer.ID, impl.CurrentLayer.Name)
 
 	plan, planErr := loadPlan(s, dir)
 	totalBatches := 0
 	if planErr == nil && plan != nil {
-		totalBatches = countTotalBatches(plan, s.BatchSize)
+		totalBatches = countTotalBatches(plan, s.Config.Implementing.Batch)
 	}
 	fmt.Fprintf(w, "Batch: %d/%d\n", impl.BatchNumber, totalBatches)
 

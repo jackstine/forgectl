@@ -13,9 +13,6 @@ func TestInitDefaultsToSpecifyingPhase(t *testing.T) {
 	s := &ForgeState{
 		Phase:          PhaseSpecifying,
 		State:          StateOrient,
-		BatchSize:      2,
-		MinRounds:      1,
-		MaxRounds:      3,
 		StartedAtPhase: PhaseSpecifying,
 		Specifying: NewSpecifyingState([]SpecQueueEntry{
 			{Name: "Spec1", Domain: "test", Topic: "t", File: "spec1.md", PlanningSources: []string{}, DependsOn: []string{}},
@@ -37,9 +34,6 @@ func TestInitAtPlanningPhase(t *testing.T) {
 	s := &ForgeState{
 		Phase:          PhasePlanning,
 		State:          StateOrient,
-		BatchSize:      2,
-		MinRounds:      1,
-		MaxRounds:      3,
 		StartedAtPhase: PhasePlanning,
 		Planning: NewPlanningState([]PlanQueueEntry{
 			{Name: "Plan1", Domain: "test", Topic: "t", File: "plan.json", Specs: []string{}, CodeSearchRoots: []string{}},
@@ -69,11 +63,13 @@ func newSpecifyingState(numSpecs int) *ForgeState {
 		})
 	}
 	return &ForgeState{
-		Phase:     PhaseSpecifying,
-		State:     StateOrient,
-		BatchSize: 2,
-		MinRounds: 1,
-		MaxRounds: 3,
+		Phase: PhaseSpecifying,
+		State: StateOrient,
+		Config: ForgeConfig{
+			Specifying: SpecifyingConfig{
+				Eval: EvalConfig{MinRounds: 1, MaxRounds: 3},
+			},
+		},
 		Specifying: NewSpecifyingState(specs),
 	}
 }
@@ -126,7 +122,7 @@ func TestSpecifyingFailBelowMaxRoundsGoesToRefine(t *testing.T) {
 
 func TestSpecifyingFailAtMaxRoundsForcesAccept(t *testing.T) {
 	s := newSpecifyingState(1)
-	s.MaxRounds = 2
+	s.Config.Specifying.Eval.MaxRounds = 2
 
 	advanceToEvaluate(t, s)
 
@@ -150,7 +146,7 @@ func TestSpecifyingFailAtMaxRoundsForcesAccept(t *testing.T) {
 
 func TestSpecifyingPassBelowMinRoundsGoesToRefine(t *testing.T) {
 	s := newSpecifyingState(1)
-	s.MinRounds = 2
+	s.Config.Specifying.Eval.MinRounds = 2
 
 	advanceToEvaluate(t, s)
 
@@ -169,7 +165,7 @@ func TestSpecifyingPassBelowMinRoundsGoesToRefine(t *testing.T) {
 
 func TestSpecifyingPassAtMinRoundsGoesToAccept(t *testing.T) {
 	s := newSpecifyingState(1)
-	s.MinRounds = 2
+	s.Config.Specifying.Eval.MinRounds = 2
 
 	advanceToEvaluate(t, s)
 
@@ -324,7 +320,7 @@ func TestPhaseShiftSpecifyingToPlanningWithValidQueue(t *testing.T) {
 
 func TestPhaseShiftGuidedSetting(t *testing.T) {
 	s := newSpecifyingState(1)
-	s.UserGuided = true
+	s.Config.General.UserGuided = true
 	advanceToComplete(t, s)
 	Advance(s, AdvanceInput{}, "") // → PHASE_SHIFT
 
@@ -340,7 +336,7 @@ func TestPhaseShiftGuidedSetting(t *testing.T) {
 
 	noGuided := false
 	Advance(s, AdvanceInput{From: queueFile, Guided: &noGuided}, "")
-	if s.UserGuided != false {
+	if s.Config.General.UserGuided != false {
 		t.Error("user_guided should be false after --no-guided at phase shift")
 	}
 }
@@ -506,7 +502,7 @@ func TestPlanningDraftSetsRoundTo1OnValidationFailure(t *testing.T) {
 func TestPlanningEvaluatePassAtMinRoundsAccept(t *testing.T) {
 	dir := t.TempDir()
 	s := newPlanningStateWithDir(dir)
-	s.MinRounds = 1
+	s.Config.Planning.Eval.MinRounds = 1
 
 	advancePlanningToEvaluate(t, s, dir)
 
@@ -525,7 +521,7 @@ func TestPlanningEvaluatePassAtMinRoundsAccept(t *testing.T) {
 func TestPlanningEvaluateFailAtMaxRoundsForcesAccept(t *testing.T) {
 	dir := t.TempDir()
 	s := newPlanningStateWithDir(dir)
-	s.MaxRounds = 1
+	s.Config.Planning.Eval.MaxRounds = 1
 
 	advancePlanningToEvaluate(t, s, dir)
 
@@ -645,7 +641,7 @@ func TestEvaluatePassWithSufficientRoundsToCommit(t *testing.T) {
 func TestEvaluateFailAtMaxRoundsToCommit(t *testing.T) {
 	dir := t.TempDir()
 	s := newImplementingState(dir, 1, 1)
-	s.MaxRounds = 1
+	s.Config.Implementing.Eval.MaxRounds = 1
 
 	advanceImplToEvaluate(t, s, dir)
 
@@ -664,7 +660,7 @@ func TestEvaluateFailAtMaxRoundsToCommit(t *testing.T) {
 func TestEvaluateFailWithinMaxRoundsToImplement(t *testing.T) {
 	dir := t.TempDir()
 	s := newImplementingState(dir, 1, 1)
-	s.MaxRounds = 3
+	s.Config.Implementing.Eval.MaxRounds = 3
 
 	advanceImplToEvaluate(t, s, dir)
 
@@ -726,7 +722,7 @@ func TestDoneCannotAdvance(t *testing.T) {
 func TestSubsequentRoundImplementDoesNotRequireMessage(t *testing.T) {
 	dir := t.TempDir()
 	s := newImplementingState(dir, 1, 1)
-	s.MaxRounds = 3
+	s.Config.Implementing.Eval.MaxRounds = 3
 
 	advanceImplToEvaluate(t, s, dir)
 
@@ -806,11 +802,13 @@ func advanceToComplete(t *testing.T, s *ForgeState) {
 
 func newPlanningState() *ForgeState {
 	return &ForgeState{
-		Phase:     PhasePlanning,
-		State:     StateOrient,
-		BatchSize: 2,
-		MinRounds: 1,
-		MaxRounds: 3,
+		Phase: PhasePlanning,
+		State: StateOrient,
+		Config: ForgeConfig{
+			Planning: PlanningConfig{
+				Eval: EvalConfig{MinRounds: 1, MaxRounds: 3},
+			},
+		},
 		Planning: &PlanningState{
 			CurrentPlan: &ActivePlan{
 				ID:              1,
@@ -933,17 +931,20 @@ func newImplementingState(dir string, numItems, batchSize int) *ForgeState {
 	os.WriteFile(planPath, data, 0644)
 
 	return &ForgeState{
-		Phase:     PhaseImplementing,
-		State:     StateOrient,
-		BatchSize: batchSize,
-		MinRounds: 1,
-		MaxRounds: 3,
+		Phase: PhaseImplementing,
+		State: StateOrient,
+		Config: ForgeConfig{
+			Implementing: ImplementingConfig{
+				Batch: batchSize,
+				Eval:  EvalConfig{MinRounds: 1, MaxRounds: 3},
+			},
+		},
 		Planning: &PlanningState{
 			CurrentPlan: &ActivePlan{
-				ID:   1,
-				Name: "Test Plan",
+				ID:     1,
+				Name:   "Test Plan",
 				Domain: "test",
-				File: "impl/plan.json",
+				File:   "impl/plan.json",
 			},
 		},
 		Implementing: NewImplementingState(),

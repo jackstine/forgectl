@@ -11,7 +11,7 @@ import (
 func Advance(s *ForgeState, in AdvanceInput, dir string) error {
 	// Update guided setting if provided.
 	if in.Guided != nil {
-		s.UserGuided = *in.Guided
+		s.Config.General.UserGuided = *in.Guided
 	}
 
 	// Phase shift is handled before phase dispatch — it can occur
@@ -88,7 +88,7 @@ func advanceSpecifying(s *ForgeState, in AdvanceInput) error {
 		spec.CurrentSpec.Evals = append(spec.CurrentSpec.Evals, eval)
 
 		if in.Verdict == "PASS" {
-			if spec.CurrentSpec.Round >= s.MinRounds {
+			if spec.CurrentSpec.Round >= s.Config.Specifying.Eval.MinRounds {
 				if in.Message == "" {
 					return fmt.Errorf("--message is required when --verdict is PASS")
 				}
@@ -97,7 +97,7 @@ func advanceSpecifying(s *ForgeState, in AdvanceInput) error {
 				s.State = StateRefine
 			}
 		} else {
-			if spec.CurrentSpec.Round >= s.MaxRounds {
+			if spec.CurrentSpec.Round >= s.Config.Specifying.Eval.MaxRounds {
 				s.State = StateAccept
 			} else {
 				s.State = StateRefine
@@ -223,13 +223,13 @@ func advancePlanning(s *ForgeState, in AdvanceInput, dir string) error {
 		s.Planning.Evals = append(s.Planning.Evals, eval)
 
 		if in.Verdict == "PASS" {
-			if s.Planning.Round >= s.MinRounds {
+			if s.Planning.Round >= s.Config.Planning.Eval.MinRounds {
 				s.State = StateAccept
 			} else {
 				s.State = StateRefine
 			}
 		} else {
-			if s.Planning.Round >= s.MaxRounds {
+			if s.Planning.Round >= s.Config.Planning.Eval.MaxRounds {
 				s.State = StateAccept
 			} else {
 				s.State = StateRefine
@@ -381,7 +381,7 @@ func advanceImplFromOrient(s *ForgeState, dir string) error {
 		}
 
 		// Check for unblocked items.
-		batch := selectBatch(plan, layer, s.BatchSize)
+		batch := selectBatch(plan, layer, s.Config.Implementing.Batch)
 		if len(batch) == 0 {
 			continue
 		}
@@ -474,7 +474,7 @@ func advanceImplFromEvaluate(s *ForgeState, in AdvanceInput, dir string) error {
 	}
 
 	if in.Verdict == "PASS" {
-		if batch.EvalRound >= s.MinRounds {
+		if batch.EvalRound >= s.Config.Implementing.Eval.MinRounds {
 			// Mark items passed.
 			for _, id := range batch.Items {
 				setItemPasses(plan, id, "passed")
@@ -489,7 +489,7 @@ func advanceImplFromEvaluate(s *ForgeState, in AdvanceInput, dir string) error {
 			s.State = StateImplement
 		}
 	} else {
-		if batch.EvalRound >= s.MaxRounds {
+		if batch.EvalRound >= s.Config.Implementing.Eval.MaxRounds {
 			// Force accept — mark items failed.
 			for _, id := range batch.Items {
 				setItemPasses(plan, id, "failed")

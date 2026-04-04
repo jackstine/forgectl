@@ -81,13 +81,24 @@ func runInit(cmd *cobra.Command, args []string) error {
 	phase := state.PhaseName(initPhase)
 	out := cmd.OutOrStdout()
 
+	cfg := state.DefaultForgeConfig()
+	cfg.General.UserGuided = userGuided
+	// Populate phase-specific batch/eval settings from CLI flags.
+	// These will be superseded by TOML config loading in a future overhaul.
+	cfg.Specifying.Batch = initBatchSize
+	cfg.Specifying.Eval.MinRounds = initMinRounds
+	cfg.Specifying.Eval.MaxRounds = initMaxRounds
+	cfg.Planning.Batch = initBatchSize
+	cfg.Planning.Eval.MinRounds = initMinRounds
+	cfg.Planning.Eval.MaxRounds = initMaxRounds
+	cfg.Implementing.Batch = initBatchSize
+	cfg.Implementing.Eval.MinRounds = initMinRounds
+	cfg.Implementing.Eval.MaxRounds = initMaxRounds
+
 	s := &state.ForgeState{
 		Phase:          phase,
 		State:          state.StateOrient,
-		BatchSize:      initBatchSize,
-		MinRounds:      initMinRounds,
-		MaxRounds:      initMaxRounds,
-		UserGuided:     userGuided,
+		Config:         cfg,
 		StartedAtPhase: phase,
 	}
 

@@ -1,15 +1,91 @@
 {
-  "phase": "planning",
-  "state": "PHASE_SHIFT",
-  "batch_size": 1,
-  "min_rounds": 1,
-  "max_rounds": 3,
-  "user_guided": true,
-  "started_at_phase": "planning",
-  "phase_shift": {
-    "from": "planning",
-    "to": "implementing"
+  "phase": "implementing",
+  "state": "COMMIT",
+  "config": {
+    "general": {
+      "enable_commits": false,
+      "user_guided": false
+    },
+    "specifying": {
+      "batch": 4,
+      "commit_strategy": "all-specs",
+      "eval": {
+        "min_rounds": 1,
+        "max_rounds": 3,
+        "model": "opus",
+        "type": "eval",
+        "count": 1,
+        "enable_eval_output": false
+      },
+      "cross_reference": {
+        "min_rounds": 1,
+        "max_rounds": 2,
+        "model": "haiku",
+        "type": "explore",
+        "count": 3,
+        "user_review": false,
+        "eval": {
+          "model": "opus",
+          "type": "eval",
+          "count": 1
+        }
+      },
+      "reconciliation": {
+        "min_rounds": 0,
+        "max_rounds": 3,
+        "model": "opus",
+        "type": "eval",
+        "count": 1,
+        "user_review": false
+      }
+    },
+    "planning": {
+      "batch": 4,
+      "commit_strategy": "strict",
+      "self_review": false,
+      "plan_all_before_implementing": false,
+      "study_code": {
+        "model": "haiku",
+        "type": "explore",
+        "count": 3
+      },
+      "eval": {
+        "min_rounds": 1,
+        "max_rounds": 3,
+        "model": "opus",
+        "type": "eval",
+        "count": 1,
+        "enable_eval_output": false
+      },
+      "refine": {
+        "model": "opus",
+        "type": "refine",
+        "count": 1
+      }
+    },
+    "implementing": {
+      "batch": 4,
+      "commit_strategy": "scoped",
+      "eval": {
+        "min_rounds": 1,
+        "max_rounds": 3,
+        "model": "opus",
+        "type": "eval",
+        "count": 1,
+        "enable_eval_output": false
+      }
+    },
+    "paths": {
+      "state_dir": ".forgectl/state",
+      "workspace_dir": ".forge_workspace"
+    },
+    "logs": {
+      "enabled": true,
+      "retention_days": 90,
+      "max_files": 50
+    }
   },
+  "started_at_phase": "planning",
   "specifying": null,
   "planning": {
     "current_plan": {
@@ -49,5 +125,30 @@
     "queue": [],
     "completed": []
   },
-  "implementing": null
+  "implementing": {
+    "current_layer": {
+      "id": "L0",
+      "name": "Foundation — Types and Config Structs"
+    },
+    "batch_number": 1,
+    "current_batch": {
+      "items": [
+        "types.config"
+      ],
+      "current_item_index": 0,
+      "eval_round": 2,
+      "evals": [
+        {
+          "round": 1,
+          "verdict": "FAIL",
+          "eval_report": "forgectl/.workspace/implementation_plan/evals/batch-1-round-1.md"
+        },
+        {
+          "round": 2,
+          "verdict": "PASS",
+          "eval_report": "forgectl/.workspace/implementation_plan/evals/batch-1-round-2.md"
+        }
+      ]
+    }
+  }
 }

@@ -126,12 +126,11 @@ func TestStatusCommand(t *testing.T) {
 	s := &state.ForgeState{
 		Phase:          state.PhaseSpecifying,
 		State:          state.StateOrient,
-		BatchSize:      2,
-		MinRounds:      1,
-		MaxRounds:      3,
-		UserGuided:     true,
 		StartedAtPhase: state.PhaseSpecifying,
-		Specifying:     state.NewSpecifyingState([]state.SpecQueueEntry{}),
+		Config: state.ForgeConfig{
+			General: state.GeneralConfig{UserGuided: true},
+		},
+		Specifying: state.NewSpecifyingState([]state.SpecQueueEntry{}),
 	}
 	state.Save(dir, s)
 
