@@ -51,7 +51,7 @@ func TestFindProjectRootNotFound(t *testing.T) {
 	}
 }
 
-// TestLoadConfigMissing verifies defaults are returned when no config file exists.
+// TestLoadConfigMissing verifies an error is returned when config file is missing.
 func TestLoadConfigMissing(t *testing.T) {
 	dir := t.TempDir()
 	forgectlDir := filepath.Join(dir, ".forgectl")
@@ -59,12 +59,31 @@ func TestLoadConfigMissing(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	cfg, err := LoadConfig(dir)
-	if err != nil {
-		t.Fatalf("LoadConfig with missing config: %v", err)
+	_, err := LoadConfig(dir)
+	if err == nil {
+		t.Fatal("expected error when .forgectl/config is missing, got nil")
+	}
+	if !strings.Contains(err.Error(), "not found") {
+		t.Errorf("expected 'not found' in error, got: %v", err)
+	}
+}
+
+// TestLoadConfigEmptyFile verifies defaults are returned when config file is empty.
+func TestLoadConfigEmptyFile(t *testing.T) {
+	dir := t.TempDir()
+	forgectlDir := filepath.Join(dir, ".forgectl")
+	if err := os.MkdirAll(forgectlDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(forgectlDir, "config"), []byte(""), 0644); err != nil {
+		t.Fatal(err)
 	}
 
-	// Defaults should be preserved.
+	cfg, err := LoadConfig(dir)
+	if err != nil {
+		t.Fatalf("LoadConfig with empty config: %v", err)
+	}
+
 	def := DefaultForgeConfig()
 	if cfg.Specifying.Batch != def.Specifying.Batch {
 		t.Errorf("specifying.batch: got %d, want %d", cfg.Specifying.Batch, def.Specifying.Batch)
@@ -230,5 +249,14 @@ func TestValidateConfigNestedDomains(t *testing.T) {
 	errs := ValidateConfig(cfg)
 	if len(errs) == 0 {
 		t.Error("expected error for nested domain paths")
+	}
+	found := false
+	for _, e := range errs {
+		if strings.Contains(e, "Domain paths must not be nested:") && strings.Contains(e, "apps") {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("expected spec-format nesting error, got: %v", errs)
 	}
 }

@@ -23,7 +23,7 @@ type tomlEvalConfig struct {
 	Model            string          `toml:"model"`
 	Type             string          `toml:"type"`
 	Count            int             `toml:"count"`
-	EnableEvalOutput bool            `toml:"enable_eval_output"`
+	EnableEvalOutput *bool           `toml:"enable_eval_output"`
 	Eval             tomlAgentConfig `toml:"eval"`
 }
 
@@ -34,7 +34,7 @@ type tomlCrossRefConfig struct {
 	Model      string          `toml:"model"`
 	Type       string          `toml:"type"`
 	Count      int             `toml:"count"`
-	UserReview bool            `toml:"user_review"`
+	UserReview *bool           `toml:"user_review"`
 	Eval       tomlAgentConfig `toml:"eval"`
 }
 
@@ -45,7 +45,7 @@ type tomlReconciliationConfig struct {
 	Model      string `toml:"model"`
 	Type       string `toml:"type"`
 	Count      int    `toml:"count"`
-	UserReview bool   `toml:"user_review"`
+	UserReview *bool  `toml:"user_review"`
 }
 
 // tomlSpecifyingConfig mirrors SpecifyingConfig for TOML decoding.
@@ -75,8 +75,8 @@ type tomlRefineConfig struct {
 type tomlPlanningConfig struct {
 	Batch                     int                `toml:"batch"`
 	CommitStrategy            string             `toml:"commit_strategy"`
-	SelfReview                bool               `toml:"self_review"`
-	PlanAllBeforeImplementing bool               `toml:"plan_all_before_implementing"`
+	SelfReview                *bool              `toml:"self_review"`
+	PlanAllBeforeImplementing *bool              `toml:"plan_all_before_implementing"`
 	StudyCode                 tomlStudyCodeConfig `toml:"study_code"`
 	Eval                      tomlEvalConfig      `toml:"eval"`
 	Refine                    tomlRefineConfig    `toml:"refine"`
@@ -103,16 +103,16 @@ type tomlPathsConfig struct {
 
 // tomlLogsConfig mirrors LogsConfig for TOML decoding.
 type tomlLogsConfig struct {
-	Enabled       bool `toml:"enabled"`
-	RetentionDays int  `toml:"retention_days"`
-	MaxFiles      int  `toml:"max_files"`
+	Enabled       *bool `toml:"enabled"`
+	RetentionDays int   `toml:"retention_days"`
+	MaxFiles      int   `toml:"max_files"`
 }
 
 // tomlGeneralConfig mirrors GeneralConfig for TOML decoding.
 type tomlGeneralConfig struct {
-	EnableCommits   bool `toml:"enable_commits"`
-	EnableEvalOutput bool `toml:"enable_eval_output"`
-	UserGuided      bool `toml:"user_guided"`
+	EnableCommits    *bool `toml:"enable_commits"`
+	EnableEvalOutput *bool `toml:"enable_eval_output"`
+	UserGuided       *bool `toml:"user_guided"`
 }
 
 // tomlForgeConfig is the intermediate struct for TOML decoding of .forgectl/config.
@@ -154,8 +154,7 @@ func LoadConfig(projectRoot string) (ForgeConfig, error) {
 	data, err := os.ReadFile(configPath)
 	if err != nil {
 		if os.IsNotExist(err) {
-			// Config file is optional; return defaults.
-			return cfg, nil
+			return cfg, fmt.Errorf(".forgectl/config not found at %s", configPath)
 		}
 		return cfg, fmt.Errorf("reading config: %w", err)
 	}
@@ -173,9 +172,15 @@ func LoadConfig(projectRoot string) (ForgeConfig, error) {
 // Zero values in the TOML struct are ignored so that defaults are preserved.
 func mergeTomlConfig(cfg *ForgeConfig, raw *tomlForgeConfig) {
 	// General
-	cfg.General.EnableCommits = raw.General.EnableCommits
-	cfg.General.EnableEvalOutput = raw.General.EnableEvalOutput
-	cfg.General.UserGuided = raw.General.UserGuided
+	if raw.General.EnableCommits != nil {
+		cfg.General.EnableCommits = *raw.General.EnableCommits
+	}
+	if raw.General.EnableEvalOutput != nil {
+		cfg.General.EnableEvalOutput = *raw.General.EnableEvalOutput
+	}
+	if raw.General.UserGuided != nil {
+		cfg.General.UserGuided = *raw.General.UserGuided
+	}
 
 	// Domains (replace entirely if provided)
 	if len(raw.Domains) > 0 {
@@ -203,8 +208,12 @@ func mergeTomlConfig(cfg *ForgeConfig, raw *tomlForgeConfig) {
 	if raw.Planning.CommitStrategy != "" {
 		cfg.Planning.CommitStrategy = raw.Planning.CommitStrategy
 	}
-	cfg.Planning.SelfReview = raw.Planning.SelfReview
-	cfg.Planning.PlanAllBeforeImplementing = raw.Planning.PlanAllBeforeImplementing
+	if raw.Planning.SelfReview != nil {
+		cfg.Planning.SelfReview = *raw.Planning.SelfReview
+	}
+	if raw.Planning.PlanAllBeforeImplementing != nil {
+		cfg.Planning.PlanAllBeforeImplementing = *raw.Planning.PlanAllBeforeImplementing
+	}
 	mergeEvalConfig(&cfg.Planning.Eval, &raw.Planning.Eval)
 	if raw.Planning.StudyCode.Model != "" {
 		cfg.Planning.StudyCode.AgentConfig.Model = raw.Planning.StudyCode.Model
@@ -243,7 +252,9 @@ func mergeTomlConfig(cfg *ForgeConfig, raw *tomlForgeConfig) {
 	}
 
 	// Logs
-	cfg.Logs.Enabled = raw.Logs.Enabled
+	if raw.Logs.Enabled != nil {
+		cfg.Logs.Enabled = *raw.Logs.Enabled
+	}
 	if raw.Logs.RetentionDays > 0 {
 		cfg.Logs.RetentionDays = raw.Logs.RetentionDays
 	}
@@ -268,7 +279,9 @@ func mergeEvalConfig(dst *EvalConfig, src *tomlEvalConfig) {
 	if src.Count > 0 {
 		dst.AgentConfig.Count = src.Count
 	}
-	dst.EnableEvalOutput = src.EnableEvalOutput
+	if src.EnableEvalOutput != nil {
+		dst.EnableEvalOutput = *src.EnableEvalOutput
+	}
 }
 
 func mergeCrossRefConfig(dst *CrossRefConfig, src *tomlCrossRefConfig) {
@@ -287,7 +300,9 @@ func mergeCrossRefConfig(dst *CrossRefConfig, src *tomlCrossRefConfig) {
 	if src.Count > 0 {
 		dst.AgentConfig.Count = src.Count
 	}
-	dst.UserReview = src.UserReview
+	if src.UserReview != nil {
+		dst.UserReview = *src.UserReview
+	}
 	if src.Eval.Model != "" {
 		dst.Eval.Model = src.Eval.Model
 	}
@@ -315,7 +330,9 @@ func mergeReconciliationConfig(dst *ReconciliationConfig, src *tomlReconciliatio
 	if src.Count > 0 {
 		dst.AgentConfig.Count = src.Count
 	}
-	dst.UserReview = src.UserReview
+	if src.UserReview != nil {
+		dst.UserReview = *src.UserReview
+	}
 }
 
 // GenerateSessionID returns a new UUID v4 string using crypto/rand.
@@ -355,6 +372,22 @@ func ValidateConfig(cfg ForgeConfig) []string {
 		errs = append(errs, fmt.Sprintf("implementing.commit_strategy: invalid value %q", cfg.Implementing.CommitStrategy))
 	}
 
+	if cfg.Specifying.Batch < 1 {
+		errs = append(errs, "specifying.batch must be >= 1")
+	}
+	if cfg.Planning.Batch < 1 {
+		errs = append(errs, "planning.batch must be >= 1")
+	}
+	if cfg.Implementing.Batch < 1 {
+		errs = append(errs, "implementing.batch must be >= 1")
+	}
+	if cfg.Logs.RetentionDays < 0 {
+		errs = append(errs, "logs.retention_days must be >= 0")
+	}
+	if cfg.Logs.MaxFiles < 0 {
+		errs = append(errs, "logs.max_files must be >= 0")
+	}
+
 	if cfg.Specifying.Eval.MinRounds > cfg.Specifying.Eval.MaxRounds {
 		errs = append(errs, "specifying.eval.min_rounds cannot exceed max_rounds")
 	}
@@ -374,7 +407,7 @@ func ValidateConfig(cfg ForgeConfig) []string {
 			p1 := filepath.Clean(d1.Path) + string(filepath.Separator)
 			p2 := filepath.Clean(d2.Path) + string(filepath.Separator)
 			if len(p1) <= len(p2) && p2[:len(p1)] == p1 {
-				errs = append(errs, fmt.Sprintf("domain %q path is a prefix of domain %q path (nested paths not allowed)", d1.Name, d2.Name))
+				errs = append(errs, fmt.Sprintf("Domain paths must not be nested: %s is a prefix of %s.", d1.Path, d2.Path))
 			}
 		}
 	}
