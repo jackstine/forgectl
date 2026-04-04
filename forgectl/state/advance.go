@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 )
 
 // Advance transitions the state machine forward based on current state and input.
@@ -22,7 +23,9 @@ func Advance(s *ForgeState, in AdvanceInput, dir string) error {
 
 	switch s.Phase {
 	case PhaseSpecifying:
-		return advanceSpecifying(s, in)
+		return advanceSpecifying(s, in, dir)
+	case PhaseGeneratePlanningQueue:
+		return advanceGeneratePlanningQueue(s, in, dir)
 	case PhasePlanning:
 		return advancePlanning(s, in, dir)
 	case PhaseImplementing:
@@ -34,7 +37,7 @@ func Advance(s *ForgeState, in AdvanceInput, dir string) error {
 
 // --- Specifying Phase ---
 
-func advanceSpecifying(s *ForgeState, in AdvanceInput) error {
+func advanceSpecifying(s *ForgeState, in AdvanceInput, dir string) error {
 	spec := s.Specifying
 
 	switch s.State {
@@ -187,8 +190,26 @@ func advanceSpecifying(s *ForgeState, in AdvanceInput) error {
 		if s.Config.General.EnableCommits && in.Message == "" {
 			return fmt.Errorf("--message is required when enable_commits is true")
 		}
+		if s.Config.General.EnableCommits && in.Message != "" {
+			// Stage all completed spec files and commit.
+			var specPaths []string
+			for _, c := range s.Specifying.Completed {
+				specPaths = append(specPaths, c.File)
+			}
+			hash, err := AutoCommit(dir, s.Config.Specifying.CommitStrategy, specPaths, in.Message)
+			if err != nil {
+				return err
+			}
+			// Register hash on all completed specs (only if a commit was made).
+			if hash != "" {
+				for i := range s.Specifying.Completed {
+					s.Specifying.Completed[i].CommitHash = hash
+					s.Specifying.Completed[i].CommitHashes = append(s.Specifying.Completed[i].CommitHashes, hash)
+				}
+			}
+		}
 		s.State = StatePhaseShift
-		s.PhaseShift = &PhaseShiftInfo{From: PhaseSpecifying, To: PhasePlanning}
+		s.PhaseShift = &PhaseShiftInfo{From: PhaseSpecifying, To: PhaseGeneratePlanningQueue}
 
 	default:
 		return fmt.Errorf("cannot advance from state %q in specifying phase", s.State)
@@ -221,6 +242,26 @@ func advancePlanning(s *ForgeState, in AdvanceInput, dir string) error {
 
 	case StateValidate:
 		return advancePlanningFromValidate(s, dir)
+
+	case StateSelfReview:
+		planPath := s.Planning.CurrentPlan.File
+		fullPath := filepath.Join(dir, planPath)
+
+		data, err := os.ReadFile(fullPath)
+		if err != nil {
+			s.State = StateValidate
+			return fmt.Errorf("cannot read plan file %q: %w", planPath, err)
+		}
+
+		baseDir := filepath.Dir(fullPath)
+		validationErrs := ValidatePlanJSON(data, baseDir)
+		if len(validationErrs) > 0 {
+			s.State = StateValidate
+			return &ValidationError{Errors: validationErrs}
+		}
+
+		s.State = StateEvaluate
+		return nil
 
 	case StateEvaluate:
 		if in.Verdict == "" {
@@ -272,8 +313,61 @@ func advancePlanning(s *ForgeState, in AdvanceInput, dir string) error {
 		if s.Config.General.EnableCommits && in.Message == "" {
 			return fmt.Errorf("--message is required in planning ACCEPT state when enable_commits is true")
 		}
-		s.State = StatePhaseShift
-		s.PhaseShift = &PhaseShiftInfo{From: PhasePlanning, To: PhaseImplementing}
+		if s.Config.General.EnableCommits && in.Message != "" && s.Planning.CurrentPlan != nil {
+			// Stage plan.json + notes directory.
+			notesDir := filepath.Join(filepath.Dir(s.Planning.CurrentPlan.File), "notes")
+			stageTargets := []string{s.Planning.CurrentPlan.File, notesDir}
+			if _, err := AutoCommit(dir, s.Config.Planning.CommitStrategy, stageTargets, in.Message); err != nil {
+				return err
+			}
+		}
+		if !s.Config.Planning.PlanAllBeforeImplementing {
+			// Interleaved mode: always planning → implementing.
+			s.State = StatePhaseShift
+			s.PhaseShift = &PhaseShiftInfo{From: PhasePlanning, To: PhaseImplementing}
+		} else if len(s.Planning.Queue) > 0 {
+			// All-first: more plans remain — planning → planning.
+			completed := CompletedPlan{
+				ID:     len(s.Planning.Completed) + 1,
+				Name:   s.Planning.CurrentPlan.Name,
+				Domain: s.Planning.CurrentPlan.Domain,
+				File:   s.Planning.CurrentPlan.File,
+			}
+			s.Planning.Completed = append(s.Planning.Completed, completed)
+			// Pull next plan from queue.
+			entry := s.Planning.Queue[0]
+			s.Planning.Queue = s.Planning.Queue[1:]
+			s.Planning.CurrentPlan = &ActivePlan{
+				ID:              completed.ID + 1,
+				Name:            entry.Name,
+				Domain:          entry.Domain,
+				Topic:           entry.Topic,
+				File:            entry.File,
+				Specs:           entry.Specs,
+				CodeSearchRoots: entry.CodeSearchRoots,
+			}
+			s.State = StatePhaseShift
+			s.PhaseShift = &PhaseShiftInfo{From: PhasePlanning, To: PhasePlanning}
+		} else {
+			// All-first: last plan accepted — planning → implementing.
+			completed := CompletedPlan{
+				ID:     len(s.Planning.Completed) + 1,
+				Name:   s.Planning.CurrentPlan.Name,
+				Domain: s.Planning.CurrentPlan.Domain,
+				File:   s.Planning.CurrentPlan.File,
+			}
+			s.Planning.Completed = append(s.Planning.Completed, completed)
+			s.Planning.CurrentPlan = nil
+			s.State = StatePhaseShift
+			s.PhaseShift = &PhaseShiftInfo{From: PhasePlanning, To: PhaseImplementing}
+		}
+
+	case StateDone:
+		// Planning DONE is a pass-through — no flags accepted.
+		if in.Verdict != "" || in.EvalReport != "" || in.Message != "" || in.From != "" || in.File != "" {
+			return fmt.Errorf("DONE is a pass-through state. No flags accepted.")
+		}
+		return fmt.Errorf("cannot advance from state %q in planning phase", s.State)
 
 	default:
 		return fmt.Errorf("cannot advance from state %q in planning phase", s.State)
@@ -310,7 +404,11 @@ func advancePlanningFromDraftOrRefine(s *ForgeState, dir string) error {
 	if fromDraft {
 		s.Planning.Round = 1
 	}
-	s.State = StateEvaluate
+	if s.Config.Planning.SelfReview {
+		s.State = StateSelfReview
+	} else {
+		s.State = StateEvaluate
+	}
 	return nil
 }
 
@@ -329,7 +427,11 @@ func advancePlanningFromValidate(s *ForgeState, dir string) error {
 		return &ValidationError{Errors: validationErrs}
 	}
 
-	s.State = StateEvaluate
+	if s.Config.Planning.SelfReview {
+		s.State = StateSelfReview
+	} else {
+		s.State = StateEvaluate
+	}
 	return nil
 }
 
@@ -352,6 +454,20 @@ func advanceImplementing(s *ForgeState, in AdvanceInput, dir string) error {
 		if s.Config.General.EnableCommits && in.Message == "" {
 			return fmt.Errorf("--message is required in COMMIT state when enable_commits is true")
 		}
+		if s.Config.General.EnableCommits && in.Message != "" {
+			// Stage the domain directory and commit.
+			domain := impl.CurrentPlanDomain
+			if domain == "" && s.Planning != nil && s.Planning.CurrentPlan != nil {
+				domain = s.Planning.CurrentPlan.Domain
+			}
+			var stageTargets []string
+			if domain != "" {
+				stageTargets = []string{domain + "/"}
+			}
+			if _, err := AutoCommit(dir, s.Config.Implementing.CommitStrategy, stageTargets, in.Message); err != nil {
+				return err
+			}
+		}
 		// Archive batch to history.
 		archiveBatch(s)
 
@@ -367,6 +483,21 @@ func advanceImplementing(s *ForgeState, in AdvanceInput, dir string) error {
 		}
 
 	case StateDone:
+		if !s.Config.Planning.PlanAllBeforeImplementing {
+			// Interleaved mode: check Planning.Queue for remaining domains.
+			if s.Planning != nil && len(s.Planning.Queue) > 0 {
+				s.State = StatePhaseShift
+				s.PhaseShift = &PhaseShiftInfo{From: PhaseImplementing, To: PhasePlanning}
+				return nil
+			}
+		} else {
+			// All-first mode: check Implementing.PlanQueue for remaining domains.
+			if len(impl.PlanQueue) > 0 {
+				s.State = StatePhaseShift
+				s.PhaseShift = &PhaseShiftInfo{From: PhaseImplementing, To: PhaseImplementing}
+				return nil
+			}
+		}
 		return fmt.Errorf("session complete.")
 
 	default:
@@ -551,79 +682,163 @@ func advancePhaseShift(s *ForgeState, in AdvanceInput, dir string) error {
 	}
 
 	switch {
-	case s.PhaseShift.From == PhaseSpecifying && s.PhaseShift.To == PhasePlanning:
-		if in.From == "" {
-			return fmt.Errorf("--from <plans-queue.json> is required at this phase shift")
-		}
-		data, err := os.ReadFile(in.From)
-		if err != nil {
-			return fmt.Errorf("reading plan queue: %w", err)
-		}
-		validationErrs := ValidatePlanQueue(data)
-		if len(validationErrs) > 0 {
-			return &ValidationError{Errors: validationErrs}
-		}
-
-		var input PlanQueueInput
-		if err := json.Unmarshal(data, &input); err != nil {
-			return fmt.Errorf("parsing plan queue: %w", err)
-		}
-
-		s.Planning = NewPlanningState(input.Plans)
-		// Pull first plan.
-		if len(s.Planning.Queue) > 0 {
-			entry := s.Planning.Queue[0]
-			s.Planning.Queue = s.Planning.Queue[1:]
-			s.Planning.CurrentPlan = &ActivePlan{
-				ID:              1,
-				Name:            entry.Name,
-				Domain:          entry.Domain,
-				Topic:           entry.Topic,
-				File:            entry.File,
-				Specs:           entry.Specs,
-				CodeSearchRoots: entry.CodeSearchRoots,
+	case s.PhaseShift.From == PhaseSpecifying && s.PhaseShift.To == PhaseGeneratePlanningQueue:
+		if in.From != "" {
+			// --from provided: validate override and skip genqueue entirely.
+			data, err := os.ReadFile(in.From)
+			if err != nil {
+				return fmt.Errorf("reading plan queue: %w", err)
 			}
+			validationErrs := ValidatePlanQueue(data)
+			if len(validationErrs) > 0 {
+				return &ValidationError{Errors: validationErrs}
+			}
+			var input PlanQueueInput
+			if err := json.Unmarshal(data, &input); err != nil {
+				return fmt.Errorf("parsing plan queue: %w", err)
+			}
+			s.Planning = populatePlanningFromQueue(input.Plans)
+			s.Phase = PhasePlanning
+			s.State = StateOrient
+			s.PhaseShift = nil
+		} else {
+			// No --from: auto-generate plan queue, enter generate_planning_queue phase.
+			planQueueFile, err := autoGeneratePlanQueue(s, dir)
+			if err != nil {
+				return fmt.Errorf("generating plan queue: %w", err)
+			}
+			s.GeneratePlanningQueue = &GeneratePlanningQueueState{
+				PlanQueueFile: planQueueFile,
+			}
+			s.Phase = PhaseGeneratePlanningQueue
+			s.State = StateOrient
+			s.PhaseShift = nil
 		}
+
+	case s.PhaseShift.From == PhaseGeneratePlanningQueue && s.PhaseShift.To == PhasePlanning:
+		var entries []PlanQueueEntry
+		if in.From != "" {
+			// --from override: validate and use it.
+			data, err := os.ReadFile(in.From)
+			if err != nil {
+				return fmt.Errorf("reading plan queue: %w", err)
+			}
+			validationErrs := ValidatePlanQueue(data)
+			if len(validationErrs) > 0 {
+				return &ValidationError{Errors: validationErrs}
+			}
+			var input PlanQueueInput
+			if err := json.Unmarshal(data, &input); err != nil {
+				return fmt.Errorf("parsing plan queue: %w", err)
+			}
+			entries = input.Plans
+		} else {
+			// Read from generated plan-queue.json.
+			if s.GeneratePlanningQueue == nil || s.GeneratePlanningQueue.PlanQueueFile == "" {
+				return fmt.Errorf("no plan queue file in state")
+			}
+			fullPath := filepath.Join(dir, s.GeneratePlanningQueue.PlanQueueFile)
+			data, err := os.ReadFile(fullPath)
+			if err != nil {
+				return fmt.Errorf("reading plan queue: %w", err)
+			}
+			var input PlanQueueInput
+			if err := json.Unmarshal(data, &input); err != nil {
+				return fmt.Errorf("parsing plan queue: %w", err)
+			}
+			entries = input.Plans
+		}
+		s.Planning = populatePlanningFromQueue(entries)
+		s.Phase = PhasePlanning
+		s.State = StateOrient
+		s.PhaseShift = nil
+
+	case s.PhaseShift.From == PhasePlanning && s.PhaseShift.To == PhasePlanning:
+		// All-first domain boundary: CurrentPlan was already set in ACCEPT, just reset and orient.
+		s.Planning.Round = 0
+		s.Planning.Evals = nil
 		s.Phase = PhasePlanning
 		s.State = StateOrient
 		s.PhaseShift = nil
 
 	case s.PhaseShift.From == PhasePlanning && s.PhaseShift.To == PhaseImplementing:
-		planPath := s.Planning.CurrentPlan.File
-		fullPath := filepath.Join(dir, planPath)
+		var planFile, planDomain string
+		var implPlanQueue []PlanQueueEntry
 
-		data, err := os.ReadFile(fullPath)
-		if err != nil {
-			return fmt.Errorf("reading plan.json: %w", err)
+		if s.Config.Planning.PlanAllBeforeImplementing && len(s.Planning.Completed) > 0 {
+			// All-first mode: implement first completed plan, queue the rest.
+			first := s.Planning.Completed[0]
+			planFile = first.File
+			planDomain = first.Domain
+			for _, cp := range s.Planning.Completed[1:] {
+				implPlanQueue = append(implPlanQueue, PlanQueueEntry{
+					Name:            cp.Name,
+					Domain:          cp.Domain,
+					File:            cp.File,
+					Specs:           []string{},
+					CodeSearchRoots: []string{cp.Domain + "/"},
+				})
+			}
+		} else {
+			// Interleaved mode: implement current plan.
+			planFile = s.Planning.CurrentPlan.File
+			planDomain = s.Planning.CurrentPlan.Domain
 		}
 
-		baseDir := filepath.Dir(fullPath)
-		validationErrs := ValidatePlanJSON(data, baseDir)
-		if len(validationErrs) > 0 {
-			return &ValidationError{Errors: validationErrs}
-		}
-
-		var plan PlanJSON
-		if err := json.Unmarshal(data, &plan); err != nil {
-			return fmt.Errorf("parsing plan.json: %w", err)
-		}
-
-		// Add passes and rounds to items.
-		for i := range plan.Items {
-			plan.Items[i].Passes = "pending"
-			plan.Items[i].Rounds = 0
-		}
-
-		// Write updated plan.
-		planData, err := json.MarshalIndent(plan, "", "  ")
-		if err != nil {
-			return fmt.Errorf("marshaling plan: %w", err)
-		}
-		if err := os.WriteFile(fullPath, planData, 0644); err != nil {
-			return fmt.Errorf("writing plan: %w", err)
+		if err := mutatePlanForImplementing(dir, planFile); err != nil {
+			return err
 		}
 
 		s.Implementing = NewImplementingState()
+		s.Implementing.CurrentPlanFile = planFile
+		s.Implementing.CurrentPlanDomain = planDomain
+		s.Implementing.PlanQueue = implPlanQueue
+		s.Phase = PhaseImplementing
+		s.State = StateOrient
+		s.PhaseShift = nil
+
+	case s.PhaseShift.From == PhaseImplementing && s.PhaseShift.To == PhasePlanning:
+		// Interleaved: pop next plan from Planning.Queue.
+		if s.Planning == nil || len(s.Planning.Queue) == 0 {
+			return fmt.Errorf("no plans in planning queue")
+		}
+		entry := s.Planning.Queue[0]
+		s.Planning.Queue = s.Planning.Queue[1:]
+		s.Planning.CurrentPlan = &ActivePlan{
+			ID:              len(s.Planning.Completed) + 1,
+			Name:            entry.Name,
+			Domain:          entry.Domain,
+			Topic:           entry.Topic,
+			File:            entry.File,
+			Specs:           entry.Specs,
+			CodeSearchRoots: entry.CodeSearchRoots,
+		}
+		s.Planning.Round = 0
+		s.Planning.Evals = nil
+		s.Phase = PhasePlanning
+		s.State = StateOrient
+		s.PhaseShift = nil
+
+	case s.PhaseShift.From == PhaseImplementing && s.PhaseShift.To == PhaseImplementing:
+		// All-first domain boundary: pop next plan from Implementing.PlanQueue.
+		impl := s.Implementing
+		if len(impl.PlanQueue) == 0 {
+			return fmt.Errorf("no plans in implementing queue")
+		}
+		entry := impl.PlanQueue[0]
+		impl.PlanQueue = impl.PlanQueue[1:]
+
+		if err := mutatePlanForImplementing(dir, entry.File); err != nil {
+			return err
+		}
+
+		// Reset implementing state for the new plan.
+		impl.CurrentLayer = nil
+		impl.BatchNumber = 0
+		impl.CurrentBatch = nil
+		impl.LayerHistory = []LayerHistory{}
+		impl.CurrentPlanFile = entry.File
+		impl.CurrentPlanDomain = entry.Domain
 		s.Phase = PhaseImplementing
 		s.State = StateOrient
 		s.PhaseShift = nil
@@ -635,11 +850,186 @@ func advancePhaseShift(s *ForgeState, in AdvanceInput, dir string) error {
 	return nil
 }
 
+// --- Generate Planning Queue Phase ---
+
+func advanceGeneratePlanningQueue(s *ForgeState, in AdvanceInput, dir string) error {
+	switch s.State {
+	case StateOrient:
+		s.State = StateRefine
+
+	case StateRefine:
+		if s.GeneratePlanningQueue == nil || s.GeneratePlanningQueue.PlanQueueFile == "" {
+			return fmt.Errorf("no plan queue file in state")
+		}
+		fullPath := filepath.Join(dir, s.GeneratePlanningQueue.PlanQueueFile)
+		data, err := os.ReadFile(fullPath)
+		if err != nil {
+			return fmt.Errorf("reading plan queue %q: %w", s.GeneratePlanningQueue.PlanQueueFile, err)
+		}
+		validationErrs := ValidatePlanQueue(data)
+		if len(validationErrs) > 0 {
+			return &ValidationError{Errors: validationErrs}
+		}
+		s.State = StatePhaseShift
+		s.PhaseShift = &PhaseShiftInfo{From: PhaseGeneratePlanningQueue, To: PhasePlanning}
+
+	default:
+		return fmt.Errorf("cannot advance from state %q in generate_planning_queue phase", s.State)
+	}
+	return nil
+}
+
+// autoGeneratePlanQueue groups completed specs by domain and writes plan-queue.json to the state dir.
+// Returns the relative path to the written file (relative to dir).
+func autoGeneratePlanQueue(s *ForgeState, dir string) (string, error) {
+	// Group completed specs by domain, preserving first-appearance order.
+	domainOrder := []string{}
+	domainSpecs := map[string][]CompletedSpec{}
+	if s.Specifying != nil {
+		for _, spec := range s.Specifying.Completed {
+			if _, ok := domainSpecs[spec.Domain]; !ok {
+				domainOrder = append(domainOrder, spec.Domain)
+			}
+			domainSpecs[spec.Domain] = append(domainSpecs[spec.Domain], spec)
+		}
+	}
+
+	workspaceDir := s.Config.Paths.WorkspaceDir
+	if workspaceDir == "" {
+		workspaceDir = ".forge_workspace"
+	}
+
+	var entries []PlanQueueEntry
+	for _, domain := range domainOrder {
+		specs := domainSpecs[domain]
+
+		// Determine code search roots.
+		var roots []string
+		if s.Specifying != nil && s.Specifying.DomainRoots != nil {
+			if r, ok := s.Specifying.DomainRoots[domain]; ok {
+				roots = r
+			}
+		}
+		if len(roots) == 0 {
+			roots = []string{domain + "/"}
+		}
+
+		// Collect spec file paths.
+		var specFiles []string
+		for _, spec := range specs {
+			specFiles = append(specFiles, spec.File)
+		}
+
+		// Deduplicate commit hashes.
+		seen := map[string]bool{}
+		var commits []string
+		for _, spec := range specs {
+			for _, h := range spec.CommitHashes {
+				if h != "" && !seen[h] {
+					seen[h] = true
+					commits = append(commits, h)
+				}
+			}
+			if spec.CommitHash != "" && !seen[spec.CommitHash] {
+				seen[spec.CommitHash] = true
+				commits = append(commits, spec.CommitHash)
+			}
+		}
+
+		// Capitalize first letter of domain.
+		displayName := domain
+		if len(displayName) > 0 {
+			displayName = strings.ToUpper(displayName[:1]) + displayName[1:]
+		}
+
+		entries = append(entries, PlanQueueEntry{
+			Name:            displayName + " Implementation Plan",
+			Domain:          domain,
+			Topic:           "Implementation of " + domain,
+			File:            domain + "/" + workspaceDir + "/implementation_plan/plan.json",
+			Specs:           specFiles,
+			CodeSearchRoots: roots,
+			SpecCommits:     commits,
+		})
+	}
+
+	input := PlanQueueInput{Plans: entries}
+	data, err := json.MarshalIndent(input, "", "  ")
+	if err != nil {
+		return "", fmt.Errorf("marshaling plan queue: %w", err)
+	}
+
+	stateDir := s.Config.Paths.StateDir
+	if stateDir == "" {
+		stateDir = ".forgectl/state"
+	}
+	outPath := filepath.Join(stateDir, "plan-queue.json")
+	fullPath := filepath.Join(dir, outPath)
+	if err := os.MkdirAll(filepath.Dir(fullPath), 0755); err != nil {
+		return "", fmt.Errorf("creating state dir: %w", err)
+	}
+	if err := os.WriteFile(fullPath, data, 0644); err != nil {
+		return "", fmt.Errorf("writing plan queue: %w", err)
+	}
+	return outPath, nil
+}
+
+// populatePlanningFromQueue creates a PlanningState from queue entries, pulling the first as CurrentPlan.
+func populatePlanningFromQueue(entries []PlanQueueEntry) *PlanningState {
+	ps := NewPlanningState(entries)
+	if len(ps.Queue) > 0 {
+		entry := ps.Queue[0]
+		ps.Queue = ps.Queue[1:]
+		ps.CurrentPlan = &ActivePlan{
+			ID:              1,
+			Name:            entry.Name,
+			Domain:          entry.Domain,
+			Topic:           entry.Topic,
+			File:            entry.File,
+			Specs:           entry.Specs,
+			CodeSearchRoots: entry.CodeSearchRoots,
+		}
+	}
+	return ps
+}
+
+// mutatePlanForImplementing reads plan.json, sets passes=pending/rounds=0, and writes it back.
+func mutatePlanForImplementing(dir, planFile string) error {
+	fullPath := filepath.Join(dir, planFile)
+	data, err := os.ReadFile(fullPath)
+	if err != nil {
+		return fmt.Errorf("reading plan.json: %w", err)
+	}
+	baseDir := filepath.Dir(fullPath)
+	validationErrs := ValidatePlanJSON(data, baseDir)
+	if len(validationErrs) > 0 {
+		return &ValidationError{Errors: validationErrs}
+	}
+	var plan PlanJSON
+	if err := json.Unmarshal(data, &plan); err != nil {
+		return fmt.Errorf("parsing plan.json: %w", err)
+	}
+	for i := range plan.Items {
+		plan.Items[i].Passes = "pending"
+		plan.Items[i].Rounds = 0
+	}
+	planData, err := json.MarshalIndent(plan, "", "  ")
+	if err != nil {
+		return fmt.Errorf("marshaling plan: %w", err)
+	}
+	if err := os.WriteFile(fullPath, planData, 0644); err != nil {
+		return fmt.Errorf("writing plan: %w", err)
+	}
+	return nil
+}
+
 // --- Helpers ---
 
 func loadPlan(s *ForgeState, dir string) (*PlanJSON, error) {
 	var planPath string
-	if s.Planning != nil && s.Planning.CurrentPlan != nil {
+	if s.Implementing != nil && s.Implementing.CurrentPlanFile != "" {
+		planPath = s.Implementing.CurrentPlanFile
+	} else if s.Planning != nil && s.Planning.CurrentPlan != nil {
 		planPath = s.Planning.CurrentPlan.File
 	}
 	if planPath == "" {
@@ -662,7 +1052,9 @@ func loadPlan(s *ForgeState, dir string) (*PlanJSON, error) {
 
 func savePlan(s *ForgeState, dir string, plan *PlanJSON) error {
 	var planPath string
-	if s.Planning != nil && s.Planning.CurrentPlan != nil {
+	if s.Implementing != nil && s.Implementing.CurrentPlanFile != "" {
+		planPath = s.Implementing.CurrentPlanFile
+	} else if s.Planning != nil && s.Planning.CurrentPlan != nil {
 		planPath = s.Planning.CurrentPlan.File
 	}
 	if planPath == "" {

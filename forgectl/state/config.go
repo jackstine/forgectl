@@ -110,8 +110,9 @@ type tomlLogsConfig struct {
 
 // tomlGeneralConfig mirrors GeneralConfig for TOML decoding.
 type tomlGeneralConfig struct {
-	EnableCommits bool `toml:"enable_commits"`
-	UserGuided    bool `toml:"user_guided"`
+	EnableCommits   bool `toml:"enable_commits"`
+	EnableEvalOutput bool `toml:"enable_eval_output"`
+	UserGuided      bool `toml:"user_guided"`
 }
 
 // tomlForgeConfig is the intermediate struct for TOML decoding of .forgectl/config.
@@ -173,6 +174,7 @@ func LoadConfig(projectRoot string) (ForgeConfig, error) {
 func mergeTomlConfig(cfg *ForgeConfig, raw *tomlForgeConfig) {
 	// General
 	cfg.General.EnableCommits = raw.General.EnableCommits
+	cfg.General.EnableEvalOutput = raw.General.EnableEvalOutput
 	cfg.General.UserGuided = raw.General.UserGuided
 
 	// Domains (replace entirely if provided)
