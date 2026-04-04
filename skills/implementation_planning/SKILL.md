@@ -19,11 +19,53 @@ The implementation plan should answer: "What is needed to fully implement THESE 
 <workflow>
 
 <step_0>
-**Init — Start the Forgectl Planning Session**
+**Entry Mode — Ask the User**
+
+Before starting, ask the user which entry mode they want:
+
+1. **`generate_planning_queue`** — Auto-generate the plan queue from completed specs. **This is only available as a transition from a completed specifying phase** — it cannot be initialized directly. It requires `forgectl-state.json` with completed specifying data. If no specifying session was run (e.g., specs were committed outside forgectl), use `planning` instead.
+
+2. **`planning`** — Start planning directly with a pre-built plan queue. Use this when you already have a `plan-queue.json` file (manually constructed or from a previous session), or when specs were created outside of a forgectl specifying session. You build the queue yourself and pass it via `--from`.
+
+Ask: **"Would you like to start with `generate_planning_queue` (auto-generate from completed specs) or `planning` (provide your own plan queue)?"**
+
+- If **`generate_planning_queue`**: proceed to step_0a.
+- If **`planning`**: proceed to step_0b.
+</step_0>
+
+<step_0a>
+**Generate Planning Queue — Auto-Generate from Completed Specs**
+
+This path uses forgectl's `generate_planning_queue` phase to auto-generate the plan queue from completed specs.
+
+See: [references/generate-planning-queue.md](references/generate-planning-queue.md)
+
+The generate_planning_queue phase has 3 states:
+
+1. **ORIENT** — Forgectl groups completed specs by domain and writes `<state_dir>/plan-queue.json`. Advance to continue.
+2. **REFINE** — Review the generated `<state_dir>/plan-queue.json`. Reorder domains, adjust entries, or leave unchanged. Advance when satisfied (forgectl validates before transitioning).
+3. **PHASE_SHIFT** — Validates the queue and transitions to the planning phase. Advance to begin planning.
+
+```bash
+# Advance through each state
+forgectl advance
+```
+
+At the PHASE_SHIFT (generate_planning_queue → planning), you may optionally override with a different file:
+
+```bash
+forgectl advance --from <custom-queue.json>
+```
+
+After the phase shift, planning begins at ORIENT. Proceed to step_1.
+</step_0a>
+
+<step_0b>
+**Init — Start the Forgectl Planning Session Directly**
 
 Prepare a plan queue JSON file listing every implementation plan to produce in this session.
 
-See: [references/plan-queue-format.md](references/plan-queue-format.md)
+See: [references/creating-plan-queue.md](references/creating-plan-queue.md) and [references/plan-queue-format.md](references/plan-queue-format.md)
 
 ```bash
 forgectl init --phase planning --from <plan-queue.json>
@@ -34,7 +76,7 @@ All batch sizes, round limits, and guided settings are configured in `.forgectl/
 This creates `forgectl-state.json` and sets the state to ORIENT.
 
 Run `forgectl status` to see the full session overview.
-</step_0>
+</step_0b>
 
 <step_1>
 **Loop — Follow the Planning State Machine**
