@@ -328,9 +328,9 @@ func TestEvalOutputCrossRefEvalContainsEvaluatorPrompt(t *testing.T) {
 			},
 		},
 		Specifying: &SpecifyingState{
-			CrossReference: &CrossReferenceState{
-				Domain: "optimizer",
-				Round:  1,
+			CurrentDomain: "optimizer",
+			CrossReference: map[string]*CrossReferenceState{
+				"optimizer": {Domain: "optimizer", Round: 1},
 			},
 			Completed: []CompletedSpec{
 				{ID: 1, Name: "spec-a.md", Domain: "optimizer", File: "optimizer/specs/spec-a.md", RoundsTaken: 1},

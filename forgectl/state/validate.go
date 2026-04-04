@@ -107,7 +107,7 @@ func ValidatePlanQueue(data []byte) []string {
 		}
 		allowedFields := map[string]bool{
 			"name": true, "domain": true, "topic": true,
-			"file": true, "specs": true, "code_search_roots": true,
+			"file": true, "specs": true, "spec_commits": true, "code_search_roots": true,
 		}
 		for k := range entry {
 			if !allowedFields[k] {

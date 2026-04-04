@@ -137,8 +137,8 @@ func snapshotForLog(s *state.ForgeState) advanceSnapshot {
 		}
 		snap.batchNumber = s.Implementing.BatchNumber
 	}
-	if s.Specifying != nil && s.Specifying.CurrentSpec != nil {
-		snap.specRound = s.Specifying.CurrentSpec.Round
+	if s.Specifying != nil && len(s.Specifying.CurrentSpecs) > 0 {
+		snap.specRound = s.Specifying.CurrentSpecs[0].Round
 	}
 	return snap
 }

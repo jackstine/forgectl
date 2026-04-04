@@ -529,7 +529,7 @@ func TestAutoGenerateUsesSetRoots(t *testing.T) {
 			{ID: 1, Name: "Spec1", Domain: "mydom", File: "mydom/specs/a.md"},
 		},
 		Queue:       []SpecQueueEntry{},
-		DomainRoots: map[string][]string{"mydom": {"mydom/src/", "mydom/pkg/"}},
+		Domains: map[string]DomainMeta{"mydom": {CodeSearchRoots: []string{"mydom/src/", "mydom/pkg/"}}},
 	}
 
 	outPath, err := autoGeneratePlanQueue(s, dir)

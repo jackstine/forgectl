@@ -3,6 +3,7 @@ package state
 import (
 	"fmt"
 	"io"
+	"os"
 	"path/filepath"
 	"strings"
 
@@ -28,9 +29,7 @@ func phaseEvalConfig(s *ForgeState) (int, int, int) {
 func PrintAdvanceOutput(w io.Writer, s *ForgeState, dir string) {
 	switch s.Phase {
 	case PhaseSpecifying:
-		printSpecifyingOutput(w, s)
-	case PhaseGeneratePlanningQueue:
-		printGeneratePlanningQueueOutput(w, s)
+		printSpecifyingOutput(w, s, dir)
 	case PhasePlanning:
 		printPlanningOutput(w, s, dir)
 	case PhaseImplementing:
@@ -45,140 +44,317 @@ func PrintAdvanceOutput(w io.Writer, s *ForgeState, dir string) {
 
 // --- Specifying ---
 
-func printSpecifyingOutput(w io.Writer, s *ForgeState) {
+func printSpecifyingOutput(w io.Writer, s *ForgeState, dir string) {
 	spec := s.Specifying
-	cs := spec.CurrentSpec
+	var cs *ActiveSpec
+	if len(spec.CurrentSpecs) > 0 {
+		cs = spec.CurrentSpecs[0]
+	}
+
+	// domainPath returns "<domain>/" for output.
+	domainPath := func(domain string) string {
+		return domain + "/"
+	}
+
+	// batchEvalFile returns the eval file path for the current batch and round.
+	batchEvalFile := func(domain string, batchNum, round int) string {
+		return filepath.Join(domain, "specs", ".eval", fmt.Sprintf("batch-%d-r%d.md", batchNum, round))
+	}
 
 	switch s.State {
 	case StateSelect:
 		fmt.Fprintf(w, "State:   SELECT\n")
 		fmt.Fprintf(w, "Phase:   specifying\n")
-		fmt.Fprintf(w, "ID:      %d\n", cs.ID)
-		fmt.Fprintf(w, "Spec:    %s\n", cs.Name)
 		fmt.Fprintf(w, "Domain:  %s\n", cs.Domain)
-		fmt.Fprintf(w, "File:    %s\n", cs.File)
-		fmt.Fprintf(w, "Topic:   %s\n", cs.Topic)
-		if len(cs.PlanningSources) > 0 {
-			fmt.Fprintf(w, "Sources: %s\n", strings.Join(cs.PlanningSources, ", "))
+		fmt.Fprintf(w, "Path:    %s\n", domainPath(cs.Domain))
+		fmt.Fprintf(w, "Batch:   %d specs\n", len(spec.CurrentSpecs))
+		fmt.Fprintf(w, "Specs:\n")
+		for i, bcs := range spec.CurrentSpecs {
+			fmt.Fprintf(w, "  [%d] %s\n", i+1, bcs.Name)
+			fmt.Fprintf(w, "      File:    %s\n", bcs.File)
+			fmt.Fprintf(w, "      Topic:   %s\n", bcs.Topic)
+			if len(bcs.PlanningSources) > 0 {
+				fmt.Fprintf(w, "      Sources: %s\n", strings.Join(bcs.PlanningSources, ", "))
+			}
 		}
-		fmt.Fprintf(w, "Action:  Review topic and planning sources.\n")
+		fmt.Fprintf(w, "Action:  Study each planning source.\n")
+		fmt.Fprintf(w, "         Study each spec doc that exists.\n")
 		if s.Config.General.UserGuided {
-			fmt.Fprintf(w, "         Stop and review and discuss with user before continuing.\n")
+			fmt.Fprintf(w, "         STOP please review and discuss with user before continuing.\n")
 		}
-		fmt.Fprintf(w, "         Advance to begin drafting.\n")
+		fmt.Fprintf(w, "         After completion of the above, advance to begin drafting.\n")
 
 	case StateDraft:
 		fmt.Fprintf(w, "State:   DRAFT\n")
 		fmt.Fprintf(w, "Phase:   specifying\n")
-		fmt.Fprintf(w, "ID:      %d\n", cs.ID)
-		fmt.Fprintf(w, "Spec:    %s\n", cs.Name)
 		fmt.Fprintf(w, "Domain:  %s\n", cs.Domain)
-		fmt.Fprintf(w, "File:    %s\n", cs.File)
-		fmt.Fprintf(w, "Action:  Draft the spec. Advance when ready.\n")
-		fmt.Fprintf(w, "         Use --file <path> if the file path changed.\n")
+		fmt.Fprintf(w, "Path:    %s\n", domainPath(cs.Domain))
+		fmt.Fprintf(w, "Batch:   %d specs\n", len(spec.CurrentSpecs))
+		fmt.Fprintf(w, "Specs:\n")
+		for i, bcs := range spec.CurrentSpecs {
+			fmt.Fprintf(w, "  [%d] %s\n", i+1, bcs.File)
+			if len(bcs.PlanningSources) > 0 {
+				fmt.Fprintf(w, "      Sources: %s\n", strings.Join(bcs.PlanningSources, ", "))
+			}
+		}
+		fmt.Fprintf(w, "Action:  Draft all specs in the batch using the spec skill.\n")
+		fmt.Fprintf(w, "         Format:    references/spec-format.md\n")
+		fmt.Fprintf(w, "         Process:   references/spec-generation-skill.md\n")
+		fmt.Fprintf(w, "         Scoping:   references/topic-of-concern.md\n")
+		fmt.Fprintf(w, "         If a topic needs splitting or a missing spec is identified,\n")
+		fmt.Fprintf(w, "         write the new spec file, then register it:\n")
+		fmt.Fprintf(w, "           forgectl add-queue-item --name <name> --topic <topic> --file <file> [--source <path>...]\n")
+		fmt.Fprintf(w, "         After completion of the above, advance to begin evaluation.\n")
 
 	case StateEvaluate:
-		evalDir := filepath.Dir(cs.File)
-		specBase := strings.TrimSuffix(filepath.Base(cs.File), filepath.Ext(cs.File))
-		evalFile := filepath.Join(evalDir, ".eval", fmt.Sprintf("%s-r%d.md", specBase, cs.Round))
-
+		evalFile := batchEvalFile(cs.Domain, spec.BatchNumber, spec.BatchRound)
 		fmt.Fprintf(w, "State:   EVALUATE\n")
 		fmt.Fprintf(w, "Phase:   specifying\n")
-		fmt.Fprintf(w, "ID:      %d\n", cs.ID)
-		fmt.Fprintf(w, "Spec:    %s\n", cs.Name)
 		fmt.Fprintf(w, "Domain:  %s\n", cs.Domain)
-		fmt.Fprintf(w, "File:    %s\n", cs.File)
-		fmt.Fprintf(w, "Round:   %d/%d\n", cs.Round, s.Config.Specifying.Eval.MaxRounds)
-		fmt.Fprintf(w, "Action:  Spawn evaluation sub-agent against the spec.\n")
-		if s.Config.General.EnableEvalOutput {
-			fmt.Fprintf(w, "         Eval output: %s\n", evalFile)
-			fmt.Fprintf(w, "         Advance with --verdict PASS --eval-report <path> --message <commit msg>\n")
-			fmt.Fprintf(w, "           or --verdict FAIL --eval-report <path>\n")
+		fmt.Fprintf(w, "Path:    %s\n", domainPath(cs.Domain))
+		fmt.Fprintf(w, "Batch:   %d specs\n", len(spec.CurrentSpecs))
+		fmt.Fprintf(w, "Round:   %d/%d\n", spec.BatchRound, s.Config.Specifying.Eval.MaxRounds)
+		fmt.Fprintf(w, "Specs:\n")
+		for i, bcs := range spec.CurrentSpecs {
+			fmt.Fprintf(w, "  [%d] %s\n", i+1, bcs.File)
+		}
+		fmt.Fprintf(w, "Action:  Please spawn 1 %s sub-agent to evaluate the spec batch.\n", s.Config.Specifying.Eval.Type)
+		fmt.Fprintf(w, "         Eval output: %s\n", evalFile)
+		if s.Config.General.EnableCommits {
+			fmt.Fprintf(w, "         After completion of the above, advance with --verdict PASS|FAIL --eval-report <path>\n")
+			fmt.Fprintf(w, "           (--message <commit msg> required with PASS)\n")
 		} else {
-			fmt.Fprintf(w, "         Advance with --verdict PASS|FAIL\n")
+			fmt.Fprintf(w, "         After completion of the above, advance with --verdict PASS|FAIL --eval-report <path>\n")
 		}
 
 	case StateRefine:
-		evalDir := filepath.Dir(cs.File)
-		specBase := strings.TrimSuffix(filepath.Base(cs.File), filepath.Ext(cs.File))
-		evalFile := filepath.Join(evalDir, ".eval", fmt.Sprintf("%s-r%d.md", specBase, cs.Round))
-
+		evalFile := batchEvalFile(cs.Domain, spec.BatchNumber, spec.BatchRound)
 		fmt.Fprintf(w, "State:   REFINE\n")
 		fmt.Fprintf(w, "Phase:   specifying\n")
-		fmt.Fprintf(w, "ID:      %d\n", cs.ID)
-		fmt.Fprintf(w, "Spec:    %s\n", cs.Name)
 		fmt.Fprintf(w, "Domain:  %s\n", cs.Domain)
-		fmt.Fprintf(w, "File:    %s\n", cs.File)
-		fmt.Fprintf(w, "Round:   %d/%d\n", cs.Round, s.Config.Specifying.Eval.MaxRounds)
-		if s.Config.General.EnableEvalOutput {
-			fmt.Fprintf(w, "Action:  Study the eval file %q\n", evalFile)
-			fmt.Fprintf(w, "         and implement any corrections as needed.\n")
-			fmt.Fprintf(w, "         Apply \"fresh\" eyes and a tightened lens when reviewing the work,\n")
-			fmt.Fprintf(w, "         then apply corrections as needed.\n")
-			fmt.Fprintf(w, "         After completion of the above, advance to continue.\n")
-		} else {
-			fmt.Fprintf(w, "Action:  Make corrections based off communication with the evaluator.\n")
-			fmt.Fprintf(w, "         Implement any corrections as needed.\n")
-			fmt.Fprintf(w, "         Apply \"fresh\" eyes and a tightened lens when reviewing the work,\n")
-			fmt.Fprintf(w, "         then apply corrections as needed.\n")
-			fmt.Fprintf(w, "         After completion of the above, advance to continue.\n")
+		fmt.Fprintf(w, "Path:    %s\n", domainPath(cs.Domain))
+		fmt.Fprintf(w, "Batch:   %d specs\n", len(spec.CurrentSpecs))
+		fmt.Fprintf(w, "Round:   %d/%d\n", spec.BatchRound, s.Config.Specifying.Eval.MaxRounds)
+		fmt.Fprintf(w, "Specs:\n")
+		for i, bcs := range spec.CurrentSpecs {
+			fmt.Fprintf(w, "  [%d] %s\n", i+1, bcs.File)
 		}
+		fmt.Fprintf(w, "Action:  Read the eval report and address any findings in the spec files\n")
+		fmt.Fprintf(w, "         using the spec skill.\n")
+		fmt.Fprintf(w, "         Eval report: %s\n", evalFile)
+		fmt.Fprintf(w, "         Format:      references/spec-format.md\n")
+		fmt.Fprintf(w, "         Process:     references/spec-generation-skill.md\n")
+		fmt.Fprintf(w, "         Scoping:     references/topic-of-concern.md\n")
+		fmt.Fprintf(w, "         After completion of the above, advance to continue evaluation.\n")
 
 	case StateAccept:
 		fmt.Fprintf(w, "State:   ACCEPT\n")
 		fmt.Fprintf(w, "Phase:   specifying\n")
-		fmt.Fprintf(w, "ID:      %d\n", cs.ID)
-		fmt.Fprintf(w, "Spec:    %s\n", cs.Name)
-		fmt.Fprintf(w, "Domain:  %s\n", cs.Domain)
-		fmt.Fprintf(w, "File:    %s\n", cs.File)
-		fmt.Fprintf(w, "Round:   %d/%d\n", cs.Round, s.Config.Specifying.Eval.MaxRounds)
-		fmt.Fprintf(w, "Action:  Spec accepted. Advance to continue.\n")
+		fmt.Fprintf(w, "Domain:  %s\n", spec.CurrentDomain)
+		fmt.Fprintf(w, "Path:    %s\n", domainPath(spec.CurrentDomain))
+		if cs != nil {
+			fmt.Fprintf(w, "Batch:   %d specs accepted\n", len(spec.CurrentSpecs))
+			fmt.Fprintf(w, "Round:   %d/%d\n", spec.BatchRound, s.Config.Specifying.Eval.MaxRounds)
+		}
+		fmt.Fprintf(w, "Action:  Batch accepted.\n")
+		fmt.Fprintf(w, "         After completion of the above, advance to continue.\n")
+
+	case StateCrossReference:
+		currentDomain := spec.CurrentDomain
+		fmt.Fprintf(w, "State:   CROSS_REFERENCE\n")
+		fmt.Fprintf(w, "Phase:   specifying\n")
+		fmt.Fprintf(w, "Domain:  %s\n", currentDomain)
+		fmt.Fprintf(w, "Path:    %s\n", domainPath(currentDomain))
+		fmt.Fprintln(w)
+		fmt.Fprintf(w, "Specs in domain:\n")
+
+		// Session-completed specs for this domain.
+		var sessionSpecs []CompletedSpec
+		for _, c := range spec.Completed {
+			if c.Domain == currentDomain {
+				sessionSpecs = append(sessionSpecs, c)
+			}
+		}
+		if len(sessionSpecs) > 0 {
+			fmt.Fprintf(w, "  [session — completed]\n")
+			for _, c := range sessionSpecs {
+				fmt.Fprintf(w, "    %s (batch %d)\n", filepath.Base(c.File), c.BatchNumber)
+			}
+		}
+
+		// Existing specs not in session.
+		existingSpecs := findExistingSpecs(dir, currentDomain, spec)
+		if len(existingSpecs) > 0 {
+			fmt.Fprintf(w, "  [existing — not in queue]\n")
+			for _, f := range existingSpecs {
+				fmt.Fprintf(w, "    %s\n", f)
+			}
+		}
+
+		fmt.Fprintln(w)
+		agentCount := s.Config.Specifying.CrossReference.Count
+		agentType := s.Config.Specifying.CrossReference.Type
+		fmt.Fprintf(w, "Action:  Please spawn %d %s sub-agent(s) to cross-reference ALL specs in this domain.\n", agentCount, agentType)
+		fmt.Fprintf(w, "         Assign each sub-agent a subset of specs to review against the others.\n")
+		fmt.Fprintf(w, "         Fix any findings.\n")
+		fmt.Fprintf(w, "         After completion of the above, advance to begin evaluation.\n")
+
+	case StateCrossReferenceEval:
+		currentDomain := spec.CurrentDomain
+		cr := spec.CrossReference[currentDomain]
+		evalFile := filepath.Join(currentDomain, "specs", ".eval", fmt.Sprintf("cross-reference-r%d.md", cr.Round))
+		evalAgentType := s.Config.Specifying.CrossReference.Eval.Type
+		if evalAgentType == "" {
+			evalAgentType = "opus"
+		}
+		fmt.Fprintf(w, "State:   CROSS_REFERENCE_EVAL\n")
+		fmt.Fprintf(w, "Phase:   specifying\n")
+		fmt.Fprintf(w, "Domain:  %s\n", currentDomain)
+		fmt.Fprintf(w, "Path:    %s\n", domainPath(currentDomain))
+		fmt.Fprintf(w, "Round:   %d/%d\n", cr.Round, s.Config.Specifying.CrossReference.MaxRounds)
+		fmt.Fprintf(w, "Eval:    %s\n", evalFile)
+		fmt.Fprintln(w)
+		fmt.Fprintf(w, "Action:  Please spawn 1 %s sub-agent to evaluate cross-reference consistency.\n", evalAgentType)
+		fmt.Fprintf(w, "         After completion of the above, advance with --verdict PASS|FAIL --eval-report <path>\n")
+
+	case StateCrossReferenceReview:
+		currentDomain := spec.CurrentDomain
+		cr := spec.CrossReference[currentDomain]
+		var lastEval EvalRecord
+		if len(cr.Evals) > 0 {
+			lastEval = cr.Evals[len(cr.Evals)-1]
+		}
+		evalFile := filepath.Join(currentDomain, "specs", ".eval", fmt.Sprintf("cross-reference-r%d.md", cr.Round))
+		fmt.Fprintf(w, "State:   CROSS_REFERENCE_REVIEW\n")
+		fmt.Fprintf(w, "Phase:   specifying\n")
+		fmt.Fprintf(w, "Domain:  %s\n", currentDomain)
+		fmt.Fprintf(w, "Path:    %s\n", domainPath(currentDomain))
+		fmt.Fprintf(w, "Round:   %d/%d\n", cr.Round, s.Config.Specifying.CrossReference.MaxRounds)
+		fmt.Fprintf(w, "Verdict: %s\n", lastEval.Verdict)
+		fmt.Fprintf(w, "Eval:    %s\n", evalFile)
+		fmt.Fprintln(w)
+		if s.Config.Specifying.CrossReference.UserReview {
+			fmt.Fprintf(w, "Action:  STOP please review and discuss with user before continuing.\n")
+		} else {
+			fmt.Fprintf(w, "Action:  Domain cross-reference complete.\n")
+		}
+		fmt.Fprintf(w, "         If additional specs are needed for this domain,\n")
+		fmt.Fprintf(w, "         write the new spec file, then register it:\n")
+		fmt.Fprintf(w, "           forgectl add-queue-item --name <name> --topic <topic> --file <file> [--source <path>...]\n")
+		fmt.Fprintf(w, "         Set code search roots for this domain (used in planning phase):\n")
+		fmt.Fprintf(w, "           forgectl set-roots <path> [<path>...]\n")
+		fmt.Fprintf(w, "         After completion of the above, advance to continue.\n")
 
 	case StateDone:
 		fmt.Fprintf(w, "State:   DONE\n")
 		fmt.Fprintf(w, "Phase:   specifying\n")
 		fmt.Fprintf(w, "Specs:   %d completed\n", len(spec.Completed))
-		fmt.Fprintf(w, "Action:  All individual specs complete. Advance to begin reconciliation.\n")
+		fmt.Fprintf(w, "Action:  All individual specs complete.\n")
+		fmt.Fprintf(w, "         If additional specs are needed,\n")
+		fmt.Fprintf(w, "         write the new spec file, then register it:\n")
+		fmt.Fprintf(w, "           forgectl add-queue-item --name <name> --domain <domain> --topic <topic> --file <file> [--source <path>...]\n")
+		fmt.Fprintf(w, "           Adding specs here re-enters ORIENT for the new items before reconciliation.\n")
+		fmt.Fprintf(w, "         Set code search roots for any domain not yet configured (used in planning phase):\n")
+		fmt.Fprintf(w, "           forgectl set-roots --domain <domain> <path> [<path>...]\n")
+		fmt.Fprintf(w, "         When ready, advance to begin reconciliation.\n")
 
 	case StateReconcile:
+		domains := uniqueDomains(spec.Completed)
 		fmt.Fprintf(w, "State:   RECONCILE\n")
 		fmt.Fprintf(w, "Phase:   specifying\n")
-		if len(spec.Completed) > 0 {
-			fmt.Fprintf(w, "Domain:  %s\n", spec.Completed[0].Domain)
-		}
-		fmt.Fprintf(w, "Specs:   %d completed\n", len(spec.Completed))
-		fmt.Fprintf(w, "Action:  Cross-validate all specs: verify Depends On entries, Integration Points\n")
-		fmt.Fprintf(w, "         symmetry, naming consistency. Stage changes with git add.\n")
-		fmt.Fprintf(w, "         Advance when ready.\n")
+		fmt.Fprintf(w, "Specs:   %d completed across %d domains\n", len(spec.Completed), len(domains))
+		fmt.Fprintf(w, "Action:  Cross-validate all specs across domains: verify Depends On entries,\n")
+		fmt.Fprintf(w, "         Integration Points symmetry, naming consistency. Stage changes with git add.\n")
+		fmt.Fprintf(w, "         After completion of the above, advance to begin evaluation.\n")
 
 	case StateReconcileEval:
+		maxRounds := s.Config.Specifying.Reconciliation.MaxRounds
 		fmt.Fprintf(w, "State:   RECONCILE_EVAL\n")
 		fmt.Fprintf(w, "Phase:   specifying\n")
-		fmt.Fprintf(w, "Round:   %d\n", spec.Reconcile.Round)
-		fmt.Fprintf(w, "Action:  Tell the sub-agent to run git diff --staged and evaluate\n")
-		fmt.Fprintf(w, "         consistency across all specs.\n")
-		fmt.Fprintf(w, "         Advance with --verdict PASS --message <commit msg>\n")
-		fmt.Fprintf(w, "           or --verdict FAIL.\n")
+		fmt.Fprintf(w, "Round:   %d/%d\n", spec.Reconcile.Round, maxRounds)
+		fmt.Fprintf(w, "Action:  Please spawn 1 opus sub-agent to evaluate cross-domain reconciliation.\n")
+		fmt.Fprintf(w, "         The sub-agent should run: forgectl eval\n")
+		fmt.Fprintf(w, "         After completion of the above, advance with --verdict PASS|FAIL --eval-report <path>\n")
+		if s.Config.General.EnableCommits {
+			fmt.Fprintf(w, "           (--message <commit msg> required with PASS)\n")
+		}
 
 	case StateReconcileReview:
+		domains := uniqueDomains(spec.Completed)
+		maxRounds := s.Config.Specifying.Reconciliation.MaxRounds
+		var lastVerdict string
+		if len(spec.Reconcile.Evals) > 0 {
+			lastVerdict = spec.Reconcile.Evals[len(spec.Reconcile.Evals)-1].Verdict
+		}
 		fmt.Fprintf(w, "State:   RECONCILE_REVIEW\n")
 		fmt.Fprintf(w, "Phase:   specifying\n")
-		fmt.Fprintf(w, "Round:   %d\n", spec.Reconcile.Round)
-		fmt.Fprintf(w, "Action:  Reconciliation eval found issues.\n")
-		fmt.Fprintf(w, "         Accept: advance (or --verdict PASS)\n")
-		fmt.Fprintf(w, "         Fix and re-evaluate: advance --verdict FAIL\n")
+		fmt.Fprintf(w, "Specs:   %d completed across %d domains\n", len(spec.Completed), len(domains))
+		fmt.Fprintf(w, "Round:   %d/%d\n", spec.Reconcile.Round, maxRounds)
+		fmt.Fprintf(w, "Verdict: %s\n", lastVerdict)
+		fmt.Fprintln(w)
+		if s.Config.Specifying.Reconciliation.UserReview {
+			fmt.Fprintf(w, "Action:  STOP please review and discuss with user before continuing.\n")
+		} else {
+			fmt.Fprintf(w, "Action:  Reconciliation review complete.\n")
+		}
+		fmt.Fprintf(w, "         If additional specs are needed,\n")
+		fmt.Fprintf(w, "         write the new spec file, then register it:\n")
+		fmt.Fprintf(w, "           forgectl add-queue-item --name <name> --domain <domain> --topic <topic> --file <file> [--source <path>...]\n")
+		fmt.Fprintf(w, "           Adding specs here re-enters DONE for the new items before reconciliation restarts.\n")
+		fmt.Fprintf(w, "         After completion of the above, advance to continue.\n")
 
 	case StateComplete:
 		fmt.Fprintf(w, "State:   COMPLETE\n")
 		fmt.Fprintf(w, "Phase:   specifying\n")
 		fmt.Fprintf(w, "Specs:   %d completed, reconciled\n", len(spec.Completed))
-		if s.Config.General.EnableCommits {
-			fmt.Fprintf(w, "Action:  Specifying phase complete.\n")
-			fmt.Fprintf(w, "         Advance with --message \"your commit message\" to commit and continue.\n")
-		} else {
-			fmt.Fprintf(w, "Action:  Specifying phase complete. Advance to continue.\n")
+		fmt.Fprintf(w, "Action:  Specifying phase complete. Advance to continue.\n")
+	}
+}
+
+// findExistingSpecs returns spec file basenames in <dir>/<domain>/specs/ that
+// are not already tracked in the session (not in completed, queue, or currentSpecs).
+func findExistingSpecs(dir, domain string, spec *SpecifyingState) []string {
+	specsDir := filepath.Join(dir, domain, "specs")
+	entries, err := os.ReadDir(specsDir)
+	if err != nil {
+		return nil
+	}
+
+	// Build set of tracked files (by basename).
+	tracked := make(map[string]bool)
+	for _, c := range spec.Completed {
+		tracked[filepath.Base(c.File)] = true
+	}
+	for _, q := range spec.Queue {
+		tracked[filepath.Base(q.File)] = true
+	}
+	for _, cs := range spec.CurrentSpecs {
+		tracked[filepath.Base(cs.File)] = true
+	}
+
+	var existing []string
+	for _, e := range entries {
+		if e.IsDir() || filepath.Ext(e.Name()) != ".md" {
+			continue
+		}
+		if !tracked[e.Name()] {
+			existing = append(existing, e.Name())
 		}
 	}
+	return existing
+}
+
+// uniqueDomains returns the set of unique domain names from completed specs.
+func uniqueDomains(completed []CompletedSpec) []string {
+	seen := make(map[string]bool)
+	var domains []string
+	for _, c := range completed {
+		if !seen[c.Domain] {
+			seen[c.Domain] = true
+			domains = append(domains, c.Domain)
+		}
+	}
+	return domains
 }
 
 // --- Generate Planning Queue ---
@@ -732,12 +908,8 @@ func printImplementingOutput(w io.Writer, s *ForgeState, dir string) {
 		fmt.Fprintf(w, "Phase:   implementing\n")
 
 		// Check if more domains remain.
-		moreDomains := (impl != nil && len(impl.PlanQueue) > 0) ||
-			(s.Planning != nil && len(s.Planning.Queue) > 0)
-
-		if moreDomains && impl != nil && impl.CurrentPlanDomain != "" {
-			fmt.Fprintf(w, "Domain:  %s\n", impl.CurrentPlanDomain)
-		}
+		moreDomains := (s.Planning != nil && len(s.Planning.Queue) > 0) ||
+			(s.Implementing != nil && len(s.Implementing.PlanQueue) > 0)
 
 		fmt.Fprintf(w, "Summary:\n")
 		if plan != nil {
@@ -838,7 +1010,7 @@ func PrintStatus(w io.Writer, s *ForgeState, dir string, verbose bool) {
 	if s.Specifying != nil {
 		fmt.Fprintf(w, "--- Specifying ---\n\n")
 		spec := s.Specifying
-		if len(spec.Completed) > 0 && len(spec.Queue) == 0 && spec.CurrentSpec == nil {
+		if len(spec.Completed) > 0 && len(spec.Queue) == 0 && len(spec.CurrentSpecs) == 0 {
 			if spec.Reconcile != nil && len(spec.Reconcile.Evals) > 0 {
 				fmt.Fprintf(w, "  Complete (%d specs, reconciled)\n", len(spec.Completed))
 			} else {
@@ -863,8 +1035,6 @@ func PrintStatus(w io.Writer, s *ForgeState, dir string, verbose bool) {
 				fmt.Fprintf(w, "  [%d] %s (%s)  — %d %s", c.ID, c.Name, c.Domain, c.RoundsTaken, roundLabel)
 				if len(c.CommitHashes) > 0 {
 					fmt.Fprintf(w, ", commit %s", strings.Join(c.CommitHashes, ", "))
-				} else if c.CommitHash != "" {
-					fmt.Fprintf(w, ", commit %s", c.CommitHash)
 				}
 				fmt.Fprintln(w)
 				for _, e := range c.Evals {
@@ -1155,12 +1325,13 @@ func PrintCrossRefEvalOutput(w io.Writer, s *ForgeState) error {
 	}
 
 	spec := s.Specifying
-	domain := ""
+	domain := spec.CurrentDomain
 	round := 0
 	maxRounds := s.Config.Specifying.CrossReference.MaxRounds
 	if spec.CrossReference != nil {
-		domain = spec.CrossReference.Domain
-		round = spec.CrossReference.Round
+		if cr, ok := spec.CrossReference[domain]; ok {
+			round = cr.Round
+		}
 	}
 
 	fmt.Fprintf(w, "=== CROSS-REFERENCE EVALUATION ROUND %d/%d ===\n", round, maxRounds)
@@ -1198,11 +1369,7 @@ func PrintCrossRefEvalOutput(w io.Writer, s *ForgeState) error {
 // --- Helpers ---
 
 // currentPlanDir returns the directory containing the active plan file.
-// Prefers Implementing.CurrentPlanFile over Planning.CurrentPlan.File.
 func currentPlanDir(s *ForgeState) string {
-	if s.Implementing != nil && s.Implementing.CurrentPlanFile != "" {
-		return filepath.Dir(s.Implementing.CurrentPlanFile)
-	}
 	if s.Planning != nil && s.Planning.CurrentPlan != nil {
 		return filepath.Dir(s.Planning.CurrentPlan.File)
 	}
