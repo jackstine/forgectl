@@ -37,10 +37,10 @@ See: [references/search-specs-for-specifying.md](references/search-specs-for-spe
 Feed the spec queue JSON to forgectl:
 
 ```bash
-forgectl init --phase specifying --from <spec-queue.json> --batch-size 1 --max-rounds 3 --min-rounds 1 --guided
+forgectl init --phase specifying --from <spec-queue.json>
 ```
 
-This creates `forgectl-state.json` and sets the state to ORIENT.
+This creates `forgectl-state.json` and sets the state to ORIENT. All batch sizes, round limits, and guided settings are configured in `.forgectl/config` (TOML).
 
 Run `forgectl status` to see the full session overview.
 
@@ -56,7 +56,7 @@ For each spec in the queue, follow the forgectl state machine:
 2a. **ORIENT** — Read the planning sources and any existing specs. Understand what exists before writing.
 2b. **SELECT** — Pull the next spec from the queue. If guided, discuss scope with the user.
 2c. **DRAFT** — Write the spec file following the format in `references/spec-format.md`. Advance with `forgectl advance` (optionally `--file <path>` to override the output path).
-2d. **EVALUATE** — Spawn an Opus sub-agent to adversarially review the draft. Record the verdict with `forgectl advance --verdict PASS|FAIL --eval-report <path>`. PASS requires `--message`.
+2d. **EVALUATE** — Spawn an Opus sub-agent to adversarially review the draft. Record the verdict with `forgectl advance --verdict PASS|FAIL --eval-report <path>`.
 2e. **REFINE** — If evaluation failed, fix the deficiencies and advance back to EVALUATE.
 2f. **ACCEPT** — Spec finalized. Forgectl loops to ORIENT for the next spec, or moves to DONE when the queue is empty.
 
@@ -68,11 +68,14 @@ See: [references/spec-format.md](references/spec-format.md)
 <step_3>
 **Reconcile — Cross-Spec Consistency**
 
-After all individual specs are accepted, forgectl enters reconciliation:
+After all individual specs in a domain are accepted, forgectl enters per-domain cross-referencing. After all domains are cross-referenced, it enters cross-domain reconciliation:
 
-3a. **RECONCILE** — Fix cross-references across all specs. Verify dependency symmetry, naming consistency, and scope boundaries. Stage the changes.
-3b. **RECONCILE_EVAL** — Spawn a sub-agent to evaluate cross-spec consistency from `git diff --staged`.
-3c. **RECONCILE_REVIEW** — Human reviews the reconciliation eval. Accept or grant another pass.
+3a. **CROSS_REFERENCE** — After the last batch for a domain is accepted, cross-reference ALL specs in that domain (session specs and existing specs). Spawn sub-agents to review.
+3b. **CROSS_REFERENCE_EVAL** — Sub-agent evaluates intra-domain cross-reference consistency.
+3c. **CROSS_REFERENCE_REVIEW** — Review cross-reference eval. Add specs or set code search roots for the domain. Then proceed to the next domain or DONE.
+3d. **RECONCILE** — After all domains pass cross-referencing, fix cross-references across all specs and all domains. Stage the changes.
+3e. **RECONCILE_EVAL** — Spawn a sub-agent to evaluate cross-domain consistency from `git diff --staged`.
+3f. **RECONCILE_REVIEW** — Human reviews the reconciliation eval. Accept or grant another pass.
 
 Reconciliation checklist:
 - Every `Depends On` reference points to a spec that exists

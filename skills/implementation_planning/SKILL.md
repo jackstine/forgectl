@@ -26,8 +26,10 @@ Prepare a plan queue JSON file listing every implementation plan to produce in t
 See: [references/plan-queue-format.md](references/plan-queue-format.md)
 
 ```bash
-forgectl init --phase planning --from <plan-queue.json> --batch-size 1 --max-rounds 3 --min-rounds 1 --guided
+forgectl init --phase planning --from <plan-queue.json>
 ```
+
+All batch sizes, round limits, and guided settings are configured in `.forgectl/config` (TOML).
 
 This creates `forgectl-state.json` and sets the state to ORIENT.
 
@@ -47,7 +49,7 @@ For each plan in the queue, follow the forgectl state machine:
 1f. **DRAFT** — Generate the implementation plan as `plan.json` + `notes/` at the target path. Follow the schema in [references/plan-format.json](references/plan-format.json) exactly. Forgectl validates automatically on advance. See [Schema Gotchas](#schema-gotchas) below.
 1g. **EVALUATE** — Use `forgectl eval` to get evaluation context. Spawn an Opus sub-agent to assess the plan against all 11 dimensions. Record the verdict with `forgectl advance --verdict PASS|FAIL --eval-report <path>`.
 1h. **REFINE** — If evaluation failed or min rounds not met, spawn a sub-agent to update the plan and notes. Advance to re-evaluate.
-1i. **ACCEPT** — Plan finalized. `forgectl advance --message <commit msg>`.
+1i. **ACCEPT** — Plan finalized. When `enable_commits` is true in `.forgectl/config`, advance with `forgectl advance --message <commit msg>` to auto-commit. When `enable_commits` is false, just `forgectl advance`.
 
 Use `forgectl status` at any point to see current state and what action is needed.
 
@@ -59,7 +61,7 @@ The plan output format is defined in [references/plan-format.json](references/pl
 <step_2>
 **Phase Transition**
 
-After acceptance, forgectl transitions to PHASE_SHIFT (planning → implementing). This validates `plan.json`, adds tracking fields (`passes: "pending"`, `rounds: 0`) to every item, and writes the updated plan back to disk.
+After acceptance, forgectl transitions to either ORIENT (if more plans remain in the queue) or DONE (if all plans are complete). From DONE, advancing triggers PHASE_SHIFT (planning → implementing). The phase shift validates `plan.json`, adds tracking fields (`passes: "pending"`, `rounds: 0`) to every item, and writes the updated plan back to disk.
 
 ```bash
 forgectl advance
@@ -87,7 +89,7 @@ forgectl advance
 Plans are written to the path specified in the plan queue's `file` field:
 
 ```
-<domain>/.workspace/implementation_plan/
+<domain>/.forge_workspace/implementation_plan/
 ├── plan.json          # The implementation plan manifest
 └── notes/             # Reference notes per package
     ├── <package>.md
@@ -102,8 +104,8 @@ These are common validation failures. Read [references/plan-format.json](referen
 
 1. **`refs` must be objects, not strings.** Each entry needs `{"id": "...", "path": "..."}`. Plain strings like `"specs/foo.md"` will fail parsing.
 2. **All paths are relative to the project root** (the directory containing `.forgectl/`). If plan.json is at `api/.forge_workspace/implementation_plan/plan.json`, then spec paths look like `api/specs/foo.md` and notes paths look like `api/.forge_workspace/implementation_plan/notes/bar.md`.
-3. **No `#anchor` fragments in paths.** `ref: "notes/foo.md#section"` will fail — forgectl runs `os.Stat()` on the raw string. Use `ref: "notes/foo.md"` instead.
-4. **`spec` is a single string, not an array.** To reference multiple spec sections, use the description or notes file.
+3. **No `#anchor` fragments in `refs` paths.** `refs: ["notes/foo.md#section"]` will fail — forgectl runs `os.Stat()` on the raw string. Use `refs: ["notes/foo.md"]` instead. (`specs` paths allow `#anchors` since they are display-only.)
+4. **`specs` is a string array, not a single string.** Use `"specs": ["spec1.md", "spec2.md"]`. The field is `specs` (plural). Display-only, `#anchor` fragments are OK. There is also `refs` (plural, string array) for notes file paths validated on disk.
 5. **`context` only has `domain` and `module`.** Extra fields like `go_version` or `binary` are silently ignored but add no value.
 6. **`tests` must be an array, never null.** Use `[]` for items with no tests. `null` fails validation.
 7. **`depends_on` must be an array, never null.** Use `[]` for items with no dependencies.
@@ -124,9 +126,9 @@ The planning evaluator assesses 11 dimensions against the referenced specs:
 10. Testing Criteria
 11. Dependencies & Format
 
-Full evaluator instructions: `~/.local/bin/evaluators/plan-eval.md` (read by `forgectl eval` automatically)
+Full evaluator instructions: `forgectl/evaluators/plan-eval.md` (embedded in the binary, output by `forgectl eval` automatically)
 
-Eval reports are written to: `<domain>/.workspace/implementation_plan/evals/round-N.md`
+Eval reports are written to: `<domain>/.forge_workspace/implementation_plan/evals/round-N.md`
 
 ### Evaluation Sub-Agent Context
 
