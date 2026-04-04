@@ -210,9 +210,44 @@ func runInit(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("saving state: %w", err)
 	}
 
+	// Write activity log entry (best-effort).
+	if s.Config.Logs.Enabled {
+		state.PruneLogFiles(state.LogDir(), s.Config.Logs.RetentionDays, s.Config.Logs.MaxFiles)
+		detail := buildInitLogDetail(s)
+		state.WriteLogEntry(s.SessionID, string(s.StartedAtPhase), state.LogEntry{
+			Ts:     state.NowTS(),
+			Cmd:    "init",
+			Phase:  string(s.Phase),
+			State:  string(s.State),
+			Detail: detail,
+		})
+	}
+
 	state.PrintAdvanceOutput(out, s, stateDir)
 
 	return nil
+}
+
+// buildInitLogDetail builds the detail map for an init log entry.
+func buildInitLogDetail(s *state.ForgeState) map[string]any {
+	detail := map[string]any{
+		"guided": s.Config.General.UserGuided,
+	}
+	switch s.Phase {
+	case state.PhaseSpecifying:
+		ec := s.Config.Specifying.Eval
+		detail["batch"] = s.Config.Specifying.Batch
+		detail["rounds"] = fmt.Sprintf("%d-%d", ec.MinRounds, ec.MaxRounds)
+	case state.PhasePlanning:
+		ec := s.Config.Planning.Eval
+		detail["batch"] = s.Config.Planning.Batch
+		detail["rounds"] = fmt.Sprintf("%d-%d", ec.MinRounds, ec.MaxRounds)
+	case state.PhaseImplementing:
+		ec := s.Config.Implementing.Eval
+		detail["batch"] = s.Config.Implementing.Batch
+		detail["rounds"] = fmt.Sprintf("%d-%d", ec.MinRounds, ec.MaxRounds)
+	}
+	return detail
 }
 
 func printValidationErrors(w interface{ Write([]byte) (int, error) }, errs []string) {

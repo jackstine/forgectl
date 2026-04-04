@@ -775,3 +775,152 @@ func TestValidateEmptyObjectFailsAutoDetect(t *testing.T) {
 		t.Errorf("expected 'cannot determine file type' in error, got: %v", err)
 	}
 }
+
+// --- Logging integration tests ---
+
+// Test 7: Init command writes log entry with correct cmd/phase/state/detail.
+func TestInitLogDetail(t *testing.T) {
+	s := &state.ForgeState{
+		Phase:          state.PhaseSpecifying,
+		State:          state.StateOrient,
+		StartedAtPhase: state.PhaseSpecifying,
+		Config: state.ForgeConfig{
+			General:    state.GeneralConfig{UserGuided: true},
+			Specifying: state.SpecifyingConfig{Batch: 2, Eval: state.EvalConfig{MinRounds: 1, MaxRounds: 3}},
+			Logs:       state.LogsConfig{Enabled: true, RetentionDays: 90, MaxFiles: 50},
+		},
+	}
+	detail := buildInitLogDetail(s)
+
+	if detail["guided"] != true {
+		t.Errorf("detail[guided] = %v, want true", detail["guided"])
+	}
+	if detail["batch"] != 2 {
+		t.Errorf("detail[batch] = %v, want 2", detail["batch"])
+	}
+	if detail["rounds"] != "1-3" {
+		t.Errorf("detail[rounds] = %v, want 1-3", detail["rounds"])
+	}
+}
+
+// Test 8: Advance command writes log entry with prev_state set correctly.
+func TestAdvanceLogEntryPrevState(t *testing.T) {
+	s := &state.ForgeState{
+		Phase: state.PhaseSpecifying,
+		State: state.StateSelect, // after advance from ORIENT
+		Config: state.ForgeConfig{
+			General: state.GeneralConfig{EnableEvalOutput: false},
+		},
+		Specifying: &state.SpecifyingState{},
+	}
+	prevSnap := advanceSnapshot{}
+	in := state.AdvanceInput{}
+
+	detail := buildAdvanceLogDetail(s, "ORIENT", state.PhaseSpecifying, prevSnap, in)
+	// ORIENT in specifying has no specific detail case, so detail should be nil.
+	if detail != nil {
+		t.Errorf("expected nil detail for ORIENT advance, got %v", detail)
+	}
+}
+
+// Test 9: Advance from implementing ORIENT logs layer/unblocked/remaining.
+func TestAdvanceLogDetailImplOrient(t *testing.T) {
+	s := &state.ForgeState{
+		Phase: state.PhaseImplementing,
+		State: state.StateImplement, // after ORIENT → IMPLEMENT
+		Config: state.ForgeConfig{
+			General: state.GeneralConfig{EnableEvalOutput: false},
+		},
+		Implementing: &state.ImplementingState{
+			CurrentLayer: &state.LayerRef{ID: "L0", Name: "Foundation"},
+			CurrentBatch: &state.BatchState{
+				Items: []string{"item.a", "item.b"},
+			},
+		},
+	}
+	prevSnap := advanceSnapshot{} // before ORIENT, no batch yet
+	in := state.AdvanceInput{}
+
+	detail := buildAdvanceLogDetail(s, "ORIENT", state.PhaseImplementing, prevSnap, in)
+	if detail == nil {
+		t.Fatal("expected detail for ORIENT advance in implementing")
+	}
+	if detail["layer"] != "L0" {
+		t.Errorf("detail[layer] = %v, want L0", detail["layer"])
+	}
+	if detail["unblocked"] != 2 {
+		t.Errorf("detail[unblocked] = %v, want 2", detail["unblocked"])
+	}
+}
+
+// Test 10: Advance from implementing COMMIT logs layer/batch/items.
+func TestAdvanceLogDetailImplCommit(t *testing.T) {
+	s := &state.ForgeState{
+		Phase: state.PhaseImplementing,
+		State: state.StateOrient, // after COMMIT → ORIENT
+		Config: state.ForgeConfig{
+			General: state.GeneralConfig{EnableEvalOutput: false},
+		},
+		Implementing: &state.ImplementingState{},
+	}
+	prevSnap := advanceSnapshot{
+		layerID:     "L0",
+		batchNumber: 2,
+		batchItems:  []string{"item.a", "item.b"},
+	}
+	in := state.AdvanceInput{}
+
+	detail := buildAdvanceLogDetail(s, "COMMIT", state.PhaseImplementing, prevSnap, in)
+	if detail == nil {
+		t.Fatal("expected detail for COMMIT advance in implementing")
+	}
+	if detail["layer"] != "L0" {
+		t.Errorf("detail[layer] = %v, want L0", detail["layer"])
+	}
+	if detail["batch"] != 2 {
+		t.Errorf("detail[batch] = %v, want 2", detail["batch"])
+	}
+	items, ok := detail["items"].([]string)
+	if !ok {
+		t.Fatalf("detail[items] type = %T, want []string", detail["items"])
+	}
+	if len(items) != 2 || items[0] != "item.a" {
+		t.Errorf("detail[items] = %v, want [item.a item.b]", items)
+	}
+}
+
+// Test 11: Advance from specifying EVALUATE logs round/verdict with/without eval_report.
+func TestAdvanceLogDetailSpecifyingEvaluate(t *testing.T) {
+	// Without eval_report (EnableEvalOutput = false).
+	s := &state.ForgeState{
+		Phase: state.PhaseSpecifying,
+		State: state.StateAccept,
+		Config: state.ForgeConfig{
+			General: state.GeneralConfig{EnableEvalOutput: false},
+		},
+		Specifying: &state.SpecifyingState{},
+	}
+	prevSnap := advanceSnapshot{specRound: 2}
+	in := state.AdvanceInput{Verdict: "PASS", EvalReport: "report.md"}
+
+	detail := buildAdvanceLogDetail(s, "EVALUATE", state.PhaseSpecifying, prevSnap, in)
+	if detail == nil {
+		t.Fatal("expected detail for specifying EVALUATE advance")
+	}
+	if detail["round"] != 2 {
+		t.Errorf("detail[round] = %v, want 2", detail["round"])
+	}
+	if detail["verdict"] != "PASS" {
+		t.Errorf("detail[verdict] = %v, want PASS", detail["verdict"])
+	}
+	if _, ok := detail["eval_report"]; ok {
+		t.Error("detail[eval_report] should not be present when EnableEvalOutput=false")
+	}
+
+	// With eval_report (EnableEvalOutput = true).
+	s.Config.General.EnableEvalOutput = true
+	detail2 := buildAdvanceLogDetail(s, "EVALUATE", state.PhaseSpecifying, prevSnap, in)
+	if detail2["eval_report"] != "report.md" {
+		t.Errorf("detail[eval_report] = %v, want report.md", detail2["eval_report"])
+	}
+}
