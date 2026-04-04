@@ -48,9 +48,9 @@ For each domain, fill in the 6 required fields:
 |---|---|
 | `name` | `<Domain> <Initiative Name>` (e.g., "API Centralized Logging") |
 | `domain` | The domain directory name (e.g., `api`) |
-| `topic` | One sentence summarizing the implementation scope, derived from the spec research |
-| `file` | `<domain>/.workspace/implementation_plan/plan.json` |
+| `file` | `<domain>/.forge_workspace/implementation_plan/plan.json` |
 | `specs` | All staged spec paths for this domain |
+| `spec_commits` | Git commit hashes associated with the specs (for viewing diffs); may be empty |
 | `code_search_roots` | The domain's source directory (e.g., `["api/"]`); add cross-domain roots if specs reference shared code |
 
 ---
@@ -70,21 +70,15 @@ Forgectl also validates strictly on `init` — if any field is missing or extra 
 ## Step 6 — Initialize Forgectl
 
 ```bash
-forgectl init --phase planning \
-  --from .workspace/plan-queue.json \
-  --batch-size 1 \
-  --max-rounds 3 \
-  --min-rounds 1 \
-  --guided
+forgectl init --phase planning --from .workspace/plan-queue.json
 ```
 
 | Flag | Purpose |
 |---|---|
 | `--from` | Path to the plan queue file |
-| `--batch-size` | How many plans to process concurrently (1 = sequential) |
-| `--max-rounds` | Maximum evaluate/refine cycles per plan |
-| `--min-rounds` | Minimum evaluate/refine cycles before a plan can be accepted |
-| `--guided` | Pause at REVIEW for user discussion before drafting |
+| `--phase` | Starting phase (use `planning`) |
+
+All other settings (batch size, round limits, guided mode) are configured in `.forgectl/config` (TOML). See `docs/configurations.md` for the full reference.
 
 After init, use `forgectl status` to see the session overview and `forgectl advance` to begin processing.
 
@@ -92,7 +86,6 @@ After init, use `forgectl status` to see the session overview and `forgectl adva
 
 ## Tips
 
-- **New vs modified specs**: Identify which specs are new (core initiative work) vs modified (integration changes). This helps write a better `topic`.
-- **Topic quality matters**: The topic orients the entire planning phase. It should capture the "what and why" in one sentence.
+- **New vs modified specs**: Identify which specs are new (core initiative work) vs modified (integration changes). This helps write a better `name`.
 - **Code search roots**: Typically just the domain directory. Add additional roots only if specs explicitly reference cross-domain code (e.g., a shared `lib/` directory).
 - **Review before init**: Present each plan entry to the user for approval before writing. The plan queue is hard to change after `forgectl init`.

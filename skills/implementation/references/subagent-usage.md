@@ -5,7 +5,7 @@ Guidelines for using subagents effectively during implementation work.
 ## When to Use Subagents
 
 - **Codebase search:** Before implementing anything, use a subagent to search the codebase and confirm the feature doesn't already exist.
-- **Updating documents:** Use a subagent to update `{domain}/.workspace/implementation/references/IMPLEMENTATION_LOG.md` or `{domain}/CLAUDE.md` so the main agent stays focused on implementation.
+- **Updating documents:** Use a subagent to update `{domain}/.forge_workspace/implementation/references/IMPLEMENTATION_LOG.md` or `{domain}/CLAUDE.md` so the main agent stays focused on implementation.
 - **Build and test:** Use only one subagent for build/test operations to avoid conflicts.
 - **Evaluation:** Spawn a subagent for `forgectl eval` during EVALUATE state. The subagent reads the eval context, reviews implementation files, and writes the eval report.
 
