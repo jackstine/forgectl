@@ -89,6 +89,57 @@ type tomlImplementingConfig struct {
 	Eval           tomlEvalConfig `toml:"eval"`
 }
 
+// tomlSubAgentConfig mirrors SubAgentConfig for TOML decoding.
+type tomlSubAgentConfig struct {
+	Model string `toml:"model"`
+	Type  string `toml:"type"`
+	Count int    `toml:"count"`
+}
+
+// tomlDrafterConfig mirrors DrafterConfig for TOML decoding.
+type tomlDrafterConfig struct {
+	Model     string             `toml:"model"`
+	Subagents tomlSubAgentConfig `toml:"subagents"`
+}
+
+// tomlSelfRefineConfig mirrors SelfRefineConfig for TOML decoding.
+type tomlSelfRefineConfig struct {
+	Rounds int `toml:"rounds"`
+}
+
+// tomlMultiPassConfig mirrors MultiPassConfig for TOML decoding.
+type tomlMultiPassConfig struct {
+	Passes int `toml:"passes"`
+}
+
+// tomlPeerReviewConfig mirrors PeerReviewConfig for TOML decoding.
+type tomlPeerReviewConfig struct {
+	Reviewers int                `toml:"reviewers"`
+	Rounds    int                `toml:"rounds"`
+	Subagents tomlSubAgentConfig `toml:"subagents"`
+}
+
+// tomlReconcileConfig mirrors ReconcileConfig for TOML decoding.
+type tomlReconcileConfig struct {
+	MinRounds       int             `toml:"min_rounds"`
+	MaxRounds       int             `toml:"max_rounds"`
+	ColleagueReview *bool           `toml:"colleague_review"`
+	Eval            tomlAgentConfig `toml:"eval"`
+}
+
+// tomlReverseEngineeringConfig mirrors ReverseEngineeringConfig for TOML decoding.
+// Mode-specific configs use pointers so absent blocks can be distinguished from zero values.
+type tomlReverseEngineeringConfig struct {
+	Mode        string                `toml:"mode"`
+	Drafter     tomlDrafterConfig     `toml:"drafter"`
+	SelfRefine  *tomlSelfRefineConfig `toml:"self_refine"`
+	MultiPass   *tomlMultiPassConfig  `toml:"multi_pass"`
+	PeerReview  *tomlPeerReviewConfig `toml:"peer_review"`
+	Reconcile   tomlReconcileConfig   `toml:"reconcile"`
+	Survey      tomlSubAgentConfig    `toml:"survey"`
+	GapAnalysis tomlSubAgentConfig    `toml:"gap_analysis"`
+}
+
 // tomlDomainConfig mirrors DomainConfig for TOML decoding.
 type tomlDomainConfig struct {
 	Name string `toml:"name"`
@@ -116,13 +167,14 @@ type tomlGeneralConfig struct {
 
 // tomlForgeConfig is the intermediate struct for TOML decoding of .forgectl/config.
 type tomlForgeConfig struct {
-	General      tomlGeneralConfig      `toml:"general"`
-	Domains      []tomlDomainConfig     `toml:"domains"`
-	Specifying   tomlSpecifyingConfig   `toml:"specifying"`
-	Planning     tomlPlanningConfig     `toml:"planning"`
-	Implementing tomlImplementingConfig `toml:"implementing"`
-	Paths        tomlPathsConfig        `toml:"paths"`
-	Logs         tomlLogsConfig         `toml:"logs"`
+	General            tomlGeneralConfig            `toml:"general"`
+	Domains            []tomlDomainConfig           `toml:"domains"`
+	Specifying         tomlSpecifyingConfig         `toml:"specifying"`
+	Planning           tomlPlanningConfig           `toml:"planning"`
+	Implementing       tomlImplementingConfig       `toml:"implementing"`
+	ReverseEngineering tomlReverseEngineeringConfig `toml:"reverse_engineering"`
+	Paths              tomlPathsConfig              `toml:"paths"`
+	Logs               tomlLogsConfig               `toml:"logs"`
 }
 
 // FindProjectRoot walks up from startDir until it finds a directory containing .forgectl/.
@@ -239,6 +291,9 @@ func mergeTomlConfig(cfg *ForgeConfig, raw *tomlForgeConfig) {
 	}
 	mergeEvalConfig(&cfg.Implementing.Eval, &raw.Implementing.Eval)
 
+	// ReverseEngineering
+	mergeReverseEngineeringConfig(&cfg.ReverseEngineering, &raw.ReverseEngineering)
+
 	// Paths
 	if raw.Paths.StateDir != "" {
 		cfg.Paths.StateDir = raw.Paths.StateDir
@@ -331,6 +386,105 @@ func mergeReconciliationConfig(dst *ReconciliationConfig, src *tomlReconciliatio
 	}
 }
 
+func mergeSubAgentConfig(dst *SubAgentConfig, src *tomlSubAgentConfig) {
+	if src.Model != "" {
+		dst.Model = src.Model
+	}
+	if src.Type != "" {
+		dst.Type = src.Type
+	}
+	if src.Count > 0 {
+		dst.Count = src.Count
+	}
+}
+
+// mergeReverseEngineeringConfig applies non-zero TOML values onto the default
+// ReverseEngineeringConfig. Only the active mode's config block is populated;
+// inactive mode blocks are not stored.
+func mergeReverseEngineeringConfig(dst *ReverseEngineeringConfig, src *tomlReverseEngineeringConfig) {
+	if src.Mode != "" {
+		dst.Mode = src.Mode
+	}
+
+	// Drafter
+	if src.Drafter.Model != "" {
+		dst.Drafter.Model = src.Drafter.Model
+	}
+	mergeSubAgentConfig(&dst.Drafter.Subagents, &src.Drafter.Subagents)
+
+	// Only populate the active mode's config block.
+	activeMode := dst.Mode
+	if src.SelfRefine != nil && activeMode == "self_refine" {
+		if dst.SelfRefine == nil {
+			dst.SelfRefine = &SelfRefineConfig{}
+		}
+		if src.SelfRefine.Rounds > 0 {
+			dst.SelfRefine.Rounds = src.SelfRefine.Rounds
+		}
+	}
+	if src.MultiPass != nil && activeMode == "multi_pass" {
+		if dst.MultiPass == nil {
+			dst.MultiPass = &MultiPassConfig{}
+		}
+		if src.MultiPass.Passes > 0 {
+			dst.MultiPass.Passes = src.MultiPass.Passes
+		}
+	}
+	if src.PeerReview != nil && activeMode == "peer_review" {
+		if dst.PeerReview == nil {
+			dst.PeerReview = &PeerReviewConfig{}
+		}
+		if src.PeerReview.Reviewers > 0 {
+			dst.PeerReview.Reviewers = src.PeerReview.Reviewers
+		}
+		if src.PeerReview.Rounds > 0 {
+			dst.PeerReview.Rounds = src.PeerReview.Rounds
+		}
+		mergeSubAgentConfig(&dst.PeerReview.Subagents, &src.PeerReview.Subagents)
+	}
+
+	// Reconcile
+	if src.Reconcile.MinRounds > 0 {
+		dst.Reconcile.MinRounds = src.Reconcile.MinRounds
+	}
+	if src.Reconcile.MaxRounds > 0 {
+		dst.Reconcile.MaxRounds = src.Reconcile.MaxRounds
+	}
+	if src.Reconcile.ColleagueReview != nil {
+		dst.Reconcile.ColleagueReview = *src.Reconcile.ColleagueReview
+	}
+	if src.Reconcile.Eval.Model != "" {
+		dst.Reconcile.Eval.Model = src.Reconcile.Eval.Model
+	}
+	if src.Reconcile.Eval.Type != "" {
+		dst.Reconcile.Eval.Type = src.Reconcile.Eval.Type
+	}
+	if src.Reconcile.Eval.Count > 0 {
+		dst.Reconcile.Eval.Count = src.Reconcile.Eval.Count
+	}
+
+	// Survey and GapAnalysis sub-agent configs
+	mergeSubAgentConfig(&dst.Survey, &src.Survey)
+	mergeSubAgentConfig(&dst.GapAnalysis, &src.GapAnalysis)
+
+	// Clear inactive mode configs — only the active mode's block is stored.
+	switch activeMode {
+	case "single_shot":
+		dst.SelfRefine = nil
+		dst.MultiPass = nil
+		dst.PeerReview = nil
+	case "self_refine":
+		dst.MultiPass = nil
+		dst.PeerReview = nil
+	case "multi_pass":
+		dst.SelfRefine = nil
+		dst.PeerReview = nil
+	case "peer_review":
+		dst.SelfRefine = nil
+		dst.MultiPass = nil
+	}
+}
+
 // GenerateSessionID returns a new UUID v4 string using crypto/rand.
 func GenerateSessionID() string {
 	var b [16]byte
@@ -392,6 +546,30 @@ func ValidateConfig(cfg ForgeConfig) []string {
 	}
 	if cfg.Implementing.Eval.MinRounds > cfg.Implementing.Eval.MaxRounds {
 		errs = append(errs, "implementing.eval.min_rounds cannot exceed max_rounds")
+	}
+
+	// ReverseEngineering validation.
+	validModes := map[string]bool{
+		"single_shot": true, "self_refine": true,
+		"multi_pass": true, "peer_review": true,
+	}
+	if cfg.ReverseEngineering.Mode != "" && !validModes[cfg.ReverseEngineering.Mode] {
+		errs = append(errs, fmt.Sprintf("reverse_engineering.mode: invalid value %q (must be single_shot, self_refine, multi_pass, or peer_review)", cfg.ReverseEngineering.Mode))
+	}
+	if cfg.ReverseEngineering.Reconcile.MinRounds > cfg.ReverseEngineering.Reconcile.MaxRounds {
+		errs = append(errs, "reverse_engineering.reconcile.min_rounds cannot exceed max_rounds")
+	}
+	if cfg.ReverseEngineering.Drafter.Subagents.Count < 1 {
+		errs = append(errs, "reverse_engineering.drafter.subagents.count must be >= 1")
+	}
+	if cfg.ReverseEngineering.Survey.Count < 1 {
+		errs = append(errs, "reverse_engineering.survey.count must be >= 1")
+	}
+	if cfg.ReverseEngineering.GapAnalysis.Count < 1 {
+		errs = append(errs, "reverse_engineering.gap_analysis.count must be >= 1")
+	}
+	if cfg.ReverseEngineering.PeerReview != nil && cfg.ReverseEngineering.PeerReview.Reviewers < 1 {
+		errs = append(errs, "reverse_engineering.peer_review.reviewers must be >= 1")
 	}
 
 	// No domain path is a prefix of another domain path.

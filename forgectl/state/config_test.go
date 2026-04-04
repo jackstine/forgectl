@@ -289,3 +289,147 @@ func TestValidateConfigLogsRetentionDaysNegative(t *testing.T) {
 		t.Error("expected violation for logs.retention_days=-1")
 	}
 }
+
+// TestDefaultForgeConfigReverseEngineeringDefaults verifies reverse_engineering defaults are valid.
+func TestDefaultForgeConfigReverseEngineeringDefaults(t *testing.T) {
+	cfg := DefaultForgeConfig()
+	re := cfg.ReverseEngineering
+
+	if re.Mode != "self_refine" {
+		t.Errorf("reverse_engineering.mode: got %q, want %q", re.Mode, "self_refine")
+	}
+	if re.Drafter.Model == "" {
+		t.Error("reverse_engineering.drafter.model must not be empty")
+	}
+	if re.Drafter.Subagents.Count < 1 {
+		t.Errorf("reverse_engineering.drafter.subagents.count: got %d, must be >= 1", re.Drafter.Subagents.Count)
+	}
+	if re.Survey.Count < 1 {
+		t.Errorf("reverse_engineering.survey.count: got %d, must be >= 1", re.Survey.Count)
+	}
+	if re.GapAnalysis.Count < 1 {
+		t.Errorf("reverse_engineering.gap_analysis.count: got %d, must be >= 1", re.GapAnalysis.Count)
+	}
+	if re.Reconcile.MinRounds > re.Reconcile.MaxRounds {
+		t.Errorf("reverse_engineering.reconcile: min_rounds (%d) > max_rounds (%d)", re.Reconcile.MinRounds, re.Reconcile.MaxRounds)
+	}
+	if re.SelfRefine == nil {
+		t.Error("default mode is self_refine, SelfRefine config must be non-nil")
+	}
+
+	// No errors from ValidateConfig.
+	errs := ValidateConfig(cfg)
+	if len(errs) > 0 {
+		t.Errorf("ValidateConfig on defaults: unexpected errors: %v", errs)
+	}
+}
+
+// TestLoadConfigReverseEngineeringToml verifies TOML parsing for reverse_engineering section.
+func TestLoadConfigReverseEngineeringToml(t *testing.T) {
+	dir := t.TempDir()
+	forgectlDir := filepath.Join(dir, ".forgectl")
+	if err := os.MkdirAll(forgectlDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	tomlContent := `
+[reverse_engineering]
+mode = "multi_pass"
+
+[reverse_engineering.drafter]
+model = "haiku"
+
+[reverse_engineering.drafter.subagents]
+model = "sonnet"
+type  = "explorer"
+count = 5
+
+[reverse_engineering.multi_pass]
+passes = 3
+
+[reverse_engineering.reconcile]
+min_rounds = 1
+max_rounds = 2
+colleague_review = true
+
+[reverse_engineering.survey]
+model = "haiku"
+type  = "explorer"
+count = 3
+`
+	if err := os.WriteFile(filepath.Join(forgectlDir, "config"), []byte(tomlContent), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := LoadConfig(dir)
+	if err != nil {
+		t.Fatalf("LoadConfig: %v", err)
+	}
+
+	re := cfg.ReverseEngineering
+	if re.Mode != "multi_pass" {
+		t.Errorf("mode: got %q, want multi_pass", re.Mode)
+	}
+	if re.Drafter.Model != "haiku" {
+		t.Errorf("drafter.model: got %q, want haiku", re.Drafter.Model)
+	}
+	if re.Drafter.Subagents.Count != 5 {
+		t.Errorf("drafter.subagents.count: got %d, want 5", re.Drafter.Subagents.Count)
+	}
+	if re.MultiPass == nil || re.MultiPass.Passes != 3 {
+		t.Error("multi_pass.passes: expected 3")
+	}
+	// Inactive mode config must not be populated.
+	if re.SelfRefine != nil {
+		t.Error("self_refine must be nil when mode=multi_pass")
+	}
+	if re.PeerReview != nil {
+		t.Error("peer_review must be nil when mode=multi_pass")
+	}
+	if !re.Reconcile.ColleagueReview {
+		t.Error("reconcile.colleague_review: want true")
+	}
+	if re.Survey.Count != 3 {
+		t.Errorf("survey.count: got %d, want 3", re.Survey.Count)
+	}
+}
+
+// TestValidateConfigReverseEngineeringInvalidMode verifies invalid mode is rejected.
+func TestValidateConfigReverseEngineeringInvalidMode(t *testing.T) {
+	cfg := DefaultForgeConfig()
+	cfg.ReverseEngineering.Mode = "turbo"
+	errs := ValidateConfig(cfg)
+	if len(errs) == 0 {
+		t.Error("expected error for invalid reverse_engineering.mode")
+	}
+	found := false
+	for _, e := range errs {
+		if strings.Contains(e, "reverse_engineering.mode") {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("expected reverse_engineering.mode error, got: %v", errs)
+	}
+}
+
+// TestValidateConfigReverseEngineeringReconcileMinExceedsMax verifies min > max is rejected.
+func TestValidateConfigReverseEngineeringReconcileMinExceedsMax(t *testing.T) {
+	cfg := DefaultForgeConfig()
+	cfg.ReverseEngineering.Reconcile.MinRounds = 5
+	cfg.ReverseEngineering.Reconcile.MaxRounds = 2
+	errs := ValidateConfig(cfg)
+	if len(errs) == 0 {
+		t.Error("expected error when reconcile.min_rounds > max_rounds")
+	}
+}
+
+// TestValidateConfigReverseEngineeringSubAgentCountBelowOne verifies count < 1 is rejected.
+func TestValidateConfigReverseEngineeringSubAgentCountBelowOne(t *testing.T) {
+	cfg := DefaultForgeConfig()
+	cfg.ReverseEngineering.Drafter.Subagents.Count = 0
+	errs := ValidateConfig(cfg)
+	if len(errs) == 0 {
+		t.Error("expected error for drafter.subagents.count < 1")
+	}
+}
