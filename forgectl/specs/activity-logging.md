@@ -25,6 +25,7 @@ Log files accumulate over time. Pruning runs at `init` to clean up old files bas
 | phase-transitions | `advance` in generate_planning_queue phase produces log entries with state context |
 | plan-production | `advance` in planning phase produces log entries with plan/round context |
 | batch-implementation | `advance` in implementing phase produces log entries with item/layer context |
+| reverse-engineering | `advance` in reverse_engineering phase produces log entries with domain/state context |
 
 ---
 
