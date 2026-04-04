@@ -11,6 +11,10 @@ Spec-driven development harness. Compiles planning documents into production cod
 
 
 
+## Skills
+
+Do not update skill files (`skills/`) until the forgectl binary has been built and the specs are implemented. Skills consume forgectl — updating them before the tool exists creates a chicken-and-egg problem. Build forgectl first, then update skills to match.
+
 ## Build
 
 ```bash
