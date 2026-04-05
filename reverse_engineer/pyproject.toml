@@ -1,0 +1,25 @@
+[project]
+name = "reverse-engineer"
+version = "0.1.0"
+description = "Constructs and runs Claude Agent SDK sessions for reverse-engineering specs from code"
+readme = "README.md"
+authors = [
+    { name = "Jake Cukjati", email = "jakecukjati@gmail.com" }
+]
+requires-python = ">=3.13"
+dependencies = [
+    "claude-agent-sdk>=0.1.56",
+    "pydantic>=2.12.5",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=8.3",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[build-system]
+requires = ["uv_build>=0.8.13,<0.9.0"]
+build-backend = "uv_build"

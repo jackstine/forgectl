@@ -4,13 +4,14 @@
     "Derived from forgectl/state/types.go and forgectl/state/validate.go.",
     "",
     "PATH RESOLUTION:",
-    "  All paths in 'refs[].path' and 'items[].ref' are resolved relative to",
+    "  All paths in 'refs[].path' and 'items[].refs' are resolved relative to",
     "  the directory containing plan.json (filepath.Dir(plan.json)).",
-    "  Example: if plan.json is at api/.workspace/implementation_plan/plan.json,",
+    "  Example: if plan.json is at api/.forge_workspace/implementation_plan/plan.json,",
     "  then ref path '../../specs/foo.md' resolves to api/specs/foo.md.",
     "",
-    "  Paths MUST NOT contain '#anchor' fragments — forgectl runs os.Stat()",
+    "  Paths in refs (top-level and items) MUST NOT contain '#anchor' fragments — forgectl runs os.Stat()",
     "  on the raw path string. 'notes/foo.md#section' will fail validation.",
+    "  Paths in items[].specs are display-only and DO allow '#anchor' fragments.",
     "",
     "VALIDATION RULES:",
     "  - Top-level: only 'context', 'refs', 'layers', 'items' are allowed.",
@@ -19,7 +20,7 @@
     "  - No dependency cycles.",
     "  - All depends_on IDs must exist in the items array.",
     "  - All refs paths must exist on disk.",
-    "  - All item ref paths must exist on disk.",
+    "  - All item refs paths must exist on disk.",
     "  - Test categories must be: 'functional', 'rejection', or 'edge_case'.",
     "",
     "IMPLEMENTING PHASE:",
@@ -58,8 +59,8 @@
       "depends_on": ["<string[], required> Item IDs that must complete first. Use empty array [] for no deps."],
       "steps": ["<string[], optional (omitempty)> Ordered implementation instructions"],
       "files": ["<string[], optional (omitempty)> File paths to create or modify, relative to domain root"],
-      "spec": "<string, optional (omitempty)> Spec filename reference. Single string only, not array. No #anchors.",
-      "ref": "<string, optional (omitempty)> Notes file path relative to plan.json directory. Must exist on disk. No #anchors.",
+      "specs": ["<string[], optional (omitempty)> Spec filename references. Display-only, #anchors OK, not validated on disk."],
+      "refs": ["<string[], optional (omitempty)> Notes file paths relative to plan.json directory. Validated on disk. No #anchors."],
       "tests": [
         {
           "$required": true,
@@ -79,8 +80,8 @@
       "depends_on": [],
       "files": ["internal/config/types.go"],
       "steps": ["Define ServiceEndpoint struct", "Define ServicesConfig struct"],
-      "spec": "service-configuration.md",
-      "ref": "notes/config.md",
+      "specs": ["service-configuration.md"],
+      "refs": ["notes/config.md"],
       "tests": [
         { "category": "functional", "description": "Three named fields, not a map" }
       ]

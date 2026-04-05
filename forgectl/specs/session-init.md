@@ -23,6 +23,7 @@ Sessions can begin at any of three phases — specifying, planning, or implement
 | batch-implementation | Consumes the plan.json validated during implementing init |
 | state-persistence | State file schema defines the structure created here; `session_id` stored at root |
 | activity-logging | `session_id` generated here; `[logs]` config validated here; pruning triggered here |
+| reverse-engineering | Consumes the init input (concept + domains) populated during reverse_engineering init |
 
 ---
 

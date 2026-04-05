@@ -27,6 +27,7 @@ All scaffold output is to stdout. The scaffold writes state changes to `forgectl
 | batch-implementation | Reads and mutates implementing phase state and plan.json through the persistence layer |
 | activity-logging | `session_id` in state file root is used to name the session log file |
 | validate-command | Standalone validation command; does not use the persistence layer (no session required) |
+| reverse-engineering | Reads and mutates reverse_engineering phase state through the persistence layer |
 
 ---
 

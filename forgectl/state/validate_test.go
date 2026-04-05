@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -216,5 +217,121 @@ func TestValidatePlanJSON_LayerOrderViolation(t *testing.T) {
 	errs := ValidatePlanJSON(data, t.TempDir())
 	if len(errs) == 0 {
 		t.Error("expected error for layer order violation")
+	}
+}
+
+func TestValidateReverseEngineeringInit_Valid(t *testing.T) {
+	data := []byte(`{"concept": "auth middleware refactor", "domains": ["optimizer", "api", "portal"]}`)
+	errs := ValidateReverseEngineeringInit(data)
+	if len(errs) > 0 {
+		t.Errorf("expected no errors, got %v", errs)
+	}
+}
+
+func TestValidateReverseEngineeringInit_MissingConcept(t *testing.T) {
+	data := []byte(`{"domains": ["optimizer"]}`)
+	errs := ValidateReverseEngineeringInit(data)
+	if len(errs) == 0 {
+		t.Error("expected error for missing concept")
+	}
+}
+
+func TestValidateReverseEngineeringInit_EmptyDomains(t *testing.T) {
+	data := []byte(`{"concept": "auth refactor", "domains": []}`)
+	errs := ValidateReverseEngineeringInit(data)
+	if len(errs) == 0 {
+		t.Error("expected error for empty domains")
+	}
+}
+
+func TestValidateReverseEngineeringInit_DuplicateDomain(t *testing.T) {
+	data := []byte(`{"concept": "auth refactor", "domains": ["optimizer", "optimizer"]}`)
+	errs := ValidateReverseEngineeringInit(data)
+	if len(errs) == 0 {
+		t.Error("expected error for duplicate domain")
+	}
+}
+
+func TestValidateReverseEngineeringInit_ExtraField(t *testing.T) {
+	data := []byte(`{"concept": "auth refactor", "domains": ["optimizer"], "extra": true}`)
+	errs := ValidateReverseEngineeringInit(data)
+	if len(errs) == 0 {
+		t.Error("expected error for extra field")
+	}
+}
+
+func validQueueEntry() string {
+	return `{"name":"Auth Spec","domain":"optimizer","topic":"auth","file":"specs/auth.md","action":"create","code_search_roots":["src/"],"depends_on":[]}`
+}
+
+func TestValidateReverseEngineeringQueue_Valid(t *testing.T) {
+	data := []byte(`{"specs": [` + validQueueEntry() + `]}`)
+	errs := ValidateReverseEngineeringQueue(data, "", nil)
+	if len(errs) > 0 {
+		t.Errorf("expected no errors, got %v", errs)
+	}
+}
+
+func TestValidateReverseEngineeringQueue_MissingField(t *testing.T) {
+	data := []byte(`{"specs": [{"name":"A","domain":"optimizer","topic":"t","file":"f","action":"create","code_search_roots":["src/"]}]}`)
+	errs := ValidateReverseEngineeringQueue(data, "", nil)
+	if len(errs) == 0 {
+		t.Error("expected error for missing depends_on")
+	}
+}
+
+func TestValidateReverseEngineeringQueue_InvalidAction(t *testing.T) {
+	data := []byte(`{"specs": [{"name":"A","domain":"optimizer","topic":"t","file":"f","action":"delete","code_search_roots":["src/"],"depends_on":[]}]}`)
+	errs := ValidateReverseEngineeringQueue(data, "", nil)
+	if len(errs) == 0 {
+		t.Error("expected error for invalid action")
+	}
+}
+
+func TestValidateReverseEngineeringQueue_EmptyCodeSearchRoots(t *testing.T) {
+	data := []byte(`{"specs": [{"name":"A","domain":"optimizer","topic":"t","file":"f","action":"create","code_search_roots":[],"depends_on":[]}]}`)
+	errs := ValidateReverseEngineeringQueue(data, "", nil)
+	if len(errs) == 0 {
+		t.Error("expected error for empty code_search_roots")
+	}
+}
+
+func TestValidateReverseEngineeringQueue_DomainMembership(t *testing.T) {
+	data := []byte(`{"specs": [{"name":"A","domain":"unknown","topic":"t","file":"f","action":"create","code_search_roots":["src/"],"depends_on":[]}]}`)
+	errs := ValidateReverseEngineeringQueue(data, "", []string{"optimizer"})
+	if len(errs) == 0 {
+		t.Error("expected error for domain not in initialized list")
+	}
+}
+
+func TestValidateReverseEngineeringQueue_ForwardDependency(t *testing.T) {
+	// B depends on A but A appears after B — forward dependency violation.
+	data := []byte(`{"specs": [
+		{"name":"B","domain":"optimizer","topic":"t","file":"specs/b.md","action":"create","code_search_roots":["src/"],"depends_on":["A"]},
+		{"name":"A","domain":"optimizer","topic":"t","file":"specs/a.md","action":"create","code_search_roots":["src/"],"depends_on":[]}
+	]}`)
+	errs := ValidateReverseEngineeringQueue(data, "", nil)
+	if len(errs) == 0 {
+		t.Error("expected error for dependency on entry that appears later")
+	}
+}
+
+func TestValidateReverseEngineeringQueue_CodeSearchRootsDirExists(t *testing.T) {
+	// Create a temp dir structure to simulate project root.
+	dir := t.TempDir()
+	domainDir := filepath.Join(dir, "optimizer")
+	os.MkdirAll(filepath.Join(domainDir, "src"), 0o755)
+
+	data := []byte(`{"specs": [{"name":"A","domain":"optimizer","topic":"t","file":"f","action":"create","code_search_roots":["src/","nonexistent/"],"depends_on":[]}]}`)
+	errs := ValidateReverseEngineeringQueue(data, dir, []string{"optimizer"})
+	// Should have an error for nonexistent/ but not for src/
+	found := false
+	for _, e := range errs {
+		if strings.Contains(e, "nonexistent") {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("expected error for nonexistent directory, got %v", errs)
 	}
 }

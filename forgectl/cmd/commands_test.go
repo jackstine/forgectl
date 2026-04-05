@@ -195,6 +195,155 @@ max_rounds = 2
 	}
 }
 
+// --- reverse engineering init tests ---
+
+func TestInitReverseEngineering(t *testing.T) {
+	dir := setupProjectDir(t)
+
+	input := state.ReverseEngineeringInitInput{
+		Concept: "auth middleware refactor",
+		Domains: []string{"optimizer", "api"},
+	}
+	data, _ := json.Marshal(input)
+	inputFile := filepath.Join(dir, "re-init.json")
+	os.WriteFile(inputFile, data, 0644)
+
+	initFrom = inputFile
+	initPhase = "reverse_engineering"
+
+	var buf bytes.Buffer
+	rootCmd.SetOut(&buf)
+
+	err := runInit(initCmd, nil)
+	if err != nil {
+		t.Fatalf("init: %v", err)
+	}
+
+	sd := resolvedStateDir(dir)
+	s, err := state.Load(sd)
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+
+	if s.Phase != state.PhaseReverseEngineering {
+		t.Errorf("phase = %s, want reverse_engineering", s.Phase)
+	}
+	if s.State != state.StateOrient {
+		t.Errorf("state = %s, want ORIENT", s.State)
+	}
+	if s.ReverseEngineering == nil {
+		t.Fatal("reverse_engineering state must not be nil")
+	}
+	if s.ReverseEngineering.Concept != "auth middleware refactor" {
+		t.Errorf("concept = %q, want %q", s.ReverseEngineering.Concept, "auth middleware refactor")
+	}
+	if len(s.ReverseEngineering.Domains) != 2 {
+		t.Errorf("domains len = %d, want 2", len(s.ReverseEngineering.Domains))
+	}
+	if s.ReverseEngineering.TotalDomains != 2 {
+		t.Errorf("total_domains = %d, want 2", s.ReverseEngineering.TotalDomains)
+	}
+	if s.ReverseEngineering.CurrentDomain != 0 {
+		t.Errorf("current_domain = %d, want 0", s.ReverseEngineering.CurrentDomain)
+	}
+	if s.SessionID == "" {
+		t.Error("session_id must be set")
+	}
+}
+
+func TestInitReverseEngineeringLocksConfig(t *testing.T) {
+	dir := setupProjectDir(t)
+
+	// Write config with peer_review mode.
+	tomlContent := `
+[reverse_engineering]
+mode = "peer_review"
+
+[reverse_engineering.peer_review]
+reviewers = 3
+rounds = 1
+
+[reverse_engineering.peer_review.subagents]
+model = "opus"
+type = "explorer"
+`
+	os.WriteFile(filepath.Join(dir, ".forgectl", "config"), []byte(tomlContent), 0644)
+
+	input := state.ReverseEngineeringInitInput{
+		Concept: "test",
+		Domains: []string{"api"},
+	}
+	data, _ := json.Marshal(input)
+	inputFile := filepath.Join(dir, "re-init.json")
+	os.WriteFile(inputFile, data, 0644)
+
+	initFrom = inputFile
+	initPhase = "reverse_engineering"
+
+	var buf bytes.Buffer
+	rootCmd.SetOut(&buf)
+	err := runInit(initCmd, nil)
+	if err != nil {
+		t.Fatalf("init: %v", err)
+	}
+
+	sd := resolvedStateDir(dir)
+	s, err := state.Load(sd)
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+
+	if s.Config.ReverseEngineering.Mode != "peer_review" {
+		t.Errorf("config.reverse_engineering.mode = %q, want peer_review", s.Config.ReverseEngineering.Mode)
+	}
+	// Inactive mode configs must not be present.
+	if s.Config.ReverseEngineering.SelfRefine != nil {
+		t.Error("self_refine must be nil when mode=peer_review")
+	}
+	if s.Config.ReverseEngineering.MultiPass != nil {
+		t.Error("multi_pass must be nil when mode=peer_review")
+	}
+}
+
+func TestInitReverseEngineeringRejectsInvalidInput(t *testing.T) {
+	dir := setupProjectDir(t)
+
+	// Missing concept.
+	bad := []byte(`{"domains": ["optimizer"]}`)
+	inputFile := filepath.Join(dir, "bad.json")
+	os.WriteFile(inputFile, bad, 0644)
+
+	initFrom = inputFile
+	initPhase = "reverse_engineering"
+
+	err := runInit(initCmd, nil)
+	if err == nil {
+		t.Error("expected error for missing concept")
+	}
+	if !strings.Contains(err.Error(), "input validation failed") {
+		t.Errorf("expected 'input validation failed', got: %v", err)
+	}
+}
+
+func TestInitReverseEngineeringRejectsDuplicateDomains(t *testing.T) {
+	dir := setupProjectDir(t)
+
+	bad, _ := json.Marshal(state.ReverseEngineeringInitInput{
+		Concept: "test",
+		Domains: []string{"optimizer", "optimizer"},
+	})
+	inputFile := filepath.Join(dir, "bad.json")
+	os.WriteFile(inputFile, bad, 0644)
+
+	initFrom = inputFile
+	initPhase = "reverse_engineering"
+
+	err := runInit(initCmd, nil)
+	if err == nil {
+		t.Error("expected error for duplicate domains")
+	}
+}
+
 // --- add-queue-item tests ---
 
 // setupSpecifyingState saves a specifying state at the given state and returns the state dir.
@@ -1151,6 +1300,86 @@ func TestValidateTypePlanExplicit(t *testing.T) {
 	out := buf.String()
 	if !strings.Contains(out, "Validated:") || !strings.Contains(out, "no errors") {
 		t.Errorf("expected 'Validated:' with 'no errors' with explicit --type plan, got: %s", out)
+	}
+}
+
+// TestAddDomainAddsNewDomain verifies that add-domain appends the domain and increments TotalDomains.
+func TestAddDomainAddsNewDomain(t *testing.T) {
+	dir := setupProjectDir(t)
+	sd := resolvedStateDir(dir)
+	os.MkdirAll(sd, 0755)
+
+	s := &state.ForgeState{
+		Phase:  state.PhaseReverseEngineering,
+		State:  state.StateQueue,
+		Config: state.DefaultForgeConfig(),
+		ReverseEngineering: state.NewReverseEngineeringState("test concept", []string{"optimizer", "api"}, false),
+	}
+	state.Save(sd, s)
+
+	var buf bytes.Buffer
+	addDomainCmd.SetOut(&buf)
+
+	if err := runAddDomain(addDomainCmd, []string{"portal"}); err != nil {
+		t.Fatalf("add-domain: %v", err)
+	}
+
+	loaded, _ := state.Load(sd)
+	re := loaded.ReverseEngineering
+	if re.TotalDomains != 3 {
+		t.Fatalf("TotalDomains = %d, want 3", re.TotalDomains)
+	}
+	if re.Domains[2] != "portal" {
+		t.Fatalf("Domains[2] = %q, want %q", re.Domains[2], "portal")
+	}
+	if !strings.Contains(buf.String(), "portal") {
+		t.Errorf("expected confirmation output mentioning 'portal', got: %s", buf.String())
+	}
+}
+
+// TestAddDomainRejectsDuplicate verifies that add-domain rejects an already-existing domain.
+func TestAddDomainRejectsDuplicate(t *testing.T) {
+	dir := setupProjectDir(t)
+	sd := resolvedStateDir(dir)
+	os.MkdirAll(sd, 0755)
+
+	s := &state.ForgeState{
+		Phase:              state.PhaseReverseEngineering,
+		State:              state.StateQueue,
+		Config:             state.DefaultForgeConfig(),
+		ReverseEngineering: state.NewReverseEngineeringState("test concept", []string{"optimizer", "api"}, false),
+	}
+	state.Save(sd, s)
+
+	err := runAddDomain(addDomainCmd, []string{"api"})
+	if err == nil {
+		t.Fatal("expected error for duplicate domain")
+	}
+	if !strings.Contains(err.Error(), "already exists") {
+		t.Errorf("unexpected error: %v", err)
+	}
+}
+
+// TestAddDomainBlockedOutsideQueue verifies that add-domain is rejected outside QUEUE state.
+func TestAddDomainBlockedOutsideQueue(t *testing.T) {
+	dir := setupProjectDir(t)
+	sd := resolvedStateDir(dir)
+	os.MkdirAll(sd, 0755)
+
+	s := &state.ForgeState{
+		Phase:              state.PhaseReverseEngineering,
+		State:              state.StateSurvey,
+		Config:             state.DefaultForgeConfig(),
+		ReverseEngineering: state.NewReverseEngineeringState("test concept", []string{"optimizer"}, false),
+	}
+	state.Save(sd, s)
+
+	err := runAddDomain(addDomainCmd, []string{"portal"})
+	if err == nil {
+		t.Fatal("expected error outside QUEUE state")
+	}
+	if !strings.Contains(err.Error(), "only available during the QUEUE state") {
+		t.Errorf("unexpected error: %v", err)
 	}
 }
 

@@ -13,7 +13,7 @@ You are a **Systems Architect**. You write contracts that define what "correct" 
 
 ## Inputs
 
-- **Planning documents** — found in `.workspace/planning/`. These are read-only. You consume them but never modify or delete them.
+- **Planning documents** — found in `.forge_workspace/planning/`. These are read-only. You consume them but never modify or delete them.
 - **Architecture documents** — a standalone document describing a system's components, behaviors, and boundaries. When the input is an architecture document rather than a planning document, the architect decomposes it using the Topic of Concern test (Phase 2 of the standard workflow) before generating specs. The same rules apply: identify nouns (components), verbs (behaviors), and boundaries (where one responsibility ends and another begins), then extract one spec per topic.
 - **Existing specs** — found in `<project>/specs/` directories. These tell you what is already covered.
 - **Spec queue** — a JSON file listing the specs to generate with topics of concern, domains, file paths, planning source references, and dependency ordering. This is the input to `scaffold init`.
@@ -35,8 +35,8 @@ The spec generation process is managed by the `forgectl` CLI tool that tracks st
 ### Quick Reference
 
 ```bash
-# Initialize session — validate queue, set rounds
-forgectl init --min-rounds 1 --max-rounds 3 --batch-size 1 --from queue.json --guided
+# Initialize session — configuration is read from .forgectl/config (TOML)
+forgectl init --from queue.json
 
 # Full session overview
 forgectl status
@@ -47,6 +47,8 @@ forgectl advance --file <domain>/specs/<spec-name>.md            # DRAFT only (o
 forgectl advance --verdict PASS --eval-report <path>             # EVALUATE: accept
 forgectl advance --verdict FAIL --eval-report <path>             # EVALUATE: fail → REFINE
 forgectl advance --message "Complete specifying phase"           # COMPLETE: auto-commit (when enable_commits: true)
+forgectl advance --guided                                        # Toggle guided mode on
+forgectl advance --no-guided                                     # Toggle guided mode off
 
 # Add a spec to the queue during drafting or review
 forgectl add-queue-item --name <name> --topic <topic> --file <file> [--source <path>...]
@@ -59,7 +61,7 @@ forgectl set-roots <path> [<path>...]
 
 **Global:** `--dir <path>` — directory containing state file (default `.`)
 
-**`init`:** `--from` (required), `--phase` (default `specifying`)
+**`init`:** `--from` (required), `--phase` (default `specifying`). All other settings (batch, rounds, guided, etc.) come from `.forgectl/config` TOML.
 
 **`advance`:** `--verdict PASS|FAIL`, `--eval-report <path>`, `--file <path>`, `--message <string>` / `-m`, `--from <path>`, `--guided` / `--no-guided`
 
@@ -70,24 +72,27 @@ forgectl set-roots <path> [<path>...]
 ### State Flow
 
 ```
-INIT → ORIENT → SELECT → DRAFT → EVALUATE ⇄ REFINE → REVIEW → ACCEPT → (next spec or DONE)
-                                                         ↑         │
-                                                         └─────────┘ (grant extra round)
+INIT → ORIENT → SELECT → DRAFT → EVALUATE ⇄ REFINE → ACCEPT → (next batch or domain cross-reference)
+ACCEPT (domain complete) → CROSS_REFERENCE → CROSS_REFERENCE_EVAL ⇄ CROSS_REFERENCE → CROSS_REFERENCE_REVIEW → (next domain or DONE)
+DONE → RECONCILE → RECONCILE_EVAL ⇄ RECONCILE → RECONCILE_REVIEW → COMPLETE → PHASE_SHIFT
 ```
 
-- **INIT**: Create state file from validated queue. Set `--min-rounds`, `--max-rounds`, `--batch-size`, `--guided`.
+- **INIT**: Create state file from validated queue. Configuration is read from `.forgectl/config` TOML.
 - **ORIENT**: Architect reads plans and existing specs. Builds mental model.
-- **SELECT**: Pull next topic from queue. If `--guided`, discuss with user.
-- **DRAFT**: Write the spec file. Optionally override path with `--file`.
-- **EVALUATE**: Spawn Opus sub-agent evaluator. Record `--verdict` and `--eval-report`. PASS requires `--message`.
+- **SELECT**: Pull next batch from queue (domain-grouped). If guided, discuss with user.
+- **DRAFT**: Write the spec files for the batch. Optionally override path with `--file`.
+- **EVALUATE**: Spawn Opus sub-agent evaluator. Record `--verdict` and `--eval-report`.
 - **REFINE**: Fix deficiencies. Advance back to EVALUATE when done (no special flags needed).
-- **REVIEW**: Max rounds reached (or past min rounds). Human decides: accept or `--verdict FAIL` for extra round.
-- **ACCEPT**: Spec finalized. Next spec loops to ORIENT. Empty queue → DONE.
-- **DONE**: All individual specs complete. Advance to begin reconciliation.
-- **RECONCILE**: Fix cross-references across all specs. Stage files. Advance.
-- **RECONCILE_EVAL**: Sub-agent evaluates `git diff --staged` for cross-spec consistency.
+- **ACCEPT**: Batch finalized. Next batch -> ORIENT. Domain complete -> CROSS_REFERENCE. Queue empty -> DONE.
+- **CROSS_REFERENCE**: Cross-reference all specs within the completed domain. Spawn sub-agents to review.
+- **CROSS_REFERENCE_EVAL**: Sub-agent evaluates intra-domain cross-reference consistency.
+- **CROSS_REFERENCE_REVIEW**: Review cross-reference eval. Add specs or set code search roots for the domain.
+- **DONE**: All individual specs and domain cross-references complete. Advance to begin reconciliation.
+- **RECONCILE**: Fix cross-references across all specs and domains. Stage files. Advance.
+- **RECONCILE_EVAL**: Sub-agent evaluates `git diff --staged` for cross-domain consistency.
 - **RECONCILE_REVIEW**: Human reviews eval. Accept or grant another pass.
-- **COMPLETE**: Session fully done.
+- **COMPLETE**: Specifying phase fully done. Auto-commits when `enable_commits` is true.
+- **PHASE_SHIFT**: Transitioning to the next phase (specifying -> generate_planning_queue).
 
 ### Queue Input File
 
@@ -101,7 +106,7 @@ The architect generates this JSON before `init`. The scaffold validates it stric
       "domain": "accounting",
       "topic": "The accounting service processes reservation bookings and records settlement outcomes",
       "file": "accounting/specs/reservation-booking.md",
-      "planning_sources": [".workspace/planning/accounting/transaction-processing.md"],
+      "planning_sources": [".forge_workspace/planning/accounting/transaction-processing.md"],
       "depends_on": []
     }
   ]

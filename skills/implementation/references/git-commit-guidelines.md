@@ -22,7 +22,7 @@ There are two commit points in the forgectl workflow:
 ## At COMMIT State
 
 1. Ensure tests pass for all code in the batch.
-2. Add a log entry to `{domain}/.workspace/implementation/IMPLEMENTATION_LOG.md`.
+2. Add a log entry to `{domain}/.forge_workspace/implementation/IMPLEMENTATION_LOG.md`.
 3. Stage all relevant files: `git add -A`
 4. Commit with a descriptive message: `git commit -m "<message>"`
 5. Advance the scaffold: `forgectl advance --message "<message>"`

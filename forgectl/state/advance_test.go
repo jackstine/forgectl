@@ -2416,3 +2416,960 @@ func advanceImplToCommit(t *testing.T, s *ForgeState, dir string) {
 		t.Fatalf("expected COMMIT, got %s", s.State)
 	}
 }
+
+// --- Reverse Engineering Phase Tests ---
+
+func newReverseEngineeringState(domains []string) *ForgeState {
+	return &ForgeState{
+		Phase:              PhaseReverseEngineering,
+		State:              StateOrient,
+		Config:             DefaultForgeConfig(),
+		ReverseEngineering: NewReverseEngineeringState("understand the codebase", domains, false),
+	}
+}
+
+// validREQueueJSON returns a valid reverse engineering queue JSON for the given domain.
+func validREQueueJSON(domain string) string {
+	return `{"specs":[{"name":"spec1","domain":"` + domain + `","topic":"topic-1","file":"` + domain + `/specs/spec1.md","action":"create","code_search_roots":["src/"],"depends_on":[]}]}`
+}
+
+// TestReverseEngineeringOrientToSurvey verifies ORIENT sets domain index to 0 and advances to SURVEY.
+func TestReverseEngineeringOrientToSurvey(t *testing.T) {
+	s := newReverseEngineeringState([]string{"optimizer", "api"})
+
+	if err := Advance(s, AdvanceInput{}, ""); err != nil {
+		t.Fatal(err)
+	}
+
+	if s.State != StateSurvey {
+		t.Fatalf("expected SURVEY, got %s", s.State)
+	}
+	if s.ReverseEngineering.CurrentDomain != 0 {
+		t.Fatalf("expected domain index 0, got %d", s.ReverseEngineering.CurrentDomain)
+	}
+}
+
+// TestReverseEngineeringPreExecuteSequence verifies SURVEY → GAP_ANALYSIS → DECOMPOSE → QUEUE transitions.
+func TestReverseEngineeringPreExecuteSequence(t *testing.T) {
+	s := newReverseEngineeringState([]string{"optimizer"})
+	s.State = StateSurvey
+
+	steps := []StateName{StateGapAnalysis, StateDecompose, StateQueue}
+	for _, want := range steps {
+		if err := Advance(s, AdvanceInput{}, ""); err != nil {
+			t.Fatalf("advance to %s: %v", want, err)
+		}
+		if s.State != want {
+			t.Fatalf("expected %s, got %s", want, s.State)
+		}
+	}
+}
+
+// TestReverseEngineeringQueueToSurveyNextDomain verifies QUEUE → SURVEY when more domains remain.
+func TestReverseEngineeringQueueToSurveyNextDomain(t *testing.T) {
+	dir := t.TempDir()
+	queueFile := filepath.Join(dir, "queue.json")
+	os.WriteFile(queueFile, []byte(validREQueueJSON("optimizer")), 0644)
+
+	s := newReverseEngineeringState([]string{"optimizer", "api"})
+	s.State = StateQueue
+	s.ReverseEngineering.CurrentDomain = 0
+
+	// Pass dir="" to skip code_search_roots path validation.
+	if err := Advance(s, AdvanceInput{File: queueFile}, ""); err != nil {
+		t.Fatal(err)
+	}
+
+	if s.State != StateSurvey {
+		t.Fatalf("expected SURVEY, got %s", s.State)
+	}
+	if s.ReverseEngineering.CurrentDomain != 1 {
+		t.Fatalf("expected domain index 1, got %d", s.ReverseEngineering.CurrentDomain)
+	}
+}
+
+// TestReverseEngineeringQueueToExecuteLastDomain verifies QUEUE → EXECUTE when processing the last domain.
+func TestReverseEngineeringQueueToExecuteLastDomain(t *testing.T) {
+	dir := t.TempDir()
+	queueFile := filepath.Join(dir, "queue.json")
+	initial := validREQueueJSON("optimizer")
+	os.WriteFile(queueFile, []byte(initial), 0644)
+
+	s := newReverseEngineeringState([]string{"optimizer", "api"})
+	s.State = StateQueue
+	s.ReverseEngineering.CurrentDomain = 1 // last domain (0-based)
+	// Simulate first domain already validated: QueueFile and QueueHash set with old hash.
+	s.ReverseEngineering.QueueFile = queueFile
+	s.ReverseEngineering.QueueHash = "old-hash-value" // differs from actual file content
+
+	// domains: ["optimizer", "api"] — entry domain "optimizer" is valid.
+	if err := Advance(s, AdvanceInput{}, ""); err != nil {
+		t.Fatal(err)
+	}
+
+	if s.State != StateExecute {
+		t.Fatalf("expected EXECUTE, got %s", s.State)
+	}
+}
+
+// TestReverseEngineeringQueueFirstAdvanceRequiresFile verifies --file is required on first QUEUE advance.
+func TestReverseEngineeringQueueFirstAdvanceRequiresFile(t *testing.T) {
+	s := newReverseEngineeringState([]string{"optimizer"})
+	s.State = StateQueue
+	s.ReverseEngineering.CurrentDomain = 0
+
+	err := Advance(s, AdvanceInput{}, "")
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if !strings.Contains(err.Error(), "Queue file path required") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	// State must remain QUEUE.
+	if s.State != StateQueue {
+		t.Fatalf("expected state to remain QUEUE, got %s", s.State)
+	}
+}
+
+// TestReverseEngineeringQueueFirstAdvanceStoresPathAndHash verifies that the first QUEUE advance
+// stores the queue file path and content hash in state after successful validation.
+func TestReverseEngineeringQueueFirstAdvanceStoresPathAndHash(t *testing.T) {
+	dir := t.TempDir()
+	queueFile := filepath.Join(dir, "queue.json")
+	content := validREQueueJSON("optimizer")
+	os.WriteFile(queueFile, []byte(content), 0644)
+
+	s := newReverseEngineeringState([]string{"optimizer"})
+	s.State = StateQueue
+
+	if err := Advance(s, AdvanceInput{File: queueFile}, ""); err != nil {
+		t.Fatal(err)
+	}
+
+	if s.ReverseEngineering.QueueFile != queueFile {
+		t.Fatalf("QueueFile = %q, want %q", s.ReverseEngineering.QueueFile, queueFile)
+	}
+	if s.ReverseEngineering.QueueHash == "" {
+		t.Fatal("QueueHash must be set after first advance")
+	}
+	expectedHash := computeContentHash([]byte(content))
+	if s.ReverseEngineering.QueueHash != expectedHash {
+		t.Fatalf("QueueHash = %q, want %q", s.ReverseEngineering.QueueHash, expectedHash)
+	}
+}
+
+// TestReverseEngineeringQueueSubsequentAdvanceWithChangedFile verifies that a subsequent QUEUE
+// advance with a changed file re-validates and advances state.
+func TestReverseEngineeringQueueSubsequentAdvanceWithChangedFile(t *testing.T) {
+	dir := t.TempDir()
+	queueFile := filepath.Join(dir, "queue.json")
+	initial := validREQueueJSON("optimizer")
+	os.WriteFile(queueFile, []byte(initial), 0644)
+
+	s := newReverseEngineeringState([]string{"optimizer"})
+	s.State = StateQueue
+	s.ReverseEngineering.QueueFile = queueFile
+	s.ReverseEngineering.QueueHash = "stale-hash" // differs from file content
+
+	if err := Advance(s, AdvanceInput{}, ""); err != nil {
+		t.Fatal(err)
+	}
+
+	if s.State != StateExecute {
+		t.Fatalf("expected EXECUTE, got %s", s.State)
+	}
+	// Hash must be updated to match file content.
+	if s.ReverseEngineering.QueueHash == "stale-hash" {
+		t.Fatal("QueueHash must be updated after successful subsequent advance")
+	}
+}
+
+// TestReverseEngineeringQueueSubsequentAdvanceRejectsFile verifies that subsequent QUEUE
+// advances reject the --file flag (path is already stored).
+func TestReverseEngineeringQueueSubsequentAdvanceRejectsFile(t *testing.T) {
+	dir := t.TempDir()
+	queueFile := filepath.Join(dir, "queue.json")
+	os.WriteFile(queueFile, []byte(validREQueueJSON("optimizer")), 0644)
+
+	s := newReverseEngineeringState([]string{"optimizer"})
+	s.State = StateQueue
+	s.ReverseEngineering.QueueFile = queueFile
+	s.ReverseEngineering.QueueHash = "old-hash"
+
+	err := Advance(s, AdvanceInput{File: "/other/queue.json"}, "")
+	if err == nil {
+		t.Fatal("expected error when --file provided on subsequent advance")
+	}
+	if !strings.Contains(err.Error(), "Queue file path already set") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+// TestReverseEngineeringQueueSubsequentAdvanceRejectsUnchangedFile verifies that a subsequent
+// QUEUE advance is rejected when the file content has not changed.
+func TestReverseEngineeringQueueSubsequentAdvanceRejectsUnchangedFile(t *testing.T) {
+	dir := t.TempDir()
+	queueFile := filepath.Join(dir, "queue.json")
+	content := validREQueueJSON("optimizer")
+	os.WriteFile(queueFile, []byte(content), 0644)
+
+	s := newReverseEngineeringState([]string{"optimizer"})
+	s.State = StateQueue
+	s.ReverseEngineering.QueueFile = queueFile
+	s.ReverseEngineering.QueueHash = computeContentHash([]byte(content)) // matches file
+
+	err := Advance(s, AdvanceInput{}, "")
+	if err == nil {
+		t.Fatal("expected error when queue file has not changed")
+	}
+	if !strings.Contains(err.Error(), "Queue file has not changed") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+// TestReverseEngineeringQueueValidationFailureOnFirstAdvance verifies that schema validation
+// errors block the first QUEUE advance and do not store the file path.
+func TestReverseEngineeringQueueValidationFailureOnFirstAdvance(t *testing.T) {
+	dir := t.TempDir()
+	queueFile := filepath.Join(dir, "queue.json")
+	// Missing required "code_search_roots" field.
+	invalid := `{"specs":[{"name":"s1","domain":"optimizer","topic":"t","file":"f.md","action":"create","depends_on":[]}]}`
+	os.WriteFile(queueFile, []byte(invalid), 0644)
+
+	s := newReverseEngineeringState([]string{"optimizer"})
+	s.State = StateQueue
+
+	err := Advance(s, AdvanceInput{File: queueFile}, "")
+	if err == nil {
+		t.Fatal("expected validation error")
+	}
+	// Path must NOT be stored on validation failure.
+	if s.ReverseEngineering.QueueFile != "" {
+		t.Fatalf("QueueFile must not be stored on validation failure, got %q", s.ReverseEngineering.QueueFile)
+	}
+}
+
+// TestReverseEngineeringQueueDomainMembershipRejection verifies that entries with unrecognized
+// domains are rejected at QUEUE advance.
+func TestReverseEngineeringQueueDomainMembershipRejection(t *testing.T) {
+	dir := t.TempDir()
+	queueFile := filepath.Join(dir, "queue.json")
+	// Entry has domain "portal" which is not in initialized domains.
+	content := `{"specs":[{"name":"s1","domain":"portal","topic":"t","file":"f.md","action":"create","code_search_roots":["src/"],"depends_on":[]}]}`
+	os.WriteFile(queueFile, []byte(content), 0644)
+
+	s := newReverseEngineeringState([]string{"optimizer", "api"})
+	s.State = StateQueue
+
+	err := Advance(s, AdvanceInput{File: queueFile}, "")
+	if err == nil {
+		t.Fatal("expected domain membership error")
+	}
+	// Should be a validation error mentioning the unrecognized domain.
+	if _, ok := err.(*ValidationError); !ok {
+		t.Fatalf("expected ValidationError, got %T: %v", err, err)
+	}
+}
+
+// --- EXECUTE State Tests ---
+
+// setupREExecuteState creates a state at StateExecute with a valid queue file.
+func setupREExecuteState(t *testing.T, dir string, specs []ReverseEngineeringQueueEntry, mode string) *ForgeState {
+	t.Helper()
+	domains := uniqueQueueDomains(specs)
+	s := &ForgeState{
+		Phase:              PhaseReverseEngineering,
+		State:              StateExecute,
+		Config:             DefaultForgeConfig(),
+		ReverseEngineering: NewReverseEngineeringState("test concept", domains, false),
+	}
+	s.Config.ReverseEngineering.Mode = mode
+	// Use a relative path so advanceREFromExecute joins it with dir correctly.
+	s.Config.Paths.StateDir = ".forgectl/state"
+	os.MkdirAll(filepath.Join(dir, ".forgectl", "state"), 0755)
+
+	qi := ReverseEngineeringQueueInput{Specs: specs}
+	queueData, _ := json.Marshal(qi)
+	queueFile := filepath.Join(dir, "queue.json")
+	os.WriteFile(queueFile, queueData, 0644)
+	s.ReverseEngineering.QueueFile = queueFile
+
+	return s
+}
+
+func uniqueQueueDomains(specs []ReverseEngineeringQueueEntry) []string {
+	seen := make(map[string]bool)
+	var domains []string
+	for _, s := range specs {
+		if !seen[s.Domain] {
+			seen[s.Domain] = true
+			domains = append(domains, s.Domain)
+		}
+	}
+	return domains
+}
+
+func makeRESpec(name, domain string) ReverseEngineeringQueueEntry {
+	return ReverseEngineeringQueueEntry{
+		Name:            name,
+		Domain:          domain,
+		Topic:           "test topic",
+		File:            domain + "/specs/" + name + ".md",
+		Action:          "create",
+		CodeSearchRoots: []string{"src/"},
+		DependsOn:       []string{},
+	}
+}
+
+// withSuccessRunner replaces pyRunner for the duration of the test, writing
+// success results to execute.json before returning exit code 0.
+func withSuccessRunner(t *testing.T) func() {
+	t.Helper()
+	old := pyRunner
+	pyRunner = func(executeFilePath, dir string) (string, int) {
+		data, err := os.ReadFile(executeFilePath)
+		if err != nil {
+			return "cannot read execute.json", 1
+		}
+		var ef ExecuteJSONFile
+		if err := json.Unmarshal(data, &ef); err != nil {
+			return "cannot parse execute.json", 1
+		}
+		for i := range ef.Specs {
+			status := "success"
+			iters := 1
+			ef.Specs[i].Result = &ExecuteJSONSpecResult{Status: status, IterationsCompleted: &iters}
+		}
+		updated, _ := json.MarshalIndent(ef, "", "  ")
+		os.WriteFile(executeFilePath, updated, 0644)
+		return "", 0
+	}
+	return func() { pyRunner = old }
+}
+
+// withPartialFailureRunner replaces pyRunner: first entry fails, rest succeed.
+func withPartialFailureRunner(t *testing.T) func() {
+	t.Helper()
+	old := pyRunner
+	pyRunner = func(executeFilePath, dir string) (string, int) {
+		data, _ := os.ReadFile(executeFilePath)
+		var ef ExecuteJSONFile
+		json.Unmarshal(data, &ef)
+		for i := range ef.Specs {
+			if i == 0 {
+				errMsg := "agent timed out"
+				ef.Specs[i].Result = &ExecuteJSONSpecResult{Status: "failure", Error: &errMsg}
+			} else {
+				iters := 1
+				ef.Specs[i].Result = &ExecuteJSONSpecResult{Status: "success", IterationsCompleted: &iters}
+			}
+		}
+		updated, _ := json.MarshalIndent(ef, "", "  ")
+		os.WriteFile(executeFilePath, updated, 0644)
+		return "", 0
+	}
+	return func() { pyRunner = old }
+}
+
+// withNonZeroExitRunner replaces pyRunner: exits non-zero and does NOT write execute.json.
+func withNonZeroExitRunner(t *testing.T, stderrMsg string) func() {
+	t.Helper()
+	old := pyRunner
+	pyRunner = func(executeFilePath, dir string) (string, int) {
+		// Remove execute.json to simulate unreadable results.
+		os.Remove(executeFilePath)
+		return stderrMsg, 1
+	}
+	return func() { pyRunner = old }
+}
+
+// TestReverseEngineeringExecuteGeneratesExecuteJSON verifies that EXECUTE writes execute.json
+// with the correct structure: project_root, active mode config, and all queue entries.
+func TestReverseEngineeringExecuteGeneratesExecuteJSON(t *testing.T) {
+	dir := t.TempDir()
+	specs := []ReverseEngineeringQueueEntry{makeRESpec("auth-handler", "api")}
+	s := setupREExecuteState(t, dir, specs, "self_refine")
+	s.Config.ReverseEngineering.SelfRefine = &SelfRefineConfig{Rounds: 2}
+
+	defer withSuccessRunner(t)()
+
+	if err := Advance(s, AdvanceInput{}, dir); err != nil {
+		t.Fatalf("Advance failed: %v", err)
+	}
+
+	// Read execute.json from state dir.
+	executeFilePath := filepath.Join(dir, ".forgectl", "state", "execute.json")
+	data, err := os.ReadFile(executeFilePath)
+	if err != nil {
+		t.Fatalf("execute.json not written: %v", err)
+	}
+
+	var ef ExecuteJSONFile
+	if err := json.Unmarshal(data, &ef); err != nil {
+		t.Fatalf("invalid execute.json: %v", err)
+	}
+
+	if ef.ProjectRoot != dir {
+		t.Errorf("project_root = %q, want %q", ef.ProjectRoot, dir)
+	}
+	if ef.Config.Mode != "self_refine" {
+		t.Errorf("config.mode = %q, want self_refine", ef.Config.Mode)
+	}
+	if ef.Config.SelfRefine == nil || ef.Config.SelfRefine.Rounds != 2 {
+		t.Errorf("config.self_refine not set correctly")
+	}
+	if ef.Config.MultiPass != nil {
+		t.Errorf("inactive multi_pass should be omitted, got %+v", ef.Config.MultiPass)
+	}
+	if len(ef.Specs) != 1 || ef.Specs[0].Name != "auth-handler" {
+		t.Errorf("unexpected specs: %+v", ef.Specs)
+	}
+}
+
+// TestReverseEngineeringExecuteCreatesSpecsDirectories verifies that EXECUTE creates
+// <project_root>/<domain>/specs/ directories for each unique domain before invoking the subprocess.
+func TestReverseEngineeringExecuteCreatesSpecsDirectories(t *testing.T) {
+	dir := t.TempDir()
+	specs := []ReverseEngineeringQueueEntry{
+		makeRESpec("spec-a", "api"),
+		makeRESpec("spec-b", "api"), // same domain — deduped
+		makeRESpec("spec-c", "billing"),
+	}
+	s := setupREExecuteState(t, dir, specs, "single_shot")
+
+	defer withSuccessRunner(t)()
+
+	if err := Advance(s, AdvanceInput{}, dir); err != nil {
+		t.Fatalf("Advance failed: %v", err)
+	}
+
+	for _, domain := range []string{"api", "billing"} {
+		specsDir := filepath.Join(dir, domain, "specs")
+		if _, err := os.Stat(specsDir); os.IsNotExist(err) {
+			t.Errorf("specs dir not created: %s", specsDir)
+		}
+	}
+}
+
+// TestReverseEngineeringExecuteAllSuccessAdvancesToReconcile verifies that when all subprocess
+// results are "success", state advances to RECONCILE with reconcile_domain=0 and round=1.
+func TestReverseEngineeringExecuteAllSuccessAdvancesToReconcile(t *testing.T) {
+	dir := t.TempDir()
+	specs := []ReverseEngineeringQueueEntry{makeRESpec("spec-a", "api"), makeRESpec("spec-b", "api")}
+	s := setupREExecuteState(t, dir, specs, "single_shot")
+
+	defer withSuccessRunner(t)()
+
+	if err := Advance(s, AdvanceInput{}, dir); err != nil {
+		t.Fatalf("Advance failed: %v", err)
+	}
+
+	if s.State != StateReconcile {
+		t.Errorf("state = %s, want RECONCILE", s.State)
+	}
+	if s.ReverseEngineering.ReconcileDomain != 0 {
+		t.Errorf("reconcile_domain = %d, want 0", s.ReverseEngineering.ReconcileDomain)
+	}
+	if s.ReverseEngineering.Round != 1 {
+		t.Errorf("round = %d, want 1", s.ReverseEngineering.Round)
+	}
+}
+
+// TestReverseEngineeringExecutePartialFailureStaysInExecute verifies that when any subprocess
+// result is "failure", state stays in EXECUTE and per-entry results are written to executeOutput.
+func TestReverseEngineeringExecutePartialFailureStaysInExecute(t *testing.T) {
+	dir := t.TempDir()
+	specs := []ReverseEngineeringQueueEntry{makeRESpec("spec-a", "api"), makeRESpec("spec-b", "api")}
+	s := setupREExecuteState(t, dir, specs, "single_shot")
+
+	defer withPartialFailureRunner(t)()
+
+	var buf bytes.Buffer
+	oldOut := executeOutput
+	executeOutput = &buf
+	defer func() { executeOutput = oldOut }()
+
+	if err := Advance(s, AdvanceInput{}, dir); err != nil {
+		t.Fatalf("Advance failed: %v", err)
+	}
+
+	if s.State != StateExecute {
+		t.Errorf("state = %s, want EXECUTE (partial failure should stay in EXECUTE)", s.State)
+	}
+
+	out := buf.String()
+	if !strings.Contains(out, "failure") {
+		t.Errorf("expected per-entry failure output, got:\n%s", out)
+	}
+	if !strings.Contains(out, "spec-a") {
+		t.Errorf("expected failed entry name in output, got:\n%s", out)
+	}
+	if !strings.Contains(out, "success") {
+		t.Errorf("expected successful entry in output, got:\n%s", out)
+	}
+}
+
+// TestReverseEngineeringExecuteEmptyQueueRejected verifies that an empty queue returns an error
+// before any subprocess invocation.
+func TestReverseEngineeringExecuteEmptyQueueRejected(t *testing.T) {
+	dir := t.TempDir()
+	s := setupREExecuteState(t, dir, []ReverseEngineeringQueueEntry{}, "single_shot")
+
+	subprocessCalled := false
+	old := pyRunner
+	pyRunner = func(_, _ string) (string, int) {
+		subprocessCalled = true
+		return "", 0
+	}
+	defer func() { pyRunner = old }()
+
+	err := Advance(s, AdvanceInput{}, dir)
+	if err == nil {
+		t.Fatal("expected error for empty queue")
+	}
+	if !strings.Contains(err.Error(), "zero entries") {
+		t.Errorf("expected 'zero entries' in error, got: %v", err)
+	}
+	if subprocessCalled {
+		t.Error("subprocess must not be invoked for empty queue")
+	}
+	if s.State != StateExecute {
+		t.Errorf("state should stay in EXECUTE, got %s", s.State)
+	}
+}
+
+// TestReverseEngineeringExecuteSubprocessFailureOutputsStop verifies that when the subprocess
+// exits non-zero and execute.json is unreadable, the STOP message is written to executeOutput.
+func TestReverseEngineeringExecuteSubprocessFailureOutputsStop(t *testing.T) {
+	dir := t.TempDir()
+	specs := []ReverseEngineeringQueueEntry{makeRESpec("spec-a", "api")}
+	s := setupREExecuteState(t, dir, specs, "single_shot")
+
+	stderrMsg := "Traceback: KeyError 'model'"
+	defer withNonZeroExitRunner(t, stderrMsg)()
+
+	var buf bytes.Buffer
+	oldOut := executeOutput
+	executeOutput = &buf
+	defer func() { executeOutput = oldOut }()
+
+	if err := Advance(s, AdvanceInput{}, dir); err != nil {
+		t.Fatalf("Advance should not return error for subprocess failure, got: %v", err)
+	}
+
+	if s.State != StateExecute {
+		t.Errorf("state = %s, want EXECUTE after subprocess failure", s.State)
+	}
+	out := buf.String()
+	if !strings.Contains(out, "STOP") {
+		t.Errorf("expected STOP in output, got:\n%s", out)
+	}
+	if !strings.Contains(out, stderrMsg) {
+		t.Errorf("expected stderr in output, got:\n%s", out)
+	}
+}
+
+// TestReverseEngineeringExecuteWorksFromAnyDir verifies that EXECUTE uses absolute paths
+// so it works correctly regardless of the current working directory.
+// TestReverseEngineeringReconcileAdvancesToReconcileEval verifies that advancing from RECONCILE
+// transitions to RECONCILE_EVAL with no other state mutation.
+func TestReverseEngineeringReconcileAdvancesToReconcileEval(t *testing.T) {
+	s := &ForgeState{
+		Phase: PhaseReverseEngineering,
+		State: StateReconcile,
+		Config: DefaultForgeConfig(),
+		ReverseEngineering: NewReverseEngineeringState("concept", []string{"api"}, false),
+	}
+	s.ReverseEngineering.ReconcileDomain = 0
+	s.ReverseEngineering.Round = 1
+
+	if err := Advance(s, AdvanceInput{}, ""); err != nil {
+		t.Fatalf("Advance failed: %v", err)
+	}
+
+	if s.State != StateReconcileEval {
+		t.Errorf("state = %s, want RECONCILE_EVAL", s.State)
+	}
+	if s.ReverseEngineering.ReconcileDomain != 0 {
+		t.Errorf("reconcile_domain mutated, want 0, got %d", s.ReverseEngineering.ReconcileDomain)
+	}
+	if s.ReverseEngineering.Round != 1 {
+		t.Errorf("round mutated, want 1, got %d", s.ReverseEngineering.Round)
+	}
+}
+
+func TestReverseEngineeringExecuteWorksFromAnyDir(t *testing.T) {
+	dir := t.TempDir()
+	specs := []ReverseEngineeringQueueEntry{makeRESpec("spec-a", "api")}
+	s := setupREExecuteState(t, dir, specs, "single_shot")
+
+	// Capture the executeFilePath passed to the subprocess.
+	var capturedPath string
+	old := pyRunner
+	pyRunner = func(executeFilePath, runDir string) (string, int) {
+		capturedPath = executeFilePath
+		// Write success results.
+		data, _ := os.ReadFile(executeFilePath)
+		var ef ExecuteJSONFile
+		json.Unmarshal(data, &ef)
+		iters := 1
+		for i := range ef.Specs {
+			ef.Specs[i].Result = &ExecuteJSONSpecResult{Status: "success", IterationsCompleted: &iters}
+		}
+		updated, _ := json.MarshalIndent(ef, "", "  ")
+		os.WriteFile(executeFilePath, updated, 0644)
+		return "", 0
+	}
+	defer func() { pyRunner = old }()
+
+	if err := Advance(s, AdvanceInput{}, dir); err != nil {
+		t.Fatalf("Advance failed: %v", err)
+	}
+
+	if !filepath.IsAbs(capturedPath) {
+		t.Errorf("execute file path passed to subprocess is not absolute: %q", capturedPath)
+	}
+	if s.ReverseEngineering.ExecuteFile != capturedPath {
+		t.Errorf("state.execute_file = %q, want %q", s.ReverseEngineering.ExecuteFile, capturedPath)
+	}
+}
+
+// setupREReconcileEvalState returns a state in RECONCILE_EVAL with the given round and config.
+func setupREReconcileEvalState(round, minRounds, maxRounds int, colleagueReview bool) *ForgeState {
+	s := &ForgeState{
+		Phase:  PhaseReverseEngineering,
+		State:  StateReconcileEval,
+		Config: DefaultForgeConfig(),
+		ReverseEngineering: NewReverseEngineeringState("concept", []string{"api"}, false),
+	}
+	s.ReverseEngineering.Round = round
+	s.ReverseEngineering.ReconcileDomain = 0
+	s.Config.ReverseEngineering.Reconcile.MinRounds = minRounds
+	s.Config.ReverseEngineering.Reconcile.MaxRounds = maxRounds
+	s.Config.ReverseEngineering.Reconcile.ColleagueReview = colleagueReview
+	return s
+}
+
+// TestREReconcileEvalPassBelowMinLoopsBack verifies PASS before min_rounds loops back to RECONCILE
+// and increments round.
+func TestREReconcileEvalPassBelowMinLoopsBack(t *testing.T) {
+	s := setupREReconcileEvalState(1, 2, 3, false)
+
+	if err := Advance(s, AdvanceInput{Verdict: "PASS"}, ""); err != nil {
+		t.Fatalf("Advance failed: %v", err)
+	}
+
+	if s.State != StateReconcile {
+		t.Errorf("state = %s, want RECONCILE", s.State)
+	}
+	if s.ReverseEngineering.Round != 2 {
+		t.Errorf("round = %d, want 2", s.ReverseEngineering.Round)
+	}
+}
+
+// TestREReconcileEvalFailBelowMaxLoopsBack verifies FAIL before max_rounds loops back to RECONCILE
+// and increments round.
+func TestREReconcileEvalFailBelowMaxLoopsBack(t *testing.T) {
+	s := setupREReconcileEvalState(1, 1, 3, false)
+
+	if err := Advance(s, AdvanceInput{Verdict: "FAIL"}, ""); err != nil {
+		t.Fatalf("Advance failed: %v", err)
+	}
+
+	if s.State != StateReconcile {
+		t.Errorf("state = %s, want RECONCILE", s.State)
+	}
+	if s.ReverseEngineering.Round != 2 {
+		t.Errorf("round = %d, want 2", s.ReverseEngineering.Round)
+	}
+}
+
+// TestREReconcileEvalPassAtMinNoColleagueAdvancesToReconcileAdvance verifies PASS at min_rounds
+// without colleague_review advances to RECONCILE_ADVANCE.
+func TestREReconcileEvalPassAtMinNoColleagueAdvancesToReconcileAdvance(t *testing.T) {
+	s := setupREReconcileEvalState(1, 1, 3, false)
+
+	if err := Advance(s, AdvanceInput{Verdict: "PASS"}, ""); err != nil {
+		t.Fatalf("Advance failed: %v", err)
+	}
+
+	if s.State != StateReconcileAdvance {
+		t.Errorf("state = %s, want RECONCILE_ADVANCE", s.State)
+	}
+}
+
+// TestREReconcileEvalPassAtMinWithColleagueAdvancesToColleagueReview verifies PASS at min_rounds
+// with colleague_review enabled advances to COLLEAGUE_REVIEW.
+func TestREReconcileEvalPassAtMinWithColleagueAdvancesToColleagueReview(t *testing.T) {
+	s := setupREReconcileEvalState(1, 1, 3, true)
+
+	if err := Advance(s, AdvanceInput{Verdict: "PASS"}, ""); err != nil {
+		t.Fatalf("Advance failed: %v", err)
+	}
+
+	if s.State != StateColleagueReview {
+		t.Errorf("state = %s, want COLLEAGUE_REVIEW", s.State)
+	}
+}
+
+// TestREReconcileEvalFailAtMaxNoColleagueAdvancesToReconcileAdvance verifies FAIL at max_rounds
+// without colleague_review advances to RECONCILE_ADVANCE (force-advance).
+func TestREReconcileEvalFailAtMaxNoColleagueAdvancesToReconcileAdvance(t *testing.T) {
+	s := setupREReconcileEvalState(3, 1, 3, false)
+
+	if err := Advance(s, AdvanceInput{Verdict: "FAIL"}, ""); err != nil {
+		t.Fatalf("Advance failed: %v", err)
+	}
+
+	if s.State != StateReconcileAdvance {
+		t.Errorf("state = %s, want RECONCILE_ADVANCE", s.State)
+	}
+}
+
+// TestREReconcileEvalMissingVerdictReturnsError verifies that advancing without --verdict
+// returns an error and state does not change.
+func TestREReconcileEvalMissingVerdictReturnsError(t *testing.T) {
+	s := setupREReconcileEvalState(1, 1, 3, false)
+
+	err := Advance(s, AdvanceInput{}, "")
+	if err == nil {
+		t.Fatal("expected error for missing verdict")
+	}
+	if !strings.Contains(err.Error(), "--verdict") {
+		t.Errorf("expected '--verdict' in error, got: %v", err)
+	}
+	if s.State != StateReconcileEval {
+		t.Errorf("state should stay RECONCILE_EVAL, got %s", s.State)
+	}
+}
+
+// TestREColleagueReviewAdvancesToReconcileAdvance verifies that advancing from COLLEAGUE_REVIEW
+// always transitions to RECONCILE_ADVANCE with no other state mutation.
+func TestREColleagueReviewAdvancesToReconcileAdvance(t *testing.T) {
+	s := &ForgeState{
+		Phase:  PhaseReverseEngineering,
+		State:  StateColleagueReview,
+		Config: DefaultForgeConfig(),
+		ReverseEngineering: NewReverseEngineeringState("concept", []string{"api"}, false),
+	}
+	s.ReverseEngineering.Round = 2
+
+	if err := Advance(s, AdvanceInput{}, ""); err != nil {
+		t.Fatalf("Advance failed: %v", err)
+	}
+
+	if s.State != StateReconcileAdvance {
+		t.Errorf("state = %s, want RECONCILE_ADVANCE", s.State)
+	}
+	if s.ReverseEngineering.Round != 2 {
+		t.Errorf("round mutated, want 2, got %d", s.ReverseEngineering.Round)
+	}
+}
+
+// TestREReconcileAdvanceMoreDomainsGoesToReconcile verifies that when more domains remain,
+// RECONCILE_ADVANCE increments reconcile_domain, resets round to 1, clears evals, and
+// returns to RECONCILE.
+func TestREReconcileAdvanceMoreDomainsGoesToReconcile(t *testing.T) {
+	s := &ForgeState{
+		Phase:  PhaseReverseEngineering,
+		State:  StateReconcileAdvance,
+		Config: DefaultForgeConfig(),
+		ReverseEngineering: NewReverseEngineeringState("concept", []string{"api", "billing"}, false),
+	}
+	s.ReverseEngineering.ReconcileDomain = 0
+	s.ReverseEngineering.Round = 2
+	s.ReverseEngineering.Evals = []EvalRecord{{Round: 1, Verdict: "PASS"}}
+
+	if err := Advance(s, AdvanceInput{}, ""); err != nil {
+		t.Fatalf("Advance failed: %v", err)
+	}
+
+	if s.State != StateReconcile {
+		t.Errorf("state = %s, want RECONCILE", s.State)
+	}
+	if s.ReverseEngineering.ReconcileDomain != 1 {
+		t.Errorf("reconcile_domain = %d, want 1", s.ReverseEngineering.ReconcileDomain)
+	}
+	if s.ReverseEngineering.Round != 1 {
+		t.Errorf("round = %d, want 1 (reset)", s.ReverseEngineering.Round)
+	}
+	if len(s.ReverseEngineering.Evals) != 0 {
+		t.Errorf("evals not cleared, got %d entries", len(s.ReverseEngineering.Evals))
+	}
+}
+
+// TestREReconcileAdvanceLastDomainGoesToDone verifies that when on the last domain,
+// RECONCILE_ADVANCE transitions to DONE.
+func TestREReconcileAdvanceLastDomainGoesToDone(t *testing.T) {
+	s := &ForgeState{
+		Phase:  PhaseReverseEngineering,
+		State:  StateReconcileAdvance,
+		Config: DefaultForgeConfig(),
+		ReverseEngineering: NewReverseEngineeringState("concept", []string{"api"}, false),
+	}
+	s.ReverseEngineering.ReconcileDomain = 0
+
+	if err := Advance(s, AdvanceInput{}, ""); err != nil {
+		t.Fatalf("Advance failed: %v", err)
+	}
+
+	if s.State != StateDone {
+		t.Errorf("state = %s, want DONE", s.State)
+	}
+}
+
+// TestREReconcileAdvanceSingleDomainGoesToDone verifies the edge case where total_domains == 1:
+// RECONCILE_ADVANCE transitions immediately to DONE without any domain increment.
+func TestREReconcileAdvanceSingleDomainGoesToDone(t *testing.T) {
+	s := &ForgeState{
+		Phase:  PhaseReverseEngineering,
+		State:  StateReconcileAdvance,
+		Config: DefaultForgeConfig(),
+		ReverseEngineering: NewReverseEngineeringState("concept", []string{"only-domain"}, false),
+	}
+	s.ReverseEngineering.ReconcileDomain = 0 // only domain
+
+	if err := Advance(s, AdvanceInput{}, ""); err != nil {
+		t.Fatalf("Advance failed: %v", err)
+	}
+
+	if s.State != StateDone {
+		t.Errorf("state = %s, want DONE", s.State)
+	}
+	if s.ReverseEngineering.ReconcileDomain != 0 {
+		t.Errorf("reconcile_domain should not change for single domain, got %d", s.ReverseEngineering.ReconcileDomain)
+	}
+}
+
+// makeRELogger creates a Logger writing to a temp file and a readEntries helper.
+func makeRELogger(t *testing.T) (*Logger, func() []LogEntry) {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "test.jsonl")
+	logger := &Logger{enabled: true, path: path}
+	read := func() []LogEntry {
+		data, err := os.ReadFile(path)
+		if err != nil {
+			return nil
+		}
+		var entries []LogEntry
+		for _, line := range strings.Split(strings.TrimSpace(string(data)), "\n") {
+			if line == "" {
+				continue
+			}
+			var e LogEntry
+			if json.Unmarshal([]byte(line), &e) == nil {
+				entries = append(entries, e)
+			}
+		}
+		return entries
+	}
+	return logger, read
+}
+
+// TestRELoggingDomainStateContext verifies that advance in reverse_engineering phase produces
+// a JSONL log entry containing domain, domain_index, and total_domains.
+func TestRELoggingDomainStateContext(t *testing.T) {
+	s := &ForgeState{
+		Phase:  PhaseReverseEngineering,
+		State:  StateOrient,
+		Config: DefaultForgeConfig(),
+		ReverseEngineering: NewReverseEngineeringState("concept", []string{"api", "billing"}, false),
+	}
+	logger, readEntries := makeRELogger(t)
+	s.Logger = logger
+
+	if err := Advance(s, AdvanceInput{}, ""); err != nil {
+		t.Fatalf("Advance failed: %v", err)
+	}
+
+	entries := readEntries()
+	if len(entries) == 0 {
+		t.Fatal("expected log entry, got none")
+	}
+	e := entries[0]
+	if e.Detail["domain"] != "api" {
+		t.Errorf("detail.domain = %v, want api", e.Detail["domain"])
+	}
+	if e.Detail["domain_index"] != float64(0) {
+		t.Errorf("detail.domain_index = %v, want 0", e.Detail["domain_index"])
+	}
+	if e.Detail["total_domains"] != float64(2) {
+		t.Errorf("detail.total_domains = %v, want 2", e.Detail["total_domains"])
+	}
+}
+
+// TestRELoggingExecuteIncludesModeAndSpecCount verifies that an EXECUTE state advance log entry
+// includes mode and spec_count in the detail.
+func TestRELoggingExecuteIncludesModeAndSpecCount(t *testing.T) {
+	dir := t.TempDir()
+	specs := []ReverseEngineeringQueueEntry{
+		makeRESpec("spec-a", "api"),
+		makeRESpec("spec-b", "api"),
+		makeRESpec("spec-c", "billing"),
+	}
+	s := setupREExecuteState(t, dir, specs, "self_refine")
+	defer withSuccessRunner(t)()
+
+	logger, readEntries := makeRELogger(t)
+	s.Logger = logger
+
+	if err := Advance(s, AdvanceInput{}, dir); err != nil {
+		t.Fatalf("Advance failed: %v", err)
+	}
+
+	entries := readEntries()
+	if len(entries) == 0 {
+		t.Fatal("expected log entry, got none")
+	}
+	e := entries[0]
+	if e.Detail["mode"] != "self_refine" {
+		t.Errorf("detail.mode = %v, want self_refine", e.Detail["mode"])
+	}
+	if e.Detail["spec_count"] != float64(3) {
+		t.Errorf("detail.spec_count = %v, want 3", e.Detail["spec_count"])
+	}
+}
+
+// TestRELoggingReconcileEvalIncludesRoundAndVerdict verifies that a RECONCILE_EVAL advance log
+// entry includes round and verdict.
+func TestRELoggingReconcileEvalIncludesRoundAndVerdict(t *testing.T) {
+	s := setupREReconcileEvalState(2, 1, 3, false)
+	logger, readEntries := makeRELogger(t)
+	s.Logger = logger
+
+	if err := Advance(s, AdvanceInput{Verdict: "PASS"}, ""); err != nil {
+		t.Fatalf("Advance failed: %v", err)
+	}
+
+	entries := readEntries()
+	if len(entries) == 0 {
+		t.Fatal("expected log entry, got none")
+	}
+	e := entries[0]
+	if e.Detail["round"] != float64(2) {
+		t.Errorf("detail.round = %v, want 2", e.Detail["round"])
+	}
+	if e.Detail["verdict"] != "PASS" {
+		t.Errorf("detail.verdict = %v, want PASS", e.Detail["verdict"])
+	}
+}
+
+// TestREReconcileEvalRecordsEval verifies that each advance appends an EvalRecord with the correct
+// round and verdict.
+func TestREReconcileEvalRecordsEval(t *testing.T) {
+	s := setupREReconcileEvalState(1, 2, 3, false)
+
+	if err := Advance(s, AdvanceInput{Verdict: "FAIL"}, ""); err != nil {
+		t.Fatalf("Advance failed: %v", err)
+	}
+
+	if len(s.ReverseEngineering.Evals) != 1 {
+		t.Fatalf("evals = %d, want 1", len(s.ReverseEngineering.Evals))
+	}
+	if s.ReverseEngineering.Evals[0].Round != 1 {
+		t.Errorf("eval round = %d, want 1", s.ReverseEngineering.Evals[0].Round)
+	}
+	if s.ReverseEngineering.Evals[0].Verdict != "FAIL" {
+		t.Errorf("eval verdict = %q, want FAIL", s.ReverseEngineering.Evals[0].Verdict)
+	}
+}

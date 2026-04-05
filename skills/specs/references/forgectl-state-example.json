@@ -1,43 +1,102 @@
 {
   "phase": "specifying",
   "state": "EVALUATE",
-  "batch_size": 1,
-  "min_rounds": 1,
-  "max_rounds": 3,
-  "user_guided": true,
+  "config": {
+    "general": {
+      "enable_commits": false,
+      "enable_eval_output": false,
+      "user_guided": true
+    },
+    "specifying": {
+      "batch": 1,
+      "commit_strategy": "all-specs",
+      "eval": {
+        "min_rounds": 1,
+        "max_rounds": 3,
+        "model": "opus",
+        "type": "eval",
+        "count": 1,
+        "enable_eval_output": false
+      },
+      "cross_reference": {
+        "min_rounds": 0,
+        "max_rounds": 0,
+        "model": "",
+        "type": "",
+        "count": 0,
+        "user_review": false,
+        "eval": { "model": "", "type": "", "count": 0 }
+      },
+      "reconciliation": {
+        "min_rounds": 0,
+        "max_rounds": 0,
+        "model": "",
+        "type": "",
+        "count": 0,
+        "user_review": false
+      }
+    },
+    "planning": {
+      "batch": 1,
+      "commit_strategy": "strict",
+      "self_review": false,
+      "plan_all_before_implementing": false,
+      "study_code": { "model": "haiku", "type": "explore", "count": 3 },
+      "eval": { "min_rounds": 1, "max_rounds": 3, "model": "opus", "type": "eval", "count": 1, "enable_eval_output": false },
+      "refine": { "model": "opus", "type": "refine", "count": 1 }
+    },
+    "implementing": {
+      "batch": 2,
+      "commit_strategy": "scoped",
+      "eval": { "min_rounds": 1, "max_rounds": 3, "model": "opus", "type": "eval", "count": 1, "enable_eval_output": false }
+    },
+    "paths": {
+      "state_dir": ".forgectl/state",
+      "workspace_dir": ".forge_workspace"
+    },
+    "logs": {
+      "enabled": true,
+      "retention_days": 90,
+      "max_files": 50
+    }
+  },
+  "session_id": "a3f1b2c4-7e2d-4f01-b4c8-e312d9f01234",
   "started_at_phase": "specifying",
   "phase_shift": null,
   "specifying": {
-    "current_spec": {
-      "id": 1,
-      "name": "Reservation Booking",
-      "domain": "accounting",
-      "topic": "The accounting service records reservation bookings and tracks ledger entries",
-      "file": "accounting/specs/reservation-booking.md",
-      "planning_sources": [".workspace/planning/accounting/reservation-lifecycle.md"],
-      "depends_on": [],
-      "round": 2,
-      "evals": [
-        {
-          "round": 1,
-          "verdict": "FAIL",
-          "eval_report": "accounting/specs/.eval/reservation-booking-r1.md"
-        }
-      ]
-    },
+    "current_specs": [
+      {
+        "id": 1,
+        "name": "Reservation Booking",
+        "domain": "accounting",
+        "topic": "The accounting service records reservation bookings and tracks ledger entries",
+        "file": "accounting/specs/reservation-booking.md",
+        "planning_sources": [".forge_workspace/planning/accounting/reservation-lifecycle.md"],
+        "depends_on": [],
+        "round": 2,
+        "evals": [
+          {
+            "round": 1,
+            "verdict": "FAIL",
+            "eval_report": "accounting/specs/.eval/reservation-booking-r1.md"
+          }
+        ]
+      }
+    ],
     "queue": [
       {
         "name": "Ledger Reconciliation",
         "domain": "accounting",
         "topic": "The accounting service reconciles ledger entries against completed bookings",
         "file": "accounting/specs/ledger-reconciliation.md",
-        "planning_sources": [".workspace/planning/accounting/ledger-management.md"],
+        "planning_sources": [".forge_workspace/planning/accounting/ledger-management.md"],
         "depends_on": ["Reservation Booking"]
       }
     ],
     "completed": [],
     "reconcile": null
   },
+  "generate_planning_queue": null,
   "planning": null,
   "implementing": null
 }

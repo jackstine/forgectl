@@ -77,6 +77,9 @@ func runAdvance(cmd *cobra.Command, args []string) error {
 	prevState := string(s.State)
 	prevPhase := string(s.Phase)
 
+	// Attach logger so state transitions can write phase-specific detail.
+	s.Logger = state.NewLogger(s.Config.Logs, s.StartedAtPhase, s.SessionID)
+
 	err = state.Advance(s, in, projectRoot)
 	if err != nil {
 		// Check if it's a validation error — still save state if VALIDATE was entered.
@@ -100,17 +103,20 @@ func runAdvance(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("saving state: %w", err)
 	}
 
-	// Activity logging.
-	detail := buildAdvanceDetail(in)
-	logger := state.NewLogger(s.Config.Logs, s.StartedAtPhase, s.SessionID)
-	logger.Write(state.LogEntry{
-		TS:        state.LogNow(),
-		Cmd:       "advance",
-		Phase:     prevPhase,
-		PrevState: prevState,
-		State:     string(s.State),
-		Detail:    detail,
-	})
+	// Activity logging. RE phase writes its own log entries inside state.Advance
+	// (with richer domain/round context), so skip the generic cmd-level entry for that phase.
+	if prevPhase != string(state.PhaseReverseEngineering) {
+		detail := buildAdvanceDetail(in)
+		logger := state.NewLogger(s.Config.Logs, s.StartedAtPhase, s.SessionID)
+		logger.Write(state.LogEntry{
+			TS:        state.LogNow(),
+			Cmd:       "advance",
+			Phase:     prevPhase,
+			PrevState: prevState,
+			State:     string(s.State),
+			Detail:    detail,
+		})
+	}
 
 	// Archive session at terminal states.
 	if isTerminalState(s) {
@@ -166,9 +172,13 @@ func sessionDomain(s *state.ForgeState) string {
 }
 
 func validateAdvanceFlags(s *state.ForgeState) error {
-	// --file only valid in specifying DRAFT.
-	if advanceFile != "" && !(s.Phase == state.PhaseSpecifying && s.State == state.StateDraft) {
-		return fmt.Errorf("--file is only valid in specifying DRAFT state (current: %s %s)", s.Phase, s.State)
+	// --file valid in specifying DRAFT or reverse_engineering QUEUE.
+	if advanceFile != "" {
+		specifyingDraft := s.Phase == state.PhaseSpecifying && s.State == state.StateDraft
+		reQueue := s.Phase == state.PhaseReverseEngineering && s.State == state.StateQueue
+		if !specifyingDraft && !reQueue {
+			return fmt.Errorf("--file is only valid in specifying DRAFT or reverse_engineering QUEUE state (current: %s %s)", s.Phase, s.State)
+		}
 	}
 
 	// --verdict only valid in eval states.
