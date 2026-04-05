@@ -356,6 +356,42 @@ type ReverseEngineeringQueueInput struct {
 	Specs []ReverseEngineeringQueueEntry `json:"specs"`
 }
 
+// ExecuteJSONConfig is the config section of execute.json.
+// Only the active mode's config block is included.
+type ExecuteJSONConfig struct {
+	Mode       string            `json:"mode"`
+	Drafter    DrafterConfig     `json:"drafter"`
+	SelfRefine *SelfRefineConfig `json:"self_refine,omitempty"`
+	MultiPass  *MultiPassConfig  `json:"multi_pass,omitempty"`
+	PeerReview *PeerReviewConfig `json:"peer_review,omitempty"`
+}
+
+// ExecuteJSONSpecResult is the result field of a spec entry in execute.json.
+type ExecuteJSONSpecResult struct {
+	Status              string  `json:"status"`
+	IterationsCompleted *int    `json:"iterations_completed,omitempty"`
+	Error               *string `json:"error,omitempty"`
+}
+
+// ExecuteJSONSpec is a spec entry in execute.json.
+type ExecuteJSONSpec struct {
+	Name            string                 `json:"name"`
+	Domain          string                 `json:"domain"`
+	Topic           string                 `json:"topic"`
+	File            string                 `json:"file"`
+	Action          string                 `json:"action"`
+	CodeSearchRoots []string               `json:"code_search_roots"`
+	DependsOn       []string               `json:"depends_on"`
+	Result          *ExecuteJSONSpecResult `json:"result"`
+}
+
+// ExecuteJSONFile is the complete execute.json structure written by forgectl for the Python subprocess.
+type ExecuteJSONFile struct {
+	ProjectRoot string            `json:"project_root"`
+	Config      ExecuteJSONConfig `json:"config"`
+	Specs       []ExecuteJSONSpec  `json:"specs"`
+}
+
 // --- Plan.json schema (for implementing phase) ---
 
 // PlanContext is the context section of plan.json.

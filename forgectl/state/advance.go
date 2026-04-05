@@ -1,14 +1,39 @@
 package state
 
 import (
+	"bytes"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 )
+
+// pyRunner invokes the Python subprocess for EXECUTE state.
+// Replaced in tests to avoid real subprocess invocation.
+var pyRunner = func(executeFilePath, dir string) (string, int) {
+	cmd := exec.Command("python", "reverse_engineer.py", "--execute", executeFilePath)
+	cmd.Dir = dir
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	err := cmd.Run()
+	stderrStr := stderr.String()
+	if err != nil {
+		if exitErr, ok := err.(*exec.ExitError); ok {
+			return stderrStr, exitErr.ExitCode()
+		}
+		return stderrStr, 1
+	}
+	return stderrStr, 0
+}
+
+// executeOutput is the writer for EXECUTE state inline output (subprocess STOP messages).
+// Replaced in tests to capture output.
+var executeOutput io.Writer = os.Stdout
 
 // Advance transitions the state machine forward based on current state and input.
 func Advance(s *ForgeState, in AdvanceInput, dir string) error {
@@ -1262,6 +1287,9 @@ func advanceReverseEngineering(s *ForgeState, in AdvanceInput, dir string) error
 	case StateQueue:
 		return advanceREFromQueue(s, re, in, dir)
 
+	case StateExecute:
+		return advanceREFromExecute(s, re, dir)
+
 	default:
 		return fmt.Errorf("cannot advance from state %q in reverse_engineering phase", s.State)
 	}
@@ -1320,4 +1348,157 @@ func advanceREFromQueue(s *ForgeState, re *ReverseEngineeringState, in AdvanceIn
 func computeContentHash(data []byte) string {
 	h := sha256.Sum256(data)
 	return hex.EncodeToString(h[:])
+}
+
+// generateExecuteJSON builds an ExecuteJSONFile from queue specs and RE config.
+// Only the active mode's config block is included; inactive mode blocks are omitted.
+func generateExecuteJSON(specs []ReverseEngineeringQueueEntry, cfg ReverseEngineeringConfig, projectRoot string) ExecuteJSONFile {
+	config := ExecuteJSONConfig{
+		Mode:    cfg.Mode,
+		Drafter: cfg.Drafter,
+	}
+	switch cfg.Mode {
+	case "self_refine":
+		config.SelfRefine = cfg.SelfRefine
+	case "multi_pass":
+		config.MultiPass = cfg.MultiPass
+	case "peer_review":
+		config.PeerReview = cfg.PeerReview
+	}
+
+	execSpecs := make([]ExecuteJSONSpec, len(specs))
+	for i, s := range specs {
+		execSpecs[i] = ExecuteJSONSpec{
+			Name:            s.Name,
+			Domain:          s.Domain,
+			Topic:           s.Topic,
+			File:            s.File,
+			Action:          s.Action,
+			CodeSearchRoots: s.CodeSearchRoots,
+			DependsOn:       s.DependsOn,
+			Result:          nil,
+		}
+	}
+
+	return ExecuteJSONFile{
+		ProjectRoot: projectRoot,
+		Config:      config,
+		Specs:       execSpecs,
+	}
+}
+
+func advanceREFromExecute(s *ForgeState, re *ReverseEngineeringState, dir string) error {
+	cfg := s.Config.ReverseEngineering
+
+	// 1. Read queue file.
+	queueData, err := os.ReadFile(re.QueueFile)
+	if err != nil {
+		return fmt.Errorf("reading queue file %q: %w", re.QueueFile, err)
+	}
+	var qi ReverseEngineeringQueueInput
+	if err := json.Unmarshal(queueData, &qi); err != nil {
+		return fmt.Errorf("parsing queue file: %w", err)
+	}
+
+	// 2. Reject empty queue.
+	if len(qi.Specs) == 0 {
+		return fmt.Errorf("Queue contains zero entries. Nothing to execute.")
+	}
+
+	// 3. Create <project_root>/<domain>/specs/ for each unique domain.
+	seen := make(map[string]bool)
+	for _, spec := range qi.Specs {
+		if seen[spec.Domain] {
+			continue
+		}
+		seen[spec.Domain] = true
+		specsDir := filepath.Join(dir, spec.Domain, "specs")
+		if err := os.MkdirAll(specsDir, 0755); err != nil {
+			return fmt.Errorf("creating specs directory %q: %w", specsDir, err)
+		}
+	}
+
+	// 4. Generate execute.json and write to state dir.
+	executeFile := generateExecuteJSON(qi.Specs, cfg, dir)
+
+	stateDir := s.Config.Paths.StateDir
+	if !filepath.IsAbs(stateDir) && dir != "" {
+		stateDir = filepath.Join(dir, stateDir)
+	}
+	executeFilePath := filepath.Join(stateDir, "execute.json")
+
+	executeData, err := json.MarshalIndent(executeFile, "", "  ")
+	if err != nil {
+		return fmt.Errorf("marshaling execute.json: %w", err)
+	}
+	if err := os.WriteFile(executeFilePath, executeData, 0644); err != nil {
+		return fmt.Errorf("writing execute.json %q: %w", executeFilePath, err)
+	}
+
+	// 5. Store execute file path in state.
+	re.ExecuteFile = executeFilePath
+
+	// 6. Invoke subprocess.
+	stderrStr, exitCode := pyRunner(executeFilePath, dir)
+
+	// 7. Read execute.json after subprocess exits.
+	updatedData, readErr := os.ReadFile(executeFilePath)
+	if exitCode != 0 && readErr != nil {
+		// Unreadable results after non-zero exit → STOP message. State stays in EXECUTE.
+		PrintExecuteFailureOutput(executeOutput, stderrStr)
+		return nil
+	}
+
+	// Parse updated results.
+	var updated ExecuteJSONFile
+	if parseErr := json.Unmarshal(updatedData, &updated); parseErr != nil {
+		if exitCode != 0 {
+			PrintExecuteFailureOutput(executeOutput, stderrStr)
+			return nil
+		}
+		return fmt.Errorf("parsing execute.json results: %w", parseErr)
+	}
+
+	// 8. All success → advance to RECONCILE.
+	allSuccess := true
+	for _, spec := range updated.Specs {
+		if spec.Result == nil || spec.Result.Status != "success" {
+			allSuccess = false
+			break
+		}
+	}
+
+	if allSuccess {
+		re.ReconcileDomain = 0
+		re.Round = 1
+		s.State = StateReconcile
+		return nil
+	}
+
+	// 9. Any failure → output per-entry results, stay in EXECUTE.
+	fmt.Fprintf(executeOutput, "Phase:   reverse_engineering\n")
+	fmt.Fprintf(executeOutput, "State:   EXECUTE\n\n")
+	fmt.Fprintf(executeOutput, "Some agent sessions failed. Results per entry:\n\n")
+	for _, spec := range updated.Specs {
+		if spec.Result == nil {
+			fmt.Fprintf(executeOutput, "  [no result] %s/%s\n", spec.Domain, spec.File)
+			continue
+		}
+		switch spec.Result.Status {
+		case "success":
+			fmt.Fprintf(executeOutput, "  [success]   %s/%s\n", spec.Domain, spec.File)
+		case "failure":
+			errDetail := ""
+			if spec.Result.Error != nil {
+				errDetail = ": " + *spec.Result.Error
+			}
+			fmt.Fprintf(executeOutput, "  [failure]   %s/%s%s\n", spec.Domain, spec.File, errDetail)
+		default:
+			fmt.Fprintf(executeOutput, "  [%s]   %s/%s\n", spec.Result.Status, spec.Domain, spec.File)
+		}
+	}
+	fmt.Fprintln(executeOutput)
+	fmt.Fprintf(executeOutput, "Fix failures in execute.json and re-run: forgectl advance\n")
+
+	return nil
 }

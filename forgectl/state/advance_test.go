@@ -2670,3 +2670,339 @@ func TestReverseEngineeringQueueDomainMembershipRejection(t *testing.T) {
 		t.Fatalf("expected ValidationError, got %T: %v", err, err)
 	}
 }
+
+// --- EXECUTE State Tests ---
+
+// setupREExecuteState creates a state at StateExecute with a valid queue file.
+func setupREExecuteState(t *testing.T, dir string, specs []ReverseEngineeringQueueEntry, mode string) *ForgeState {
+	t.Helper()
+	domains := uniqueQueueDomains(specs)
+	s := &ForgeState{
+		Phase:              PhaseReverseEngineering,
+		State:              StateExecute,
+		Config:             DefaultForgeConfig(),
+		ReverseEngineering: NewReverseEngineeringState("test concept", domains, false),
+	}
+	s.Config.ReverseEngineering.Mode = mode
+	// Use a relative path so advanceREFromExecute joins it with dir correctly.
+	s.Config.Paths.StateDir = ".forgectl/state"
+	os.MkdirAll(filepath.Join(dir, ".forgectl", "state"), 0755)
+
+	qi := ReverseEngineeringQueueInput{Specs: specs}
+	queueData, _ := json.Marshal(qi)
+	queueFile := filepath.Join(dir, "queue.json")
+	os.WriteFile(queueFile, queueData, 0644)
+	s.ReverseEngineering.QueueFile = queueFile
+
+	return s
+}
+
+func uniqueQueueDomains(specs []ReverseEngineeringQueueEntry) []string {
+	seen := make(map[string]bool)
+	var domains []string
+	for _, s := range specs {
+		if !seen[s.Domain] {
+			seen[s.Domain] = true
+			domains = append(domains, s.Domain)
+		}
+	}
+	return domains
+}
+
+func makeRESpec(name, domain string) ReverseEngineeringQueueEntry {
+	return ReverseEngineeringQueueEntry{
+		Name:            name,
+		Domain:          domain,
+		Topic:           "test topic",
+		File:            domain + "/specs/" + name + ".md",
+		Action:          "create",
+		CodeSearchRoots: []string{"src/"},
+		DependsOn:       []string{},
+	}
+}
+
+// withSuccessRunner replaces pyRunner for the duration of the test, writing
+// success results to execute.json before returning exit code 0.
+func withSuccessRunner(t *testing.T) func() {
+	t.Helper()
+	old := pyRunner
+	pyRunner = func(executeFilePath, dir string) (string, int) {
+		data, err := os.ReadFile(executeFilePath)
+		if err != nil {
+			return "cannot read execute.json", 1
+		}
+		var ef ExecuteJSONFile
+		if err := json.Unmarshal(data, &ef); err != nil {
+			return "cannot parse execute.json", 1
+		}
+		for i := range ef.Specs {
+			status := "success"
+			iters := 1
+			ef.Specs[i].Result = &ExecuteJSONSpecResult{Status: status, IterationsCompleted: &iters}
+		}
+		updated, _ := json.MarshalIndent(ef, "", "  ")
+		os.WriteFile(executeFilePath, updated, 0644)
+		return "", 0
+	}
+	return func() { pyRunner = old }
+}
+
+// withPartialFailureRunner replaces pyRunner: first entry fails, rest succeed.
+func withPartialFailureRunner(t *testing.T) func() {
+	t.Helper()
+	old := pyRunner
+	pyRunner = func(executeFilePath, dir string) (string, int) {
+		data, _ := os.ReadFile(executeFilePath)
+		var ef ExecuteJSONFile
+		json.Unmarshal(data, &ef)
+		for i := range ef.Specs {
+			if i == 0 {
+				errMsg := "agent timed out"
+				ef.Specs[i].Result = &ExecuteJSONSpecResult{Status: "failure", Error: &errMsg}
+			} else {
+				iters := 1
+				ef.Specs[i].Result = &ExecuteJSONSpecResult{Status: "success", IterationsCompleted: &iters}
+			}
+		}
+		updated, _ := json.MarshalIndent(ef, "", "  ")
+		os.WriteFile(executeFilePath, updated, 0644)
+		return "", 0
+	}
+	return func() { pyRunner = old }
+}
+
+// withNonZeroExitRunner replaces pyRunner: exits non-zero and does NOT write execute.json.
+func withNonZeroExitRunner(t *testing.T, stderrMsg string) func() {
+	t.Helper()
+	old := pyRunner
+	pyRunner = func(executeFilePath, dir string) (string, int) {
+		// Remove execute.json to simulate unreadable results.
+		os.Remove(executeFilePath)
+		return stderrMsg, 1
+	}
+	return func() { pyRunner = old }
+}
+
+// TestReverseEngineeringExecuteGeneratesExecuteJSON verifies that EXECUTE writes execute.json
+// with the correct structure: project_root, active mode config, and all queue entries.
+func TestReverseEngineeringExecuteGeneratesExecuteJSON(t *testing.T) {
+	dir := t.TempDir()
+	specs := []ReverseEngineeringQueueEntry{makeRESpec("auth-handler", "api")}
+	s := setupREExecuteState(t, dir, specs, "self_refine")
+	s.Config.ReverseEngineering.SelfRefine = &SelfRefineConfig{Rounds: 2}
+
+	defer withSuccessRunner(t)()
+
+	if err := Advance(s, AdvanceInput{}, dir); err != nil {
+		t.Fatalf("Advance failed: %v", err)
+	}
+
+	// Read execute.json from state dir.
+	executeFilePath := filepath.Join(dir, ".forgectl", "state", "execute.json")
+	data, err := os.ReadFile(executeFilePath)
+	if err != nil {
+		t.Fatalf("execute.json not written: %v", err)
+	}
+
+	var ef ExecuteJSONFile
+	if err := json.Unmarshal(data, &ef); err != nil {
+		t.Fatalf("invalid execute.json: %v", err)
+	}
+
+	if ef.ProjectRoot != dir {
+		t.Errorf("project_root = %q, want %q", ef.ProjectRoot, dir)
+	}
+	if ef.Config.Mode != "self_refine" {
+		t.Errorf("config.mode = %q, want self_refine", ef.Config.Mode)
+	}
+	if ef.Config.SelfRefine == nil || ef.Config.SelfRefine.Rounds != 2 {
+		t.Errorf("config.self_refine not set correctly")
+	}
+	if ef.Config.MultiPass != nil {
+		t.Errorf("inactive multi_pass should be omitted, got %+v", ef.Config.MultiPass)
+	}
+	if len(ef.Specs) != 1 || ef.Specs[0].Name != "auth-handler" {
+		t.Errorf("unexpected specs: %+v", ef.Specs)
+	}
+}
+
+// TestReverseEngineeringExecuteCreatesSpecsDirectories verifies that EXECUTE creates
+// <project_root>/<domain>/specs/ directories for each unique domain before invoking the subprocess.
+func TestReverseEngineeringExecuteCreatesSpecsDirectories(t *testing.T) {
+	dir := t.TempDir()
+	specs := []ReverseEngineeringQueueEntry{
+		makeRESpec("spec-a", "api"),
+		makeRESpec("spec-b", "api"), // same domain — deduped
+		makeRESpec("spec-c", "billing"),
+	}
+	s := setupREExecuteState(t, dir, specs, "single_shot")
+
+	defer withSuccessRunner(t)()
+
+	if err := Advance(s, AdvanceInput{}, dir); err != nil {
+		t.Fatalf("Advance failed: %v", err)
+	}
+
+	for _, domain := range []string{"api", "billing"} {
+		specsDir := filepath.Join(dir, domain, "specs")
+		if _, err := os.Stat(specsDir); os.IsNotExist(err) {
+			t.Errorf("specs dir not created: %s", specsDir)
+		}
+	}
+}
+
+// TestReverseEngineeringExecuteAllSuccessAdvancesToReconcile verifies that when all subprocess
+// results are "success", state advances to RECONCILE with reconcile_domain=0 and round=1.
+func TestReverseEngineeringExecuteAllSuccessAdvancesToReconcile(t *testing.T) {
+	dir := t.TempDir()
+	specs := []ReverseEngineeringQueueEntry{makeRESpec("spec-a", "api"), makeRESpec("spec-b", "api")}
+	s := setupREExecuteState(t, dir, specs, "single_shot")
+
+	defer withSuccessRunner(t)()
+
+	if err := Advance(s, AdvanceInput{}, dir); err != nil {
+		t.Fatalf("Advance failed: %v", err)
+	}
+
+	if s.State != StateReconcile {
+		t.Errorf("state = %s, want RECONCILE", s.State)
+	}
+	if s.ReverseEngineering.ReconcileDomain != 0 {
+		t.Errorf("reconcile_domain = %d, want 0", s.ReverseEngineering.ReconcileDomain)
+	}
+	if s.ReverseEngineering.Round != 1 {
+		t.Errorf("round = %d, want 1", s.ReverseEngineering.Round)
+	}
+}
+
+// TestReverseEngineeringExecutePartialFailureStaysInExecute verifies that when any subprocess
+// result is "failure", state stays in EXECUTE and per-entry results are written to executeOutput.
+func TestReverseEngineeringExecutePartialFailureStaysInExecute(t *testing.T) {
+	dir := t.TempDir()
+	specs := []ReverseEngineeringQueueEntry{makeRESpec("spec-a", "api"), makeRESpec("spec-b", "api")}
+	s := setupREExecuteState(t, dir, specs, "single_shot")
+
+	defer withPartialFailureRunner(t)()
+
+	var buf bytes.Buffer
+	oldOut := executeOutput
+	executeOutput = &buf
+	defer func() { executeOutput = oldOut }()
+
+	if err := Advance(s, AdvanceInput{}, dir); err != nil {
+		t.Fatalf("Advance failed: %v", err)
+	}
+
+	if s.State != StateExecute {
+		t.Errorf("state = %s, want EXECUTE (partial failure should stay in EXECUTE)", s.State)
+	}
+
+	out := buf.String()
+	if !strings.Contains(out, "failure") {
+		t.Errorf("expected per-entry failure output, got:\n%s", out)
+	}
+	if !strings.Contains(out, "spec-a") {
+		t.Errorf("expected failed entry name in output, got:\n%s", out)
+	}
+	if !strings.Contains(out, "success") {
+		t.Errorf("expected successful entry in output, got:\n%s", out)
+	}
+}
+
+// TestReverseEngineeringExecuteEmptyQueueRejected verifies that an empty queue returns an error
+// before any subprocess invocation.
+func TestReverseEngineeringExecuteEmptyQueueRejected(t *testing.T) {
+	dir := t.TempDir()
+	s := setupREExecuteState(t, dir, []ReverseEngineeringQueueEntry{}, "single_shot")
+
+	subprocessCalled := false
+	old := pyRunner
+	pyRunner = func(_, _ string) (string, int) {
+		subprocessCalled = true
+		return "", 0
+	}
+	defer func() { pyRunner = old }()
+
+	err := Advance(s, AdvanceInput{}, dir)
+	if err == nil {
+		t.Fatal("expected error for empty queue")
+	}
+	if !strings.Contains(err.Error(), "zero entries") {
+		t.Errorf("expected 'zero entries' in error, got: %v", err)
+	}
+	if subprocessCalled {
+		t.Error("subprocess must not be invoked for empty queue")
+	}
+	if s.State != StateExecute {
+		t.Errorf("state should stay in EXECUTE, got %s", s.State)
+	}
+}
+
+// TestReverseEngineeringExecuteSubprocessFailureOutputsStop verifies that when the subprocess
+// exits non-zero and execute.json is unreadable, the STOP message is written to executeOutput.
+func TestReverseEngineeringExecuteSubprocessFailureOutputsStop(t *testing.T) {
+	dir := t.TempDir()
+	specs := []ReverseEngineeringQueueEntry{makeRESpec("spec-a", "api")}
+	s := setupREExecuteState(t, dir, specs, "single_shot")
+
+	stderrMsg := "Traceback: KeyError 'model'"
+	defer withNonZeroExitRunner(t, stderrMsg)()
+
+	var buf bytes.Buffer
+	oldOut := executeOutput
+	executeOutput = &buf
+	defer func() { executeOutput = oldOut }()
+
+	if err := Advance(s, AdvanceInput{}, dir); err != nil {
+		t.Fatalf("Advance should not return error for subprocess failure, got: %v", err)
+	}
+
+	if s.State != StateExecute {
+		t.Errorf("state = %s, want EXECUTE after subprocess failure", s.State)
+	}
+	out := buf.String()
+	if !strings.Contains(out, "STOP") {
+		t.Errorf("expected STOP in output, got:\n%s", out)
+	}
+	if !strings.Contains(out, stderrMsg) {
+		t.Errorf("expected stderr in output, got:\n%s", out)
+	}
+}
+
+// TestReverseEngineeringExecuteWorksFromAnyDir verifies that EXECUTE uses absolute paths
+// so it works correctly regardless of the current working directory.
+func TestReverseEngineeringExecuteWorksFromAnyDir(t *testing.T) {
+	dir := t.TempDir()
+	specs := []ReverseEngineeringQueueEntry{makeRESpec("spec-a", "api")}
+	s := setupREExecuteState(t, dir, specs, "single_shot")
+
+	// Capture the executeFilePath passed to the subprocess.
+	var capturedPath string
+	old := pyRunner
+	pyRunner = func(executeFilePath, runDir string) (string, int) {
+		capturedPath = executeFilePath
+		// Write success results.
+		data, _ := os.ReadFile(executeFilePath)
+		var ef ExecuteJSONFile
+		json.Unmarshal(data, &ef)
+		iters := 1
+		for i := range ef.Specs {
+			ef.Specs[i].Result = &ExecuteJSONSpecResult{Status: "success", IterationsCompleted: &iters}
+		}
+		updated, _ := json.MarshalIndent(ef, "", "  ")
+		os.WriteFile(executeFilePath, updated, 0644)
+		return "", 0
+	}
+	defer func() { pyRunner = old }()
+
+	if err := Advance(s, AdvanceInput{}, dir); err != nil {
+		t.Fatalf("Advance failed: %v", err)
+	}
+
+	if !filepath.IsAbs(capturedPath) {
+		t.Errorf("execute file path passed to subprocess is not absolute: %q", capturedPath)
+	}
+	if s.ReverseEngineering.ExecuteFile != capturedPath {
+		t.Errorf("state.execute_file = %q, want %q", s.ReverseEngineering.ExecuteFile, capturedPath)
+	}
+}
