@@ -15,18 +15,25 @@ import (
 
 // pyRunner invokes the Python subprocess for EXECUTE state.
 // Replaced in tests to avoid real subprocess invocation.
+//
+// Exit codes: 0 = success, 1 = script error, 2 = environment error.
 var pyRunner = func(executeFilePath, dir string) (string, int) {
-	cmd := exec.Command("python", "reverse_engineer.py", "--execute", executeFilePath)
+	env, err := ResolvePythonEnv()
+	if err != nil {
+		return err.Error(), 2
+	}
+	cmd := exec.Command(env.PythonBin, "-m", "reverse_engineer", "--execute", executeFilePath)
 	cmd.Dir = dir
+	cmd.Env = cleanEnv(os.Environ())
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
-	err := cmd.Run()
+	err = cmd.Run()
 	stderrStr := stderr.String()
 	if err != nil {
 		if exitErr, ok := err.(*exec.ExitError); ok {
 			return stderrStr, exitErr.ExitCode()
 		}
-		return stderrStr, 1
+		return stderrStr, 2
 	}
 	return stderrStr, 0
 }
@@ -1609,6 +1616,11 @@ func advanceREFromExecute(s *ForgeState, re *ReverseEngineeringState, dir string
 
 	// 6. Invoke subprocess.
 	stderrStr, exitCode := pyRunner(executeFilePath, dir)
+
+	// 6a. Exit code 2 = environment error (hard failure, not retryable).
+	if exitCode == 2 {
+		return fmt.Errorf("Python environment error: %s", stderrStr)
+	}
 
 	// 7. Read execute.json after subprocess exits.
 	updatedData, readErr := os.ReadFile(executeFilePath)

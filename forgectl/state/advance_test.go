@@ -2969,6 +2969,28 @@ func TestReverseEngineeringExecuteSubprocessFailureOutputsStop(t *testing.T) {
 	}
 }
 
+// TestReverseEngineeringExecuteEnvErrorReturnsError verifies that exit code 2
+// (environment error) causes Advance to return an error rather than staying in EXECUTE.
+func TestReverseEngineeringExecuteEnvErrorReturnsError(t *testing.T) {
+	dir := t.TempDir()
+	specs := []ReverseEngineeringQueueEntry{makeRESpec("spec-a", "api")}
+	s := setupREExecuteState(t, dir, specs, "single_shot")
+
+	old := pyRunner
+	pyRunner = func(executeFilePath, dir string) (string, int) {
+		return "Python environment not installed", 2
+	}
+	defer func() { pyRunner = old }()
+
+	err := Advance(s, AdvanceInput{}, dir)
+	if err == nil {
+		t.Fatal("expected error for exit code 2, got nil")
+	}
+	if !strings.Contains(err.Error(), "Python environment error") {
+		t.Errorf("error = %q, want it to mention Python environment error", err.Error())
+	}
+}
+
 // TestReverseEngineeringExecuteWorksFromAnyDir verifies that EXECUTE uses absolute paths
 // so it works correctly regardless of the current working directory.
 // TestReverseEngineeringReconcileAdvancesToReconcileEval verifies that advancing from RECONCILE

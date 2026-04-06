@@ -24,8 +24,15 @@ def main() -> None:
     )
     args = parser.parse_args()
 
+    # Exit codes: 0 = success, 1 = script/logic error, 2 = environment error.
     try:
         asyncio.run(execute(args.execute))
+    except ImportError as exc:
+        print(f"Environment error: {exc}", file=sys.stderr)
+        sys.exit(2)
+    except ModuleNotFoundError as exc:
+        print(f"Environment error: {exc}", file=sys.stderr)
+        sys.exit(2)
     except FileNotFoundError as exc:
         print(str(exc), file=sys.stderr)
         sys.exit(1)

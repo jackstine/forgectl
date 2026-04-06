@@ -1721,7 +1721,7 @@ func printReverseEngineeringOutput(w io.Writer, s *ForgeState, dir string) {
 		fmt.Fprintf(w, "Mode:    %s\n", cfg.Mode)
 		fmt.Fprintln(w)
 		fmt.Fprintf(w, "Action:  forgectl invokes the Python subprocess automatically.\n")
-		fmt.Fprintf(w, "         Running: python reverse_engineer.py --execute execute.json\n")
+		fmt.Fprintf(w, "         Running: python -m reverse_engineer --execute execute.json\n")
 
 	case StateReconcile:
 		domain := domainAt(re.ReconcileDomain)
