@@ -18,9 +18,9 @@ builds:
         goarch: arm64
     ldflags:
       - -s -w
-      - -X main.version={{.Version}}
-      - -X main.commit={{.Commit}}
-      - -X main.date={{.CommitDate}}
+      - -X forgectl/buildinfo.Version={{.Version}}
+      - -X forgectl/buildinfo.Commit={{.Commit}}
+      - -X forgectl/buildinfo.Date={{.CommitDate}}
     flags:
       - -trimpath
     mod_timestamp: "{{ .CommitTimestamp }}"
@@ -36,6 +36,9 @@ archives:
       - LICENSE
       - README.md
       - CHANGELOG.md
+
+extra_files:
+  - glob: dist/reverse-engineer-python.tar.gz
 
 checksum:
   name_template: "checksums.txt"
