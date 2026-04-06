@@ -12,6 +12,9 @@ dependencies = [
     "pydantic>=2.12.5",
 ]
 
+[project.scripts]
+reverse-engineer = "reverse_engineer.cli:main"
+
 [dependency-groups]
 dev = [
     "pytest>=8.3",
