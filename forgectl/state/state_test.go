@@ -195,6 +195,140 @@ func TestArchiveSessionContainsValidJSON(t *testing.T) {
 	}
 }
 
+func TestSaveAndLoadReverseEngineeringState(t *testing.T) {
+	dir := t.TempDir()
+	re := NewReverseEngineeringState("understand the auth module", []string{"domain-a", "domain-b"}, true)
+	s := &ForgeState{
+		Phase:              PhaseReverseEngineering,
+		State:              StateOrient,
+		ReverseEngineering: re,
+	}
+
+	if err := Save(dir, s); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+
+	loaded, err := Load(dir)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+
+	if loaded.ReverseEngineering == nil {
+		t.Fatal("ReverseEngineering should not be nil after load")
+	}
+	re2 := loaded.ReverseEngineering
+	if re2.Concept != "understand the auth module" {
+		t.Errorf("Concept = %q, want %q", re2.Concept, "understand the auth module")
+	}
+	if re2.TotalDomains != 2 {
+		t.Errorf("TotalDomains = %d, want 2", re2.TotalDomains)
+	}
+	if re2.Domains[0] != "domain-a" || re2.Domains[1] != "domain-b" {
+		t.Errorf("Domains = %v, want [domain-a domain-b]", re2.Domains)
+	}
+	if !re2.ColleagueReview {
+		t.Error("ColleagueReview should be true")
+	}
+	if re2.CurrentDomain != 0 || re2.ReconcileDomain != 0 || re2.Round != 0 {
+		t.Errorf("unexpected initial counters: current=%d reconcile=%d round=%d",
+			re2.CurrentDomain, re2.ReconcileDomain, re2.Round)
+	}
+}
+
+func TestSaveAndLoadReverseEngineeringStateAllFields(t *testing.T) {
+	dir := t.TempDir()
+	s := &ForgeState{
+		Phase: PhaseReverseEngineering,
+		State: StateExecute,
+		ReverseEngineering: &ReverseEngineeringState{
+			Concept:         "map the billing system",
+			Domains:         []string{"billing"},
+			CurrentDomain:   0,
+			TotalDomains:    1,
+			QueueFile:       "/tmp/queue.json",
+			QueueHash:       "abc123",
+			ExecuteFile:     "/tmp/execute.json",
+			Round:           2,
+			ColleagueReview: false,
+			ReconcileDomain: 0,
+			Evals: []EvalRecord{
+				{Round: 1, Verdict: "FAIL", EvalReport: "needs more detail"},
+				{Round: 2, Verdict: "PASS"},
+			},
+		},
+	}
+
+	if err := Save(dir, s); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+
+	loaded, err := Load(dir)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+
+	re := loaded.ReverseEngineering
+	if re == nil {
+		t.Fatal("ReverseEngineering should not be nil")
+	}
+	if re.QueueFile != "/tmp/queue.json" {
+		t.Errorf("QueueFile = %q, want /tmp/queue.json", re.QueueFile)
+	}
+	if re.QueueHash != "abc123" {
+		t.Errorf("QueueHash = %q, want abc123", re.QueueHash)
+	}
+	if re.ExecuteFile != "/tmp/execute.json" {
+		t.Errorf("ExecuteFile = %q, want /tmp/execute.json", re.ExecuteFile)
+	}
+	if re.Round != 2 {
+		t.Errorf("Round = %d, want 2", re.Round)
+	}
+	if len(re.Evals) != 2 {
+		t.Fatalf("Evals len = %d, want 2", len(re.Evals))
+	}
+	if re.Evals[0].Verdict != "FAIL" || re.Evals[1].Verdict != "PASS" {
+		t.Errorf("Evals verdicts = %v/%v, want FAIL/PASS", re.Evals[0].Verdict, re.Evals[1].Verdict)
+	}
+}
+
+func TestRecoverReverseEngineeringStateFromBackup(t *testing.T) {
+	dir := t.TempDir()
+	s := &ForgeState{
+		Phase: PhaseReverseEngineering,
+		State: StateGapAnalysis,
+		ReverseEngineering: &ReverseEngineeringState{
+			Concept:       "trace payment flow",
+			Domains:       []string{"payments"},
+			TotalDomains:  1,
+			CurrentDomain: 0,
+			Round:         1,
+		},
+	}
+
+	// Save to put a valid state in place, then put it in the backup path.
+	data, _ := json.MarshalIndent(s, "", "  ")
+	os.WriteFile(filepath.Join(dir, stateBackup), data, 0644)
+
+	if err := Recover(dir); err != nil {
+		t.Fatalf("Recover: %v", err)
+	}
+
+	loaded, err := Load(dir)
+	if err != nil {
+		t.Fatalf("Load after recovery: %v", err)
+	}
+
+	if loaded.ReverseEngineering == nil {
+		t.Fatal("ReverseEngineering should not be nil after recovery")
+	}
+	if loaded.ReverseEngineering.Concept != "trace payment flow" {
+		t.Errorf("Concept = %q, want %q", loaded.ReverseEngineering.Concept, "trace payment flow")
+	}
+	if loaded.State != StateGapAnalysis {
+		t.Errorf("State = %s, want GAP_ANALYSIS", loaded.State)
+	}
+}
+
 func TestArchiveSessionCreatesSessionsDir(t *testing.T) {
 	dir := t.TempDir()
 	s := &ForgeState{Phase: PhaseImplementing, State: StateDone}

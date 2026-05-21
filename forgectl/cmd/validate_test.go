@@ -205,6 +205,68 @@ func TestValidateWithValidationErrors(t *testing.T) {
 	}
 }
 
+func TestValidateAutoDetectsREInit(t *testing.T) {
+	dir := t.TempDir()
+	data := []byte(`{"concept": "auth refactor", "domains": ["optimizer", "api"]}`)
+	p := filepath.Join(dir, "re-init.json")
+	os.WriteFile(p, data, 0644)
+
+	validateType = ""
+	var buf bytes.Buffer
+	validateCmd.SetOut(&buf)
+	err := runValidate(validateCmd, []string{p})
+	if err != nil {
+		t.Fatalf("expected success, got: %v — output: %s", err, buf.String())
+	}
+	out := buf.String()
+	if !strings.Contains(out, "re-init") {
+		t.Errorf("output should mention re-init, got: %q", out)
+	}
+}
+
+func TestValidateAutoDetectsREQueue(t *testing.T) {
+	dir := t.TempDir()
+	data := []byte(`{"specs": [{"name":"Auth Spec","domain":"optimizer","topic":"auth","file":"specs/auth.md","action":"create","code_search_roots":["src/"],"depends_on":[]}]}`)
+	p := filepath.Join(dir, "re-queue.json")
+	os.WriteFile(p, data, 0644)
+
+	validateType = ""
+	var buf bytes.Buffer
+	validateCmd.SetOut(&buf)
+	err := runValidate(validateCmd, []string{p})
+	if err != nil {
+		t.Fatalf("expected success, got: %v — output: %s", err, buf.String())
+	}
+	out := buf.String()
+	if !strings.Contains(out, "re-queue") {
+		t.Errorf("output should mention re-queue, got: %q", out)
+	}
+}
+
+func TestValidateSpecQueueNotMistakenForREQueue(t *testing.T) {
+	dir := t.TempDir()
+	// Spec queue entries have "planning_sources", not "action".
+	p := writeSpecQueue(t, dir, []state.SpecQueueEntry{
+		{Name: "A", Domain: "d", Topic: "t", File: "a.md", PlanningSources: []string{}, DependsOn: []string{}},
+	})
+
+	validateType = ""
+	var buf bytes.Buffer
+	validateCmd.SetOut(&buf)
+	err := runValidate(validateCmd, []string{p})
+	if err != nil {
+		t.Fatalf("expected success, got: %v", err)
+	}
+	out := buf.String()
+	// Should be detected as spec-queue, not re-queue.
+	if !strings.Contains(out, "spec-queue") {
+		t.Errorf("output should mention spec-queue, got: %q", out)
+	}
+	if strings.Contains(out, "re-queue") {
+		t.Errorf("should not mention re-queue for spec queue files, got: %q", out)
+	}
+}
+
 func TestValidatePlanResolvesRefsRelativeToFile(t *testing.T) {
 	dir := t.TempDir()
 	// Create a ref file at a known path relative to the plan file.

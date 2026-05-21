@@ -25,7 +25,36 @@ func init() {
 	rootCmd.AddCommand(validateCmd)
 }
 
+// detectFileType inspects parsed JSON to determine file type. For "specs" keys,
+// it checks the first entry for an "action" field to disambiguate RE queue from spec queue.
+func detectFileType(raw map[string]json.RawMessage) string {
+	if _, ok := raw["concept"]; ok {
+		return "re-init"
+	}
+	if _, ok := raw["plans"]; ok {
+		return "plan-queue"
+	}
+	if _, ok := raw["context"]; ok {
+		return "plan"
+	}
+	if specsRaw, ok := raw["specs"]; ok {
+		// Disambiguate: RE queue entries have "action" field; spec queue entries have "planning_sources".
+		var specs []json.RawMessage
+		if json.Unmarshal(specsRaw, &specs) == nil && len(specs) > 0 {
+			var first map[string]json.RawMessage
+			if json.Unmarshal(specs[0], &first) == nil {
+				if _, hasAction := first["action"]; hasAction {
+					return "re-queue"
+				}
+			}
+		}
+		return "spec-queue"
+	}
+	return ""
+}
+
 // topKeyType maps a top-level JSON key to a known file type name.
+// Used for --type hint when auto-detection fails.
 func topKeyType(key string) string {
 	switch key {
 	case "specs":
@@ -34,6 +63,8 @@ func topKeyType(key string) string {
 		return "plan-queue"
 	case "context":
 		return "plan"
+	case "concept":
+		return "re-init"
 	}
 	return ""
 }
@@ -47,6 +78,10 @@ func typeExpectedKey(t string) string {
 		return "plans"
 	case "plan":
 		return "context"
+	case "re-init":
+		return "concept"
+	case "re-queue":
+		return "specs"
 	}
 	return ""
 }
@@ -108,20 +143,12 @@ func runValidate(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("invalid JSON: %s", jsonErrorWithLocation(data, err))
 	}
 
-	// Find the first known key (in priority order).
-	detectedKey := ""
-	for _, k := range []string{"specs", "plans", "context"} {
-		if _, ok := raw[k]; ok {
-			detectedKey = k
-			break
-		}
-	}
-
 	fileType := validateType
 
 	if fileType == "" {
-		// Auto-detect.
-		if detectedKey == "" {
+		// Auto-detect using file content.
+		fileType = detectFileType(raw)
+		if fileType == "" {
 			// Find any top-level key for the error message.
 			found := ""
 			for k := range raw {
@@ -130,26 +157,42 @@ func runValidate(cmd *cobra.Command, args []string) error {
 			}
 			fmt.Fprintf(out, "Error: cannot detect file type.\n")
 			fmt.Fprintf(out, "  Expected one of these top-level keys:\n")
-			fmt.Fprintf(out, "    \"specs\"    → spec-queue\n")
-			fmt.Fprintf(out, "    \"plans\"    → plan-queue\n")
-			fmt.Fprintf(out, "    \"context\"  → plan\n")
+			fmt.Fprintf(out, "    \"specs\"    → spec-queue (used in specifying phase)\n")
+			fmt.Fprintf(out, "    \"plans\"    → plan-queue (used in planning phase)\n")
+			fmt.Fprintf(out, "    \"context\"  → plan.json  (used in planning/implementing phases)\n")
+			fmt.Fprintf(out, "    \"concept\"  → re-init    (used in reverse engineering phase)\n")
 			if found != "" {
 				fmt.Fprintf(out, "  Found: %q\n", found)
 			}
 			fmt.Fprintf(out, "  Hint: use --type to specify the file type explicitly.\n")
 			return fmt.Errorf("cannot detect file type")
 		}
-		fileType = topKeyType(detectedKey)
-		fmt.Fprintf(out, "Detected: %s (top-level key: %q)\n\n", fileType, detectedKey)
+		// Derive the display key for the detected type.
+		displayKey := typeExpectedKey(fileType)
+		if fileType == "re-queue" {
+			fmt.Fprintf(out, "Detected: %s (top-level key: %q with \"action\" field)\n\n", fileType, displayKey)
+		} else {
+			fmt.Fprintf(out, "Detected: %s (top-level key: %q)\n\n", fileType, displayKey)
+		}
 	} else {
-		// Verify --type matches actual key.
+		// Verify --type is valid.
 		expected := typeExpectedKey(fileType)
 		if expected == "" {
-			return fmt.Errorf("--type must be spec-queue, plan-queue, or plan (got %q)", fileType)
+			return fmt.Errorf("--type must be spec-queue, plan-queue, plan, re-init, or re-queue (got %q)", fileType)
 		}
-		if detectedKey != expected {
-			errMsg := fmt.Sprintf("Error: --type %s expects top-level key %q, found %q.", fileType, expected, detectedKey)
-			hint := didYouMean(detectedKey)
+		// Find the actual detected type to check for mismatches.
+		actualType := detectFileType(raw)
+		if actualType != fileType {
+			// Determine actual top-level key for the error message.
+			actualKey := ""
+			for _, k := range []string{"concept", "specs", "plans", "context"} {
+				if _, ok := raw[k]; ok {
+					actualKey = k
+					break
+				}
+			}
+			errMsg := fmt.Sprintf("Error: --type %s expects top-level key %q, found %q.", fileType, expected, actualKey)
+			hint := didYouMean(actualKey)
 			if hint != "" {
 				fmt.Fprintf(out, "%s\n%s\n", errMsg, hint)
 			} else {
@@ -157,7 +200,7 @@ func runValidate(cmd *cobra.Command, args []string) error {
 			}
 			return fmt.Errorf("type mismatch")
 		}
-		fmt.Fprintf(out, "Detected: %s (top-level key: %q)\n\n", fileType, detectedKey)
+		fmt.Fprintf(out, "Detected: %s (top-level key: %q)\n\n", fileType, expected)
 	}
 
 	// Run validation.
@@ -185,6 +228,17 @@ func runValidate(cmd *cobra.Command, args []string) error {
 	case "plan":
 		baseDir := filepath.Dir(filePath)
 		errs = state.ValidatePlanJSON(data, baseDir)
+	case "re-init":
+		errs = state.ValidateReverseEngineeringInit(data)
+	case "re-queue":
+		// No project root or domain list available outside a session.
+		errs = state.ValidateReverseEngineeringQueue(data, "", nil)
+		if len(errs) == 0 {
+			var input state.ReverseEngineeringQueueInput
+			json.Unmarshal(data, &input)
+			entryCount = len(input.Specs)
+		}
+		entryLabel = "entries"
 	}
 
 	filename := filepath.Base(filePath)

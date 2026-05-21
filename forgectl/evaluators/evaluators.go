@@ -26,3 +26,8 @@ var ReconcileEval string
 //
 //go:embed cross-reference-eval.md
 var CrossRefEval string
+
+// ReverseEngineeringReconcileEval contains the reverse engineering reconciliation evaluation prompt.
+//
+//go:embed reverse-engineering-reconcile-eval.md
+var ReverseEngineeringReconcileEval string

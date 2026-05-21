@@ -35,9 +35,11 @@ func runInit(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("generate_planning_queue requires a completed specifying phase. Use --phase specifying instead.")
 	}
 
-	validPhases := map[string]bool{"specifying": true, "planning": true, "implementing": true}
+	validPhases := map[string]bool{
+		"specifying": true, "planning": true, "implementing": true, "reverse_engineering": true,
+	}
 	if !validPhases[initPhase] {
-		return fmt.Errorf("--phase must be specifying, planning, or implementing")
+		return fmt.Errorf("--phase must be specifying, planning, implementing, or reverse_engineering")
 	}
 
 	// Discover project root, load and validate config.
@@ -170,6 +172,35 @@ func runInit(cmd *cobra.Command, args []string) error {
 				File:   initFrom,
 			},
 		}
+
+	case state.PhaseReverseEngineering:
+		validationErrs := state.ValidateReverseEngineeringInit(data)
+		if len(validationErrs) > 0 {
+			printValidationErrors(out, validationErrs)
+			fmt.Fprintln(out, "\nExpected schema:")
+			fmt.Fprintln(out, state.ReverseEngineeringInitSchema())
+			return fmt.Errorf("input validation failed")
+		}
+		var input state.ReverseEngineeringInitInput
+		if err := json.Unmarshal(data, &input); err != nil {
+			return fmt.Errorf("parsing input: %w", err)
+		}
+
+		// Validate mode is one of the four valid values.
+		validModes := map[string]bool{
+			"single_shot": true, "self_refine": true, "multi_pass": true, "peer_review": true,
+		}
+		if !validModes[cfg.ReverseEngineering.Mode] {
+			return fmt.Errorf("reverse_engineering.mode %q is invalid; must be one of: single_shot, self_refine, multi_pass, peer_review", cfg.ReverseEngineering.Mode)
+		}
+
+		s.ReverseEngineering = &state.ReverseEngineeringState{
+			Concept:         input.Concept,
+			Domains:         input.Domains,
+			CurrentDomain:   0,
+			TotalDomains:    len(input.Domains),
+			ColleagueReview: cfg.ReverseEngineering.Reconcile.ColleagueReview,
+		}
 	}
 
 	if err := os.MkdirAll(stateDir, 0755); err != nil {
@@ -211,6 +242,8 @@ func phaseRoundConfig(cfg state.ForgeConfig, phase state.PhaseName) (batchSize, 
 		return cfg.Planning.Batch, cfg.Planning.Eval.MinRounds, cfg.Planning.Eval.MaxRounds
 	case state.PhaseImplementing:
 		return cfg.Implementing.Batch, cfg.Implementing.Eval.MinRounds, cfg.Implementing.Eval.MaxRounds
+	case state.PhaseReverseEngineering:
+		return 1, cfg.ReverseEngineering.Reconcile.MinRounds, cfg.ReverseEngineering.Reconcile.MaxRounds
 	default:
 		return 0, 0, 0
 	}

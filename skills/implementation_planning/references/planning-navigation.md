@@ -79,7 +79,7 @@ forgectl advance
 Generate the implementation plan:
 - Write `plan.json` following the schema in `references/plan-format.json` (the authoritative schema derived from forgectl's Go types)
 - Write `notes/<package>.md` files for implementation guidance
-- Output location: `<domain>/.workspace/implementation_plan/`
+- Output location: `<domain>/.forge_workspace/implementation_plan/`
 
 When you advance, forgectl automatically validates `plan.json`. If valid, you go straight to EVALUATE. If invalid, you enter VALIDATE. See VALIDATE section below for common failures.
 
@@ -94,7 +94,7 @@ Only entered when `plan.json` fails structural validation. Forgectl prints speci
 **Common validation failures:**
 - `cannot unmarshal string into Go struct field PlanJSON.refs of type state.PlanRef` — `refs` entries must be objects `{"id": "...", "path": "..."}`, not plain strings.
 - `refs: path "..." does not exist` — Paths are resolved relative to the project root (the directory containing `.forgectl/`). Use full paths from root like `api/specs/foo.md`.
-- `items[N]: ref "notes/foo.md#section" does not exist` — Remove `#anchor` fragments from `ref` paths. Forgectl runs `os.Stat()` on the raw string including the fragment.
+- `items[N]: refs path "notes/foo.md#section" does not exist` — Remove `#anchor` fragments from `refs` paths. Forgectl runs `os.Stat()` on the raw string including the fragment.
 - `missing required field "tests"` or `"depends_on"` — These fields must be arrays, never null. Use `[]` for empty.
 
 ```bash
@@ -118,7 +118,7 @@ forgectl advance --verdict PASS --eval-report <path>
 forgectl advance --verdict FAIL --eval-report <path>
 ```
 
-Eval reports are written to: `<domain>/.workspace/implementation_plan/evals/round-N.md`
+Eval reports are written to: `<domain>/.forge_workspace/implementation_plan/evals/round-N.md`
 
 ### REFINE
 
@@ -130,13 +130,21 @@ forgectl advance
 
 ### ACCEPT
 
-Plan is accepted (either by passing evaluation or forced at max rounds). Commit and advance with a message.
+Plan is accepted (either by passing evaluation or forced at max rounds).
+
+When `enable_commits` is true in `.forgectl/config`, advance with a commit message for auto-commit:
 
 ```bash
 forgectl advance --message "Accept implementation plan for <domain>"
 ```
 
-This transitions to PHASE_SHIFT (planning → implementing).
+When `enable_commits` is false, just advance:
+
+```bash
+forgectl advance
+```
+
+After ACCEPT, forgectl transitions to ORIENT (if more plans remain in the queue) or DONE (if all plans are complete). From DONE, advancing triggers PHASE_SHIFT (planning → implementing).
 
 ---
 
@@ -144,7 +152,7 @@ This transitions to PHASE_SHIFT (planning → implementing).
 
 ```bash
 # Initialize planning session
-forgectl init --phase planning --from plan-queue.json --batch-size 1 --max-rounds 3 --min-rounds 1 --guided
+forgectl init --phase planning --from plan-queue.json
 
 # See current state and what to do next
 forgectl status
@@ -159,8 +167,11 @@ forgectl eval
 forgectl advance --verdict PASS --eval-report <path>
 forgectl advance --verdict FAIL --eval-report <path>
 
-# Accept plan (ACCEPT only)
+# Accept plan (ACCEPT only, when enable_commits is true)
 forgectl advance --message "<commit message>"
+
+# Accept plan (ACCEPT only, when enable_commits is false)
+forgectl advance
 ```
 
 ### Flag Reference
@@ -168,9 +179,8 @@ forgectl advance --message "<commit message>"
 | Flag | Used in | Description |
 |------|---------|-------------|
 | `--verdict PASS\|FAIL` | EVALUATE | Evaluation result (required) |
-| `--eval-report <path>` | EVALUATE | Path to evaluation report file (required, must exist) |
-| `--message <text>` | ACCEPT | Commit message for accepted plan (required) |
-| `--guided` / `--no-guided` | any `advance` | Toggle guided mode (pauses for user discussion at REVIEW) |
+| `--eval-report <path>` | EVALUATE | Path to evaluation report file (required when `enable_eval_output` is true, must exist) |
+| `--message <text>` | ACCEPT | Commit message for accepted plan (required when `enable_commits` is true) |
 
 ---
 
@@ -184,7 +194,7 @@ forgectl advance --message "<commit message>"
 
 ## Phase Transition
 
-After ACCEPT, forgectl enters PHASE_SHIFT (planning → implementing):
+After the last plan is accepted (queue empty), forgectl enters DONE. Advancing from DONE triggers PHASE_SHIFT (planning → implementing):
 
 1. Reads `plan.json` from `current_plan.file`
 2. Validates the plan structure

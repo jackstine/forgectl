@@ -3,3 +3,12 @@
 .env
 .*.env
 .forgectl
+forgectl-state.json
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+*.egg-info/
+dist/
+.pytest_cache/

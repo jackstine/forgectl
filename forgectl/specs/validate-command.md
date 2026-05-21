@@ -18,6 +18,7 @@ The command auto-detects the file type by inspecting the top-level JSON key. A `
 |------|-------------|
 | session-init | Same validation logic used at `init` and phase shifts; `validate` exposes it as a standalone command |
 | plan-production | Same 12-point plan.json validation used at the VALIDATE state |
+| reverse-engineering | Init input and reverse engineering queue schemas validated using the same validation logic |
 
 ---
 

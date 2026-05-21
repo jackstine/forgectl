@@ -8,22 +8,16 @@ When no `forgectl-state.json` exists, initialize from the plan:
 
 ```bash
 forgectl init \
-  --from {domain}/.workspace/implementation_plan/plan.json \
-  --phase implementing \
-  --batch-size <N> \
-  --max-rounds <N>
+  --from {domain}/.forge_workspace/implementation_plan/plan.json \
+  --phase implementing
 ```
 
 | Flag | Required | Default | Description |
 |------|----------|---------|-------------|
 | `--from` | yes | — | Path to plan.json |
 | `--phase` | no | specifying | Set to `implementing` to start at implementation |
-| `--batch-size` | yes | — | Max items per evaluation batch |
-| `--max-rounds` | yes | — | Maximum evaluation rounds per batch before force-accept |
-| `--min-rounds` | no | 1 | Minimum rounds before a PASS verdict is accepted |
-| `--guided` / `--no-guided` | no | guided | Whether ORIENT states pause for user discussion |
 
-Ask the user for `batch-size` and `max-rounds` if not provided.
+All batch sizes, round limits, and guided settings are configured in `.forgectl/config` (TOML) and locked into the state file at init time.
 
 ## Key Commands
 
@@ -83,10 +77,10 @@ The scaffold has selected a batch or is transitioning between layers.
 
 ### IMPLEMENT (round 1 — first time seeing items)
 
-You have been assigned an item. The forgectl output shows: item ID, name, description, steps, files, spec, ref, and test count.
+You have been assigned an item. The forgectl output shows: item ID, name, description, steps, files, specs, refs, and test count.
 
-1. Read the item's `spec` (specification section) to understand the contract.
-2. Read the item's `ref` (notes file section at `{domain}/.workspace/implementation_plan/notes/`) for implementation guidance.
+1. Read the item's `specs` (specification references) to understand the contract.
+2. Read the item's `refs` (notes file paths at `{domain}/.forge_workspace/implementation_plan/notes/`) for implementation guidance.
 3. Search the codebase using subagents to confirm the feature doesn't already exist.
 4. Implement the functionality completely. No placeholders, no stubs.
 5. Run the tests for the code you changed or added.
@@ -103,7 +97,7 @@ You have been assigned an item. The forgectl output shows: item ID, name, descri
 The batch has been evaluated and returned for another round. The forgectl output shows the eval report path.
 
 1. **Study the eval report** — it contains specific deficiencies to address.
-2. Read the item's spec and ref again if needed.
+2. Read the item's specs and refs again if needed.
 3. Fix the deficiencies identified in the eval report.
 4. If the eval was PASS but minimum rounds weren't met, verify the implementation and look for improvements.
 5. Run the tests.
@@ -138,7 +132,7 @@ The batch is terminal (passed or force-accepted). Commit your work.
    ```bash
    git add -A && git commit -m "<descriptive message>"
    ```
-2. Add a log entry to `{domain}/.workspace/implementation/IMPLEMENTATION_LOG.md`.
+2. Add a log entry to `{domain}/.forge_workspace/implementation/IMPLEMENTATION_LOG.md`.
 3. Advance:
    ```bash
    forgectl advance --message "<commit message>"
@@ -149,7 +143,7 @@ The batch is terminal (passed or force-accepted). Commit your work.
 
 All layers and items are complete.
 
-1. Add a final summary log entry to `{domain}/.workspace/implementation/IMPLEMENTATION_LOG.md`.
+1. Add a final summary log entry to `{domain}/.forge_workspace/implementation/IMPLEMENTATION_LOG.md`.
 2. The session is finished.
 
 ---
@@ -158,7 +152,7 @@ All layers and items are complete.
 
 - **Round 1 IMPLEMENT** requires `--message` — forgectl auto-commits per item.
 - **Round 2+ IMPLEMENT** does not need `--message` — no auto-commit, just fixing deficiencies.
-- **ORIENT** is a guided pause when `--guided` is set. Stop and discuss with the user.
+- **ORIENT** is a guided pause when `general.user_guided` is true in the config. Stop and discuss with the user.
 - **EVALUATE round 2+** output includes a `--- PREVIOUS EVALUATIONS ---` section listing prior round reports.
 - Forgectl tracks `passes` and `rounds` in plan.json automatically. Do not modify these fields manually.
-- The `--guided` / `--no-guided` flags can be passed on any `advance` call to toggle guided mode.
+- The `--guided` / `--no-guided` flags can be passed on `advance` calls to override the config's guided setting for that transition.

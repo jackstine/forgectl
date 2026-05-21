@@ -1,0 +1,63 @@
+# Dockerfile.install-test — Tests the local install process on a clean system.
+#
+# Usage (from project root):
+#   docker build -f scripts/install/Dockerfile.install-test -t forgectl-install-test .
+#
+# This proves that make install-global works on a bare machine with only Go and uv.
+
+# ============================================================
+# Stage 1: BUILD — Build the Go binary (Go only, no Python)
+# ============================================================
+FROM golang:1.22-bookworm AS builder
+
+WORKDIR /src
+COPY forgectl/ forgectl/
+RUN cd forgectl && CGO_ENABLED=0 go build -o forgectl .
+
+# ============================================================
+# Stage 2: TEST — Install and verify on a clean system
+# ============================================================
+FROM debian:bookworm-slim AS test
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    curl ca-certificates make git \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install uv
+RUN curl -LsSf https://astral.sh/uv/install.sh | sh
+ENV PATH="/root/.local/bin:$PATH"
+
+# Verify no system Python
+RUN ! command -v python3 && echo "PASS: no system Python"
+
+# Copy project source
+WORKDIR /src
+COPY Makefile .
+COPY reverse_engineer/ reverse_engineer/
+COPY scripts/ scripts/
+COPY --from=builder /src/forgectl/forgectl forgectl/forgectl
+
+# Run install-python (the part that sets up the Python environment)
+RUN make install-python VERSION=test
+
+# Verify the venv was created
+RUN test -f /root/.local/share/forgectl/test/python/.venv/bin/python \
+    && echo "PASS: venv python exists"
+
+# Verify checksums file was generated
+RUN test -f /root/.local/share/forgectl/test/python/checksums.sha256 \
+    && echo "PASS: checksums.sha256 exists"
+
+# Verify the venv Python can import the package
+RUN /root/.local/share/forgectl/test/python/.venv/bin/python \
+    -c "import reverse_engineer; print('PASS: import works')"
+
+# Verify python -m reverse_engineer --help works
+RUN /root/.local/share/forgectl/test/python/.venv/bin/python \
+    -m reverse_engineer --help \
+    && echo "PASS: python -m reverse_engineer works"
+
+# Nuclear test: confirm no system Python was used
+RUN ! command -v python3 && echo "PASS: still no system Python"
+
+RUN echo "All install tests passed."

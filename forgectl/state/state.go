@@ -199,3 +199,19 @@ func NewImplementingState() *ImplementingState {
 		LayerHistory: []LayerHistory{},
 	}
 }
+
+// NewReverseEngineeringState creates initial reverse engineering state from init input.
+func NewReverseEngineeringState(concept string, domains []string, colleagueReview bool) *ReverseEngineeringState {
+	d := make([]string, len(domains))
+	copy(d, domains)
+	return &ReverseEngineeringState{
+		Concept:         concept,
+		Domains:         d,
+		CurrentDomain:   0,
+		TotalDomains:    len(domains),
+		Round:           0,
+		ColleagueReview: colleagueReview,
+		ReconcileDomain: 0,
+		Evals:           []EvalRecord{},
+	}
+}

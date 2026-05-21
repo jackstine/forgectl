@@ -8,6 +8,7 @@ const (
 	PhasePlanning              PhaseName = "planning"
 	PhaseGeneratePlanningQueue PhaseName = "generate_planning_queue"
 	PhaseImplementing          PhaseName = "implementing"
+	PhaseReverseEngineering    PhaseName = "reverse_engineering"
 )
 
 // StateName represents the current state within a phase.
@@ -37,6 +38,14 @@ const (
 	StateImplement             StateName = "IMPLEMENT"
 	StateCommit                StateName = "COMMIT"
 	StateSelfReview            StateName = "SELF_REVIEW"
+	// Reverse engineering phase states
+	StateSurvey                StateName = "SURVEY"
+	StateGapAnalysis           StateName = "GAP_ANALYSIS"
+	StateDecompose             StateName = "DECOMPOSE"
+	StateQueue                 StateName = "QUEUE"
+	StateExecute               StateName = "EXECUTE"
+	StateColleagueReview       StateName = "COLLEAGUE_REVIEW"
+	StateReconcileAdvance      StateName = "RECONCILE_ADVANCE"
 )
 
 // --- Configuration structs ---
@@ -112,6 +121,56 @@ type ImplementingConfig struct {
 	Eval           EvalConfig `json:"eval"`
 }
 
+// SubAgentConfig specifies a sub-agent used within a reverse engineering task.
+type SubAgentConfig struct {
+	Model string `json:"model" toml:"model"`
+	Type  string `json:"type" toml:"type"`
+	Count int    `json:"count" toml:"count"`
+}
+
+// DrafterConfig configures the primary drafting agent and its exploration sub-agents.
+type DrafterConfig struct {
+	Model     string         `json:"model" toml:"model"`
+	Subagents SubAgentConfig `json:"subagents" toml:"subagents"`
+}
+
+// SelfRefineConfig configures the self-refine execution mode.
+type SelfRefineConfig struct {
+	Rounds int `json:"rounds" toml:"rounds"`
+}
+
+// MultiPassConfig configures the multi-pass execution mode.
+type MultiPassConfig struct {
+	Passes int `json:"passes" toml:"passes"`
+}
+
+// PeerReviewConfig configures the peer-review execution mode.
+type PeerReviewConfig struct {
+	Reviewers int            `json:"reviewers" toml:"reviewers"`
+	Rounds    int            `json:"rounds" toml:"rounds"`
+	Subagents SubAgentConfig `json:"subagents" toml:"subagents"`
+}
+
+// ReconcileConfig configures the reconciliation loop after EXECUTE.
+type ReconcileConfig struct {
+	MinRounds       int         `json:"min_rounds" toml:"min_rounds"`
+	MaxRounds       int         `json:"max_rounds" toml:"max_rounds"`
+	ColleagueReview bool        `json:"colleague_review" toml:"colleague_review"`
+	Eval            AgentConfig `json:"eval" toml:"eval"`
+}
+
+// ReverseEngineeringConfig configures the reverse engineering phase.
+type ReverseEngineeringConfig struct {
+	Mode        string            `json:"mode" toml:"mode"`
+	Drafter     DrafterConfig     `json:"drafter" toml:"drafter"`
+	SelfRefine  *SelfRefineConfig `json:"self_refine,omitempty" toml:"self_refine"`
+	MultiPass   *MultiPassConfig  `json:"multi_pass,omitempty" toml:"multi_pass"`
+	PeerReview  *PeerReviewConfig `json:"peer_review,omitempty" toml:"peer_review"`
+	Reconcile   ReconcileConfig   `json:"reconcile" toml:"reconcile"`
+	Survey      SubAgentConfig    `json:"survey" toml:"survey"`
+	GapAnalysis SubAgentConfig    `json:"gap_analysis" toml:"gap_analysis"`
+}
+
 // DomainConfig identifies a domain within the project.
 type DomainConfig struct {
 	Name string `json:"name"`
@@ -141,13 +200,14 @@ type GeneralConfig struct {
 // ForgeConfig is the full project configuration loaded from .forgectl/config.
 // It is locked into ForgeState at init time so all commands use consistent settings.
 type ForgeConfig struct {
-	General      GeneralConfig      `json:"general"`
-	Domains      []DomainConfig     `json:"domains,omitempty"`
-	Specifying   SpecifyingConfig   `json:"specifying"`
-	Planning     PlanningConfig     `json:"planning"`
-	Implementing ImplementingConfig `json:"implementing"`
-	Paths        PathsConfig        `json:"paths"`
-	Logs         LogsConfig         `json:"logs"`
+	General            GeneralConfig            `json:"general"`
+	Domains            []DomainConfig           `json:"domains,omitempty"`
+	Specifying         SpecifyingConfig         `json:"specifying"`
+	Planning           PlanningConfig           `json:"planning"`
+	Implementing       ImplementingConfig       `json:"implementing"`
+	ReverseEngineering ReverseEngineeringConfig `json:"reverse_engineering"`
+	Paths              PathsConfig              `json:"paths"`
+	Logs               LogsConfig               `json:"logs"`
 }
 
 // DefaultForgeConfig returns a ForgeConfig with all spec-defined default values applied.
@@ -196,6 +256,40 @@ func DefaultForgeConfig() ForgeConfig {
 				},
 			},
 		},
+		ReverseEngineering: ReverseEngineeringConfig{
+			Mode: "self_refine",
+			Drafter: DrafterConfig{
+				Model: "opus",
+				Subagents: SubAgentConfig{
+					Model: "opus",
+					Type:  "explorer",
+					Count: 3,
+				},
+			},
+			SelfRefine: &SelfRefineConfig{
+				Rounds: 2,
+			},
+			Reconcile: ReconcileConfig{
+				MinRounds:       1,
+				MaxRounds:       3,
+				ColleagueReview: false,
+				Eval: AgentConfig{
+					Model: "opus",
+					Type:  "general-purpose",
+					Count: 1,
+				},
+			},
+			Survey: SubAgentConfig{
+				Model: "haiku",
+				Type:  "explorer",
+				Count: 2,
+			},
+			GapAnalysis: SubAgentConfig{
+				Model: "sonnet",
+				Type:  "explorer",
+				Count: 5,
+			},
+		},
 		Paths: PathsConfig{
 			StateDir:     ".forgectl/state",
 			WorkspaceDir: ".forge_workspace",
@@ -238,6 +332,64 @@ type PlanQueueEntry struct {
 // PlanQueueInput is the schema for --from at specifying→planning phase shift.
 type PlanQueueInput struct {
 	Plans []PlanQueueEntry `json:"plans"`
+}
+
+// ReverseEngineeringInitInput is the schema for --from with --phase reverse_engineering.
+type ReverseEngineeringInitInput struct {
+	Concept string   `json:"concept"`
+	Domains []string `json:"domains"`
+}
+
+// ReverseEngineeringQueueEntry is a spec entry in the reverse engineering queue file.
+type ReverseEngineeringQueueEntry struct {
+	Name            string   `json:"name"`
+	Domain          string   `json:"domain"`
+	Topic           string   `json:"topic"`
+	File            string   `json:"file"`
+	Action          string   `json:"action"`
+	CodeSearchRoots []string `json:"code_search_roots"`
+	DependsOn       []string `json:"depends_on"`
+}
+
+// ReverseEngineeringQueueInput is the schema for the reverse engineering queue file.
+type ReverseEngineeringQueueInput struct {
+	Specs []ReverseEngineeringQueueEntry `json:"specs"`
+}
+
+// ExecuteJSONConfig is the config section of execute.json.
+// Only the active mode's config block is included.
+type ExecuteJSONConfig struct {
+	Mode       string            `json:"mode"`
+	Drafter    DrafterConfig     `json:"drafter"`
+	SelfRefine *SelfRefineConfig `json:"self_refine,omitempty"`
+	MultiPass  *MultiPassConfig  `json:"multi_pass,omitempty"`
+	PeerReview *PeerReviewConfig `json:"peer_review,omitempty"`
+}
+
+// ExecuteJSONSpecResult is the result field of a spec entry in execute.json.
+type ExecuteJSONSpecResult struct {
+	Status              string  `json:"status"`
+	IterationsCompleted *int    `json:"iterations_completed,omitempty"`
+	Error               *string `json:"error,omitempty"`
+}
+
+// ExecuteJSONSpec is a spec entry in execute.json.
+type ExecuteJSONSpec struct {
+	Name            string                 `json:"name"`
+	Domain          string                 `json:"domain"`
+	Topic           string                 `json:"topic"`
+	File            string                 `json:"file"`
+	Action          string                 `json:"action"`
+	CodeSearchRoots []string               `json:"code_search_roots"`
+	DependsOn       []string               `json:"depends_on"`
+	Result          *ExecuteJSONSpecResult `json:"result"`
+}
+
+// ExecuteJSONFile is the complete execute.json structure written by forgectl for the Python subprocess.
+type ExecuteJSONFile struct {
+	ProjectRoot string            `json:"project_root"`
+	Config      ExecuteJSONConfig `json:"config"`
+	Specs       []ExecuteJSONSpec  `json:"specs"`
 }
 
 // --- Plan.json schema (for implementing phase) ---
@@ -438,6 +590,23 @@ type ImplementingState struct {
 	PlanQueue         []PlanQueueEntry `json:"plan_queue,omitempty"`
 }
 
+// --- Reverse engineering phase state ---
+
+// ReverseEngineeringState holds reverse engineering phase data.
+type ReverseEngineeringState struct {
+	Concept         string       `json:"concept"`
+	Domains         []string     `json:"domains"`
+	CurrentDomain   int          `json:"current_domain"`
+	TotalDomains    int          `json:"total_domains"`
+	QueueFile       string       `json:"queue_file,omitempty"`
+	QueueHash       string       `json:"queue_hash,omitempty"`
+	ExecuteFile     string       `json:"execute_file,omitempty"`
+	Round           int          `json:"round"`
+	ColleagueReview bool         `json:"colleague_review"`
+	ReconcileDomain int          `json:"reconcile_domain"`
+	Evals           []EvalRecord `json:"evals,omitempty"`
+}
+
 // --- Phase shift info ---
 
 // PhaseShiftInfo records the from→to of a phase shift.
@@ -460,6 +629,10 @@ type ForgeState struct {
 	GeneratePlanningQueue *GeneratePlanningQueueState `json:"generate_planning_queue,omitempty"`
 	Planning              *PlanningState              `json:"planning"`
 	Implementing          *ImplementingState          `json:"implementing"`
+	ReverseEngineering    *ReverseEngineeringState    `json:"reverse_engineering,omitempty"`
+	// Logger is a transient, non-serialized activity logger attached at the cmd layer.
+	// When nil, all log writes are no-ops.
+	Logger                *Logger                     `json:"-"`
 }
 
 // AdvanceInput carries flags from the advance command.
