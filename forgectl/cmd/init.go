@@ -170,6 +170,22 @@ func runInit(cmd *cobra.Command, args []string) error {
 				File:   initFrom,
 			},
 		}
+
+	case state.PhaseReverseEngineering:
+		validationErrs := state.ValidateReverseEngineeringInput(data)
+		if len(validationErrs) > 0 {
+			printValidationErrors(out, validationErrs)
+			fmt.Fprintln(out, "\nExpected schema:")
+			fmt.Fprintln(out, state.ReverseEngineeringInitSchema())
+			return fmt.Errorf("input validation failed")
+		}
+		var input state.ReverseEngineeringInitInput
+		if err := json.Unmarshal(data, &input); err != nil {
+			return fmt.Errorf("parsing input: %w", err)
+		}
+		reState := state.NewReverseEngineeringState(input.Concept, input.Domains)
+		reState.ColleagueReview = cfg.ReverseEngineering.Reconcile.ColleagueReview
+		s.ReverseEngineering = reState
 	}
 
 	if err := os.MkdirAll(stateDir, 0755); err != nil {
@@ -211,6 +227,9 @@ func phaseRoundConfig(cfg state.ForgeConfig, phase state.PhaseName) (batchSize, 
 		return cfg.Planning.Batch, cfg.Planning.Eval.MinRounds, cfg.Planning.Eval.MaxRounds
 	case state.PhaseImplementing:
 		return cfg.Implementing.Batch, cfg.Implementing.Eval.MinRounds, cfg.Implementing.Eval.MaxRounds
+	case state.PhaseReverseEngineering:
+		// No batching in reverse engineering; rounds reflect the reconcile loop.
+		return 0, cfg.ReverseEngineering.Reconcile.MinRounds, cfg.ReverseEngineering.Reconcile.MaxRounds
 	default:
 		return 0, 0, 0
 	}
