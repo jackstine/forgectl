@@ -1,0 +1,700 @@
+{
+  "context": {
+    "domain": "forgectl",
+    "module": "forgectl"
+  },
+  "refs": [
+    {
+      "id": "spec-reverse-engineering",
+      "path": "../../../specs/reverse-engineering.md"
+    },
+    {
+      "id": "spec-session-init",
+      "path": "../../../specs/session-init.md"
+    },
+    {
+      "id": "spec-state-persistence",
+      "path": "../../../specs/state-persistence.md"
+    },
+    {
+      "id": "spec-activity-logging",
+      "path": "../../../specs/activity-logging.md"
+    },
+    {
+      "id": "spec-validate-command",
+      "path": "../../../specs/validate-command.md"
+    },
+    {
+      "id": "notes-overview",
+      "path": "notes/overview.md"
+    },
+    {
+      "id": "notes-state-package",
+      "path": "notes/state-package.md"
+    },
+    {
+      "id": "notes-cmd-package",
+      "path": "notes/cmd-package.md"
+    },
+    {
+      "id": "notes-evaluators",
+      "path": "notes/evaluators.md"
+    },
+    {
+      "id": "notes-testing",
+      "path": "notes/testing.md"
+    }
+  ],
+  "layers": [
+    {
+      "id": "L0",
+      "name": "Foundation (types, phase, states, config)",
+      "items": [
+        "re.phase-const",
+        "re.state-consts",
+        "re.config",
+        "re.state-struct"
+      ]
+    },
+    {
+      "id": "L1",
+      "name": "Validation \u0026 Hashing",
+      "items": [
+        "re.validate-input",
+        "re.validate-queue",
+        "re.queue-hash"
+      ]
+    },
+    {
+      "id": "L2",
+      "name": "Session Init",
+      "items": [
+        "re.init"
+      ]
+    },
+    {
+      "id": "L3",
+      "name": "State Machine",
+      "items": [
+        "re.advance-domain-loop",
+        "re.advance-execute-loop",
+        "re.advance-reconcile-loop"
+      ]
+    },
+    {
+      "id": "L4",
+      "name": "Commands, Eval \u0026 Output",
+      "items": [
+        "re.add-domain",
+        "re.eval-reconcile",
+        "re.output"
+      ]
+    },
+    {
+      "id": "L5",
+      "name": "Logging",
+      "items": [
+        "re.logging"
+      ]
+    }
+  ],
+  "items": [
+    {
+      "id": "re.phase-const",
+      "name": "Add reverse_engineering phase constant",
+      "description": "Add PhaseReverseEngineering to the PhaseName const block and accept \"reverse_engineering\" wherever the phase string is parsed/validated, so a session can be initialized at this phase. generate_planning_queue stays non-initializable.",
+      "depends_on": [],
+      "steps": [
+        "Add PhaseReverseEngineering PhaseName = \"reverse_engineering\" to the const block in state/types.go.",
+        "Add \"reverse_engineering\": true to the validPhases map in cmd/init.go and update the invalid-phase error message to list it.",
+        "Leave the existing generate_planning_queue rejection in place."
+      ],
+      "files": [
+        "forgectl/state/types.go",
+        "forgectl/cmd/init.go"
+      ],
+      "specs": [
+        "forgectl/specs/session-init.md"
+      ],
+      "refs": [
+        "notes/overview.md",
+        "notes/state-package.md"
+      ],
+      "tests": [
+        {
+          "category": "functional",
+          "description": "init --phase reverse_engineering is accepted and produces phase=reverse_engineering, state=ORIENT, started_at_phase=reverse_engineering.",
+          "passes": false
+        },
+        {
+          "category": "rejection",
+          "description": "init --phase generate_planning_queue is still rejected, and an unrecognized --phase value still errors listing the four valid phases.",
+          "passes": false
+        }
+      ],
+      "passes": "passed",
+      "rounds": 1
+    },
+    {
+      "id": "re.state-consts",
+      "name": "Add reverse_engineering state constants",
+      "description": "Add the RE-only StateName constants (SURVEY, GAP_ANALYSIS, DECOMPOSE, QUEUE, EXECUTE_REVERSE_ENGINEER, POST_REVERSE_ENGINEER, COLLEAGUE_REVIEW, RECONCILE_ADVANCE). ORIENT, RECONCILE, RECONCILE_EVAL, DONE are reused from the existing set.",
+      "depends_on": [],
+      "steps": [
+        "Add the eight new StateName constants with the exact string values from the spec state machine to the const block in state/types.go."
+      ],
+      "files": [
+        "forgectl/state/types.go"
+      ],
+      "specs": [
+        "forgectl/specs/reverse-engineering.md"
+      ],
+      "refs": [
+        "notes/state-package.md"
+      ],
+      "tests": [
+        {
+          "category": "functional",
+          "description": "All eight new state constants exist with the exact spec string values, and ORIENT/RECONCILE/RECONCILE_EVAL/DONE remain shared (no duplicate definitions).",
+          "passes": false
+        }
+      ],
+      "passes": "passed",
+      "rounds": 1
+    },
+    {
+      "id": "re.config",
+      "name": "Add [reverse_engineering] config block",
+      "description": "Model the [reverse_engineering] TOML block (execute, survey, gap_analysis, reconcile + reconcile.eval) as Go config, seed defaults, merge from TOML, and validate min\u003c=max — so config is locked into the state file at init.",
+      "depends_on": [],
+      "steps": [
+        "Add ReverseEngineeringConfig (Execute/Survey/GapAnalysis AgentConfig, Reconcile REReconcileConfig{MinRounds,MaxRounds,ColleagueReview,Eval}) and attach it to ForgeConfig in state/types.go.",
+        "Seed defaults in DefaultForgeConfig: execute haiku/explorer/3, survey haiku/explorer/2, gap_analysis sonnet/explorer/5, reconcile min1/max3/colleague_review false, eval opus/general-purpose/1.",
+        "Add tomlReverseEngineeringConfig (+ nested) and merge logic in mergeTomlConfig in state/config.go (ColleagueReview as *bool so false is explicit).",
+        "Add a reverse_engineering.reconcile min_rounds\u003c=max_rounds check to ValidateConfig."
+      ],
+      "files": [
+        "forgectl/state/types.go",
+        "forgectl/state/config.go"
+      ],
+      "specs": [
+        "forgectl/specs/reverse-engineering.md"
+      ],
+      "refs": [
+        "notes/state-package.md"
+      ],
+      "tests": [
+        {
+          "category": "functional",
+          "description": "DefaultForgeConfig seeds all reverse_engineering defaults (execute/survey/gap_analysis/reconcile/reconcile.eval) with the spec-defined values.",
+          "passes": false
+        },
+        {
+          "category": "functional",
+          "description": "A [reverse_engineering.*] TOML section overrides the matching defaults, and the merged config is locked into the state file at init.",
+          "passes": false
+        },
+        {
+          "category": "rejection",
+          "description": "ValidateConfig reports a violation when reverse_engineering.reconcile.min_rounds exceeds max_rounds.",
+          "passes": false
+        }
+      ],
+      "passes": "passed",
+      "rounds": 1
+    },
+    {
+      "id": "re.state-struct",
+      "name": "Add ReverseEngineeringState and schemas",
+      "description": "Add the reverse_engineering state section (concept, domains, indices, execute item index, reconcile round, queue file path + content hash, colleague_review, parsed queue, per-domain reconcile) plus the init-input and queue Go schemas, and wire the nil-able pointer onto ForgeState so it persists.",
+      "depends_on": [],
+      "steps": [
+        "Add ReverseEngineeringInitInput{Concept,Domains}, REQueueEntry, ReverseEngineeringQueueInput{Specs} to state/types.go.",
+        "Add ReverseEngineeringState with all tracking fields (reusing the existing ReconcileState per domain) and a ReverseEngineering *ReverseEngineeringState field on ForgeState.",
+        "Add NewReverseEngineeringState(concept, domains) in state/state.go setting DomainIndex=1, DomainCount=len(domains), empty Queue, DomainReconcile map."
+      ],
+      "files": [
+        "forgectl/state/types.go",
+        "forgectl/state/state.go"
+      ],
+      "specs": [
+        "forgectl/specs/state-persistence.md"
+      ],
+      "refs": [
+        "notes/state-package.md",
+        "notes/overview.md"
+      ],
+      "tests": [
+        {
+          "category": "functional",
+          "description": "A populated ReverseEngineeringState round-trips through Save then Load with every tracking field preserved.",
+          "passes": false
+        },
+        {
+          "category": "edge_case",
+          "description": "ForgeState.ReverseEngineering serializes as null when the session is in another phase (section not reached).",
+          "passes": false
+        }
+      ],
+      "passes": "passed",
+      "rounds": 1
+    },
+    {
+      "id": "re.validate-input",
+      "name": "Validate reverse_engineering init input",
+      "description": "Add ValidateReverseEngineeringInput enforcing the {concept, domains} schema: concept non-empty, domains non-empty with no duplicates, and no extra fields. Used by init and reusable as the shared validator.",
+      "depends_on": [],
+      "steps": [
+        "Add ValidateReverseEngineeringInput(data []byte) []string mirroring ValidateSpecQueue's required/allowed-field style.",
+        "Add ReverseEngineeringInitSchema() returning the printable schema."
+      ],
+      "files": [
+        "forgectl/state/validate.go"
+      ],
+      "specs": [
+        "forgectl/specs/reverse-engineering.md"
+      ],
+      "refs": [
+        "notes/state-package.md"
+      ],
+      "tests": [
+        {
+          "category": "rejection",
+          "description": "A duplicate domain is rejected with an error identifying the duplicate.",
+          "passes": false
+        },
+        {
+          "category": "rejection",
+          "description": "Empty domains, empty concept, and any unexpected top-level field are each rejected.",
+          "passes": false
+        }
+      ],
+      "passes": "passed",
+      "rounds": 1
+    },
+    {
+      "id": "re.validate-queue",
+      "name": "Validate reverse engineering queue",
+      "description": "Add ValidateReverseEngineeringQueue enforcing the queue schema, action enum, domain membership, code_search_roots existence on disk (resolved against the domain root), and acyclic depends_on. Shared by the QUEUE advance (per the recorded decision, NOT exposed as a new `validate` command type).",
+      "depends_on": [],
+      "steps": [
+        "Add ValidateReverseEngineeringQueue(data []byte, projectRoot string, validDomains []string) []string: top-level specs array non-empty; per-entry required + allowed fields; action in {create,update}; domain in validDomains (else hint forgectl add-domain \u003cdomain\u003e); code_search_roots non-empty and each dir exists under \u003cprojectRoot\u003e/\u003cdomain\u003e/; reuse detectCycle over depends_on.",
+        "Add ReverseEngineeringQueueSchema() returning the printable schema."
+      ],
+      "files": [
+        "forgectl/state/validate.go"
+      ],
+      "specs": [
+        "forgectl/specs/reverse-engineering.md"
+      ],
+      "refs": [
+        "notes/state-package.md",
+        "notes/cmd-package.md"
+      ],
+      "tests": [
+        {
+          "category": "functional",
+          "description": "A well-formed queue with existing code_search_roots and recognized domains validates with no errors.",
+          "passes": false
+        },
+        {
+          "category": "rejection",
+          "description": "An entry missing code_search_roots, with an unrecognized domain (error lists valid domains + add-domain hint), with action other than create/update, or with an extra field is rejected.",
+          "passes": false
+        },
+        {
+          "category": "edge_case",
+          "description": "A code_search_roots directory that does not exist on disk, and a circular depends_on chain, are each reported as validation errors.",
+          "passes": false
+        }
+      ],
+      "passes": "passed",
+      "rounds": 1
+    },
+    {
+      "id": "re.queue-hash",
+      "name": "Queue content-hash helper",
+      "description": "Add a small deterministic content-hash helper used to detect whether the reverse engineering queue file changed between QUEUE advances.",
+      "depends_on": [],
+      "steps": [
+        "Add HashBytes([]byte) string returning a sha256 hex digest in a new state/hash.go."
+      ],
+      "files": [
+        "forgectl/state/hash.go"
+      ],
+      "specs": [
+        "forgectl/specs/reverse-engineering.md"
+      ],
+      "refs": [
+        "notes/state-package.md"
+      ],
+      "tests": [
+        {
+          "category": "functional",
+          "description": "Identical input produces an identical hash and differing input produces a different hash.",
+          "passes": false
+        }
+      ],
+      "passes": "passed",
+      "rounds": 1
+    },
+    {
+      "id": "re.init",
+      "name": "Initialize a reverse_engineering session",
+      "description": "Wire the init command's reverse_engineering branch: validate the input, build the RE state (concept, domains, index 1, count N, ORIENT), lock the RE config, and emit the init log entry — reusing existing root discovery, config lock, session_id, and pruning.",
+      "depends_on": [
+        "re.phase-const",
+        "re.state-struct",
+        "re.config",
+        "re.validate-input"
+      ],
+      "steps": [
+        "Add a case state.PhaseReverseEngineering to the init switch: run ValidateReverseEngineeringInput (on failure print errors + ReverseEngineeringInitSchema and exit nonzero), unmarshal {concept,domains}, set s.ReverseEngineering = state.NewReverseEngineeringState(...).",
+        "Set ColleagueReview on the state from the locked config.",
+        "Confirm the existing init-entry logging path covers the new phase."
+      ],
+      "files": [
+        "forgectl/cmd/init.go"
+      ],
+      "specs": [
+        "forgectl/specs/session-init.md"
+      ],
+      "refs": [
+        "notes/cmd-package.md",
+        "notes/overview.md"
+      ],
+      "tests": [
+        {
+          "category": "functional",
+          "description": "init --phase reverse_engineering --from input.json creates a state file with concept, ordered domains, domain index 1, count N, state ORIENT, locked reverse_engineering config, and an init log entry.",
+          "passes": false
+        },
+        {
+          "category": "rejection",
+          "description": "An input failing schema validation prints the violations and the expected schema and exits nonzero; init is rejected when a state file already exists.",
+          "passes": false
+        }
+      ],
+      "passes": "passed",
+      "rounds": 1
+    },
+    {
+      "id": "re.advance-domain-loop",
+      "name": "State machine: ORIENT through per-domain QUEUE",
+      "description": "Implement advanceReverseEngineering for the per-domain analysis loop: ORIENT to SURVEY, SURVEY to GAP_ANALYSIS to DECOMPOSE to QUEUE, and the QUEUE advance (fixed path, first-vs-subsequent hash detection, schema/domain/path validation, parse) transitioning to the next domain's SURVEY or to the execution loop.",
+      "depends_on": [
+        "re.state-consts",
+        "re.state-struct",
+        "re.validate-queue",
+        "re.queue-hash"
+      ],
+      "steps": [
+        "Add case PhaseReverseEngineering to Advance() dispatch and create advanceReverseEngineering(s, in, dir).",
+        "Implement ORIENT-\u003eSURVEY (DomainIndex=1) and SURVEY-\u003eGAP_ANALYSIS-\u003eDECOMPOSE-\u003eQUEUE.",
+        "QUEUE: reject in.File; first advance reads \u003croot\u003e/.forgectl/state/reverse-engineering-queue.json, stores path+hash, validates (schema/domains/roots), parses into Queue; subsequent advance re-reads, rejects unchanged hash, else re-validates.",
+        "On valid QUEUE: if DomainIndex\u003cDomainCount -\u003e SURVEY (DomainIndex++), else -\u003e EXECUTE_REVERSE_ENGINEER (ExecuteItemIndex=1) after rejecting an empty queue."
+      ],
+      "files": [
+        "forgectl/state/advance.go"
+      ],
+      "specs": [
+        "forgectl/specs/reverse-engineering.md"
+      ],
+      "refs": [
+        "notes/state-package.md",
+        "notes/overview.md"
+      ],
+      "tests": [
+        {
+          "category": "functional",
+          "description": "ORIENT-\u003eSURVEY-\u003eGAP_ANALYSIS-\u003eDECOMPOSE-\u003eQUEUE advances in order; the first QUEUE advance reads the convention path, stores the hash, validates, and parses entries; a non-final domain returns to SURVEY with the index incremented while the final domain advances to EXECUTE_REVERSE_ENGINEER item 1.",
+          "passes": false
+        },
+        {
+          "category": "rejection",
+          "description": "advance --file in QUEUE is rejected with the fixed-path message, and a subsequent QUEUE advance over an unchanged file errors 'Queue file has not changed.'",
+          "passes": false
+        },
+        {
+          "category": "edge_case",
+          "description": "A subsequent QUEUE advance whose file content changed recomputes the hash, re-validates, and advances.",
+          "passes": false
+        }
+      ],
+      "passes": "passed",
+      "rounds": 1
+    },
+    {
+      "id": "re.advance-execute-loop",
+      "name": "State machine: per-item execution loop",
+      "description": "Implement the EXECUTE_REVERSE_ENGINEER \u003c-\u003e POST_REVERSE_ENGINEER loop: reject an empty queue on entry, pre-create the domain specs/ directory (erroring with the path on failure), advance per item using depends_on-independent ordering, loop to the next item, exit to RECONCILE on the last item, and skip failed items silently. All paths resolve against the absolute project root, independent of cwd.",
+      "depends_on": [
+        "re.advance-domain-loop"
+      ],
+      "steps": [
+        "On entering the loop with zero queue entries, return the 'Queue contains zero entries. Nothing to execute.' error and stay in EXECUTE_REVERSE_ENGINEER.",
+        "Before an item's action, ensure \u003croot\u003e/\u003cdomain\u003e/specs/ exists (mkdir); if creation fails (permissions/disk), return an error naming the path.",
+        "Drive the loop by ExecuteItemIndex in stored queue order only; do NOT consult depends_on (Invariant 13: depends_on is RECONCILE metadata, ignored by the execution loop).",
+        "Each iteration concerns exactly the one queue entry's file (Invariant 6: single-file write per item); the transition mutates no other item's target.",
+        "EXECUTE-\u003ePOST; POST increments ExecuteItemIndex and returns to EXECUTE while items remain, else transitions to RECONCILE (DomainIndex=1, ReconcileRound=1).",
+        "Take no failure path when an item produced no file (including when a code_search_roots directory was deleted after QUEUE validation).",
+        "Resolve the domain root and target file against the absolute project root (dir), never the current working directory."
+      ],
+      "files": [
+        "forgectl/state/advance.go"
+      ],
+      "specs": [
+        "forgectl/specs/reverse-engineering.md"
+      ],
+      "refs": [
+        "notes/state-package.md"
+      ],
+      "tests": [
+        {
+          "category": "functional",
+          "description": "EXECUTE advances to POST; POST loops to EXECUTE with the item index incremented; POST on the last item advances to RECONCILE for domain 1 round 1; the domain specs/ directory is created before the item action is emitted.",
+          "passes": false
+        },
+        {
+          "category": "functional",
+          "description": "The execution loop processes items strictly in stored queue order driven by ExecuteItemIndex and does not reorder by depends_on (Invariant 13), and each iteration targets only its own queue entry's file (Invariant 6).",
+          "passes": false
+        },
+        {
+          "category": "functional",
+          "description": "Path resolution for the domain root and target file uses the absolute project root, so the loop behaves identically when forgectl is invoked from a directory outside the project (CWD portability).",
+          "passes": false
+        },
+        {
+          "category": "rejection",
+          "description": "Entering the execution loop with a zero-entry queue errors 'Queue contains zero entries. Nothing to execute.' and the state stays at EXECUTE_REVERSE_ENGINEER.",
+          "passes": false
+        },
+        {
+          "category": "rejection",
+          "description": "When the domain specs/ directory cannot be created (e.g. unwritable parent), EXECUTE returns an error naming the path.",
+          "passes": false
+        },
+        {
+          "category": "edge_case",
+          "description": "An item that wrote no spec file still advances through POST with no error and no failure state.",
+          "passes": false
+        },
+        {
+          "category": "edge_case",
+          "description": "A code_search_roots directory that existed at QUEUE time but was deleted before its EXECUTE item runs yields no spec file and the loop proceeds through POST to the next item without error.",
+          "passes": false
+        }
+      ],
+      "passes": "passed",
+      "rounds": 1
+    },
+    {
+      "id": "re.advance-reconcile-loop",
+      "name": "State machine: per-domain reconcile loop",
+      "description": "Implement RECONCILE -\u003e RECONCILE_EVAL (verdict + min/max round bookkeeping), the optional COLLEAGUE_REVIEW gate, and RECONCILE_ADVANCE transitioning to the next domain or DONE. RECONCILE verifies that every spec file the queue expected for the domain exists, reporting any gap rather than fabricating a spec.",
+      "depends_on": [
+        "re.advance-execute-loop"
+      ],
+      "steps": [
+        "On entering RECONCILE for a domain, verify each queue entry's target file for that domain exists on disk; if one is missing, report the gap (do not fabricate a spec).",
+        "RECONCILE-\u003eRECONCILE_EVAL.",
+        "RECONCILE_EVAL: append the verdict to the current domain's reconcile evals; FAIL \u0026 round\u003cmax -\u003e RECONCILE (round++); PASS \u0026 round\u003cmin -\u003e RECONCILE (round++); (PASS \u0026 round\u003e=min) or (FAIL \u0026 round\u003e=max) -\u003e COLLEAGUE_REVIEW if ColleagueReview else RECONCILE_ADVANCE.",
+        "COLLEAGUE_REVIEW-\u003eRECONCILE_ADVANCE.",
+        "RECONCILE_ADVANCE: next domain -\u003e RECONCILE (DomainIndex++, round=1); last domain -\u003e DONE."
+      ],
+      "files": [
+        "forgectl/state/advance.go"
+      ],
+      "specs": [
+        "forgectl/specs/reverse-engineering.md"
+      ],
+      "refs": [
+        "notes/state-package.md"
+      ],
+      "tests": [
+        {
+          "category": "functional",
+          "description": "With colleague_review disabled, a PASS at/after min_rounds advances RECONCILE_EVAL to RECONCILE_ADVANCE, which moves to the next domain's RECONCILE (round reset to 1) or to DONE on the last domain.",
+          "passes": false
+        },
+        {
+          "category": "functional",
+          "description": "A FAIL below max_rounds and a PASS below min_rounds each return to RECONCILE with the round incremented; reaching max_rounds advances to COLLEAGUE_REVIEW when enabled or RECONCILE_ADVANCE when disabled regardless of verdict.",
+          "passes": false
+        },
+        {
+          "category": "edge_case",
+          "description": "With colleague_review enabled, a passing RECONCILE_EVAL advances to COLLEAGUE_REVIEW which then advances to RECONCILE_ADVANCE.",
+          "passes": false
+        },
+        {
+          "category": "edge_case",
+          "description": "When a spec file the queue expected for the domain is missing at RECONCILE, the gap is reported and no spec is fabricated.",
+          "passes": false
+        }
+      ],
+      "passes": "passed",
+      "rounds": 1
+    },
+    {
+      "id": "re.add-domain",
+      "name": "forgectl add-domain command",
+      "description": "Add the state-gated add-domain command that appends a domain to the initialized list during the QUEUE state, updates the domain count, rejects duplicates, and errors outside QUEUE.",
+      "depends_on": [
+        "re.state-struct",
+        "re.advance-domain-loop"
+      ],
+      "steps": [
+        "Create cmd/adddomain.go with `add-domain \u003cdomain\u003e` (ExactArgs(1)), registered on rootCmd.",
+        "Load state; require phase==reverse_engineering \u0026\u0026 state==QUEUE else error 'forgectl add-domain is only available during the QUEUE state.'",
+        "Reject a duplicate domain; otherwise append to Domains, update DomainCount, and save state."
+      ],
+      "files": [
+        "forgectl/cmd/adddomain.go"
+      ],
+      "specs": [
+        "forgectl/specs/reverse-engineering.md"
+      ],
+      "refs": [
+        "notes/cmd-package.md"
+      ],
+      "tests": [
+        {
+          "category": "functional",
+          "description": "add-domain during QUEUE appends the domain and updates the count, and a subsequent QUEUE validation accepts queue entries for the added domain.",
+          "passes": false
+        },
+        {
+          "category": "rejection",
+          "description": "add-domain rejects a domain already in the list, and is rejected outside the QUEUE state with the state-gating message.",
+          "passes": false
+        }
+      ],
+      "passes": "passed",
+      "rounds": 2
+    },
+    {
+      "id": "re.eval-reconcile",
+      "name": "Reconcile evaluator prompt + forgectl eval gating",
+      "description": "Complete the reconcile-eval.md 7-dimension checklist and surface it through `forgectl eval` during the reverse_engineering RECONCILE_EVAL state, populated with the current domain's spec list, depends_on, round, and report path; block eval in other RE states.",
+      "depends_on": [
+        "re.state-consts",
+        "re.state-struct"
+      ],
+      "steps": [
+        "Complete evaluators/reconcile-eval.md with the 7-dimension reconciliation checklist and report instructions.",
+        "Add an RE branch to the eval rendering in state/output.go populating the prompt with the current domain's specs + depends_on, round, and report path {domain}/specs/.eval/reconciliation-r{round}.md.",
+        "Add a case to cmd/eval.go runEval for phase==reverse_engineering \u0026\u0026 state==RECONCILE_EVAL, and keep eval blocked in other RE states with the spec message."
+      ],
+      "files": [
+        "forgectl/evaluators/reconcile-eval.md",
+        "forgectl/state/output.go",
+        "forgectl/cmd/eval.go"
+      ],
+      "specs": [
+        "forgectl/specs/reverse-engineering.md"
+      ],
+      "refs": [
+        "notes/evaluators.md"
+      ],
+      "tests": [
+        {
+          "category": "functional",
+          "description": "reconcile-eval.md contains all seven dimensions, and `forgectl eval` during a reverse_engineering RECONCILE_EVAL outputs the prompt populated with the domain's spec paths, depends_on, the round number, and the report path.",
+          "passes": false
+        },
+        {
+          "category": "rejection",
+          "description": "`forgectl eval` invoked in a reverse_engineering state other than RECONCILE_EVAL is rejected with 'forgectl eval is only available during RECONCILE_EVAL.'",
+          "passes": false
+        }
+      ],
+      "passes": "passed",
+      "rounds": 2
+    },
+    {
+      "id": "re.output",
+      "name": "Reverse engineering action output",
+      "description": "Render the action/status output for every reverse_engineering state per the spec, interpolating the configured sub-agent counts, and add the verbose status section.",
+      "depends_on": [
+        "re.state-consts",
+        "re.state-struct",
+        "re.config"
+      ],
+      "steps": [
+        "Add case PhaseReverseEngineering to PrintAdvanceOutput dispatching to printReverseEngineeringOutput.",
+        "Implement printReverseEngineeringOutput with a branch per RE state emitting the spec's action blocks (domain/index, concept, configured sub-agent spawn lines, topic-of-concern rules, EXECUTE item block with code_search_roots definition, the POST STOP/clear-context message, RECONCILE spec listing with depends_on, RECONCILE_EVAL forgectl eval instruction, QUEUE first/subsequent variants, RECONCILE_ADVANCE next-domain/DONE).",
+        "Add a verbose Reverse Engineering section to PrintStatus."
+      ],
+      "files": [
+        "forgectl/state/output.go"
+      ],
+      "specs": [
+        "forgectl/specs/reverse-engineering.md"
+      ],
+      "refs": [
+        "notes/state-package.md"
+      ],
+      "tests": [
+        {
+          "category": "functional",
+          "description": "ORIENT displays the concept and every domain in order with its index (e.g. domain (1/N), domain (2/N)), matching the spec's 'ORIENT displays domain order' criterion.",
+          "passes": false
+        },
+        {
+          "category": "functional",
+          "description": "SURVEY and GAP_ANALYSIS render the configured sub-agent count/model/type; GAP_ANALYSIS includes the topic-of-concern rules; EXECUTE shows item index, domain, spec, action, target file, topic, and code_search_roots; RECONCILE lists each spec file with action and depends_on; RECONCILE_EVAL instructs running forgectl eval.",
+          "passes": false
+        },
+        {
+          "category": "functional",
+          "description": "POST_REVERSE_ENGINEER outputs the exact STOP/clear-context message, and QUEUE shows the fixed convention path with distinct first-domain vs subsequent-domain wording.",
+          "passes": false
+        },
+        {
+          "category": "edge_case",
+          "description": "SURVEY notes the absence when the domain has no specs/ directory.",
+          "passes": false
+        }
+      ],
+      "passes": "passed",
+      "rounds": 2
+    },
+    {
+      "id": "re.logging",
+      "name": "Activity logging for reverse_engineering advances",
+      "description": "Ensure advance in the reverse_engineering phase appends JSONL log entries carrying domain and state context (round/verdict in RECONCILE_EVAL), reusing the existing best-effort logger.",
+      "depends_on": [
+        "re.advance-reconcile-loop"
+      ],
+      "steps": [
+        "Extend buildAdvanceDetail (or the RE advance path) to add domain, and round/verdict where applicable, to the log detail for reverse_engineering advances.",
+        "Confirm the log file is named with the reverse_engineering phase prefix from StartedAtPhase and that failures stay best-effort."
+      ],
+      "files": [
+        "forgectl/cmd/advance.go",
+        "forgectl/state/logger.go"
+      ],
+      "specs": [
+        "forgectl/specs/activity-logging.md"
+      ],
+      "refs": [
+        "notes/cmd-package.md"
+      ],
+      "tests": [
+        {
+          "category": "functional",
+          "description": "An advance in the reverse_engineering phase appends a JSONL entry with cmd=advance, prev_state/state set, and detail carrying the current domain (plus round and verdict when advancing from RECONCILE_EVAL).",
+          "passes": false
+        },
+        {
+          "category": "edge_case",
+          "description": "A log write failure prints a warning and the advance still completes successfully (best-effort logging).",
+          "passes": false
+        }
+      ],
+      "passes": "pending"
+    }
+  ]
+}

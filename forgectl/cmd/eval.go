@@ -36,6 +36,10 @@ func runEval(cmd *cobra.Command, args []string) error {
 		return state.PrintCrossRefEvalOutput(cmd.OutOrStdout(), s)
 	case s.Phase == state.PhasePlanning || s.Phase == state.PhaseImplementing:
 		return state.PrintEvalOutput(cmd.OutOrStdout(), s, projectRoot)
+	case s.Phase == state.PhaseReverseEngineering && s.State == state.StateReconcileEval:
+		return state.PrintReverseEngineeringEvalOutput(cmd.OutOrStdout(), s)
+	case s.Phase == state.PhaseReverseEngineering:
+		return fmt.Errorf("forgectl eval is only available during RECONCILE_EVAL.")
 	default:
 		return fmt.Errorf("eval is only valid in EVALUATE, RECONCILE_EVAL, or CROSS_REFERENCE_EVAL state (current: %s)", s.State)
 	}

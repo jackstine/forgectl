@@ -1,0 +1,67 @@
+# Round-2 Evaluation — Reverse Engineering Phase Implementation Plan
+
+## Verdict: PASS
+
+## Summary
+
+- Dimensions passed: **11 / 11**
+- All 7 enumerated round-1 deficiencies are RESOLVED by concrete steps and/or tests in the plan.
+- An independent line-by-line pass over all 11 dimensions against `reverse-engineering.md` (Behavior per state, the Rejection table, the Configuration block, the Observability/logging requirement, all 22 Invariants, the Edge Cases, and the ~40 Testing Criteria) plus the RE-delta of the four supporting specs found no NEW genuine in-scope gaps.
+- Format/DAG integrity holds (verified programmatically): all 15 items appear in exactly one layer (L0–L5), every `depends_on` edge points to an existing item in the same or an earlier layer with no cycles and no missing/forward edges, the top-level `refs` entries are all `{id, path}` objects, and all 40 tests use categories within `functional | rejection | edge_case` (20 functional / 11 rejection / 9 edge_case). All ~40 spec Testing Criteria match a covering test or step.
+
+The plan is structured as `layers` (each listing item ids) plus a flat `items` array; each item carries `depends_on`, `files`, `steps`, `specs`, `refs`, and `tests`. This was evaluated against `plan-format.json` and conforms.
+
+> Verification note (transparency): plan.json and round-1.md were read in full and are the basis for the item/step/test analysis below. Round-1.md quotes `reverse-engineering.md` line-by-line (state machine, Rejection table at lines 104–110, all 22 invariants with line refs, config defaults at lines 796–829, Integration Points at lines 28–33, edge cases, ~40 testing criteria); those quotations were used to cross-check the spec requirements. The four supporting specs were re-read fresh in round 1 and judged only for their RE delta. No contradiction between the plan and the spec material was found.
+
+## Round-1 deficiency resolution
+
+| # | Round-1 deficiency | Status | Where in the plan |
+|---|--------------------|--------|-------------------|
+| 1 | EXECUTE specs/ dir creation-failure error path | RESOLVED | `re.advance-execute-loop` step 2 ("ensure `<root>/<domain>/specs/` exists … if creation fails, return an error naming the path") + rejection test: "When the domain specs/ directory cannot be created … EXECUTE returns an error naming the path." |
+| 2 | RECONCILE missing queued spec file (report gap, don't fabricate) | RESOLVED | `re.advance-reconcile-loop` step 1 ("verify each queue entry's target file … if one is missing, report the gap (do not fabricate a spec)") + edge_case test: "When a spec file the queue expected for the domain is missing at RECONCILE, the gap is reported and no spec is fabricated." |
+| 3 | Invariant 6 — single-file write per item | RESOLVED | `re.advance-execute-loop` step 4 ("Each iteration concerns exactly the one queue entry's file (Invariant 6)") + functional test: "each iteration targets only its own queue entry's file (Invariant 6)." |
+| 4 | Invariant 13 — depends_on ignored by execute loop | RESOLVED | `re.advance-execute-loop` step 3 ("Drive the loop by ExecuteItemIndex in stored queue order only; do NOT consult depends_on (Invariant 13)") + functional test: "does not reorder by depends_on (Invariant 13)." |
+| 5 | Edge case: code_search_roots deleted before EXECUTE → skipped at runtime | RESOLVED | `re.advance-execute-loop` step 6 ("no failure path when an item produced no file (including when a code_search_roots directory was deleted after QUEUE validation)") + edge_case test: "deleted before its EXECUTE item runs yields no spec file and the loop proceeds through POST … without error." |
+| 6 | Edge case + criterion: CWD portability | RESOLVED | `re.advance-execute-loop` step 7 ("Resolve the domain root and target file against the absolute project root (dir), never the current working directory") + functional test: "behaves identically when forgectl is invoked from a directory outside the project (CWD portability)." |
+| 7 | Criterion: ORIENT displays domain order | RESOLVED | `re.output` functional test: "ORIENT displays the concept and every domain in order with its index (e.g. domain (1/N), domain (2/N)), matching the spec's 'ORIENT displays domain order' criterion" (+ step 2 emits domain/index blocks). |
+
+All 7 round-1 items (the two prior non-blocking notes N1=CWD and N2=missing-spec verification were also promoted to first-class steps/tests) are now backed by explicit plan logic and tests.
+
+## Per-dimension results
+
+### 1. Behavior — PASS
+Every state has covering logic + a functional test. ORIENT→SURVEY→GAP_ANALYSIS→DECOMPOSE→QUEUE and the per-domain branch to next SURVEY vs EXECUTE → `re.advance-domain-loop`. EXECUTE↔POST loop with index increment and exit to RECONCILE → `re.advance-execute-loop`. RECONCILE→RECONCILE_EVAL→(COLLEAGUE_REVIEW)→RECONCILE_ADVANCE→next domain/DONE with min/max round bookkeeping → `re.advance-reconcile-loop`. Per-state action rendering → `re.output`.
+
+### 2. Error Handling — PASS
+QUEUE `--file` rejection, file-not-found, schema/domain/root failures, unchanged-content → `re.advance-domain-loop` + `re.validate-queue`. Empty-queue on EXECUTE entry → `re.advance-execute-loop` step 1 + rejection test. specs/ dir creation failure naming the path → step 2 + rejection test. Failed/no-file item silent skip → step 6 + edge_case test. RECONCILE missing-file gap report → `re.advance-reconcile-loop`. Best-effort logging failure → `re.logging` edge_case test.
+
+### 3. Rejection — PASS
+All four spec Rejection-table rows (lines 104–110): no concept and empty domains → `re.validate-input`; duplicate domain → `re.validate-input` (identifies the duplicate) and at init via `re.init`; `code_search_roots` dir does not exist → `re.validate-queue` edge_case test. Additional rejections (unrecognized domain with add-domain hint, action enum, extra fields, add-domain duplicate/out-of-state, eval out-of-state, generate_planning_queue non-initializable) → `re.validate-queue`, `re.add-domain`, `re.eval-reconcile`, `re.phase-const`. Path validation at QUEUE (relative, domain-root-resolved) is enforced by `re.validate-queue` step 1, which resolves each path under `<projectRoot>/<domain>/` and checks existence — covering the absolute/relative concern at the validation boundary.
+
+### 4. Interface — PASS
+Init input `{concept, domains}` with no-additional-fields → `re.state-struct` (ReverseEngineeringInitInput) + `re.validate-input` (allowed-field enforcement + printable schema). Queue schema (all required fields, action enum, no-additional-fields, domain-root-relative paths, non-empty code_search_roots) → `re.state-struct` (REQueueEntry/ReverseEngineeringQueueInput) + `re.validate-queue` (+ printable schema). Fixed convention path, no user `--file` → `re.advance-domain-loop` step 3. The deliberate, user-approved decision to NOT add a `validate` command type is honored: the "same validation logic" need is met by the shared validators `ValidateReverseEngineeringInput` / `ValidateReverseEngineeringQueue`, reused by init and the QUEUE advance.
+
+### 5. Configuration — PASS
+`[reverse_engineering]` with execute/survey/gap_analysis (model/type/count), reconcile (min_rounds/max_rounds/colleague_review), reconcile.eval (count/model/type) → `re.config`: Go model, defaults, TOML merge, min≤max validation. Defaults match the spec exactly (execute haiku/explorer/3, survey haiku/explorer/2, gap_analysis sonnet/explorer/5, reconcile min1/max3/colleague_review false, eval opus/general-purpose/1). `colleague_review` is `*bool` so explicit `false` survives merge. Config locked into state at init → `re.config` functional test + `re.init`.
+
+### 6. Observability — PASS
+RE advances append JSONL entries carrying domain + state context, with round/verdict for RECONCILE_EVAL, reusing the best-effort logger and the phase-prefixed filename from StartedAtPhase → `re.logging` (functional test asserts cmd=advance, prev_state/state, detail with domain + round/verdict from RECONCILE_EVAL; edge_case asserts best-effort failure). This is exactly the activity-logging RE delta; the generic logging machinery is correctly reused rather than re-specified, and Invariant 17 (every transition logged) is satisfied through the existing per-advance logger hook applied to the new phase.
+
+### 7. Integration Points — PASS
+All four Integration-Points rows at RE-delta level: session-init → `re.phase-const` (4th initializable phase) + `re.init`; state-persistence → `re.state-struct` (new nil-able `ReverseEngineering *ReverseEngineeringState` section with round-trip and null-when-other-phase tests, plus `NewReverseEngineeringState`); activity-logging → `re.logging`; validate-command → shared validators (per the approved no-new-command-type decision). The state-persistence RE payload (concept, domains, indices, execute item index, reconcile round, queue path + hash, parsed Queue, per-domain ReconcileState) is explicitly modeled and round-tripped — covering resume-from-any-state because the full per-state cursor is persisted.
+
+### 8. Invariants — PASS
+All 22 traced to plan logic/tests: 1 read-only (execution writes only spec files); 2 one-topic-per-spec (topic-of-concern rules in `re.output`); 3 spec-format (execute output); 4 dependency ordering (`re.validate-queue` acyclic depends_on); 5 domain-root scoping (`re.validate-queue` resolves under `<projectRoot>/<domain>/`); 6 single-file write (`re.advance-execute-loop` step 4 + test); 7 specs/ pre-exists (step 2 mkdir + test); 8 sequential domains (`re.advance-domain-loop` index loop + test); 9 single queue file at fixed path (step 3); 10 queue change detection (`re.queue-hash` + unchanged-hash rejection); 11 no subprocess (workflow via action output); 12 path validation at QUEUE (`re.validate-queue`); 13 depends_on ignored by execute loop (step 3 + test); 14 per-item loop +1/iter (`re.advance-execute-loop`); 15 direct write, no draft/eval in loop (EXECUTE→POST only); 16 failed items skipped silently (step 6 + test); 17 per-domain reconciliation in order (`re.advance-reconcile-loop`); 18 reconcile eval bounded by max_rounds (step 2); 19 colleague review optional/once-when-enabled (both branches tested); 20 eval state-gated to RECONCILE_EVAL (`re.eval-reconcile`); 21 queue entries match initialized domains (`re.validate-queue` membership); 22 add-domain state-gated to QUEUE (`re.add-domain`).
+
+### 9. Edge Cases — PASS
+Fully-specified codebase → empty queue → EXECUTE empty-queue error (`re.advance-execute-loop` rejection test); multi-dir/multi-root behavior (array schema + output rendering); existing-spec action=update (enum + update wording); domain with no specs/ dir → SURVEY notes absence (`re.output` edge_case test); RECONCILE missing-spec gap (`re.advance-reconcile-loop` edge_case test); one-domain-in-queue-but-three-at-init (all domains looped); code_search_roots deleted between QUEUE and EXECUTE → silent skip (edge_case test); CWD portability (functional test); changed-but-revalidated subsequent QUEUE advance (`re.advance-domain-loop` edge_case test).
+
+### 10. Testing Criteria — PASS
+The ~40 spec criteria each map to a plan test: init domain validation (`re.validate-input`/`re.init`); per-state output criteria including ORIENT domain order, SURVEY/GAP_ANALYSIS sub-agent counts, EXECUTE item block, POST STOP message, RECONCILE listing with depends_on, RECONCILE_EVAL eval instruction, QUEUE first/subsequent wording (`re.output`); domain loop / last-domain-to-execute / QUEUE `--file` reject / schema / unrecognized-domain / unchanged / changed (`re.advance-domain-loop`); add-domain add/duplicate/blocked (`re.add-domain`); empty-queue / specs-dir created / item action / EXECUTE→POST / POST loop / POST→RECONCILE / failed-item-skipped / single-file / depends_on-ignored / CWD-portable (`re.advance-execute-loop`); eval output/blocked (`re.eval-reconcile`); all RECONCILE_EVAL verdict/round/colleague permutations (`re.advance-reconcile-loop` 4 tests); code_search_roots existence / circular depends_on (`re.validate-queue`); state round-trip + null-when-other-phase (`re.state-struct`). All categories ∈ {functional, rejection, edge_case}.
+
+### 11. Dependencies & Format — PASS
+Verified programmatically. Each of the 15 item ids appears in exactly one layer's `items` array (L0: phase-const, state-consts, config, state-struct; L1: validate-input, validate-queue, queue-hash; L2: init; L3: advance-domain-loop, advance-execute-loop, advance-reconcile-loop; L4: add-domain, eval-reconcile, output; L5: logging) — no duplicates, no orphans, no layer referencing an unknown item. Every `depends_on` references an existing item in the same or an earlier layer with no forward edges and no cycles (re.init→L0; advance-domain-loop→L0/L1; advance-execute-loop→advance-domain-loop; advance-reconcile-loop→advance-execute-loop; add-domain→L0/L3; eval-reconcile→L0; output→L0; logging→L3). This plan flavor uses top-level `refs` as `{id, path}` objects (all conform) and per-item `specs`/`refs` as path strings, consistent with `plan-format.json` (where `items[].spec`/`items[].ref` are single strings and `refs[]` are `{id,path}` objects). All 40 tests carry a category in `functional|rejection|edge_case` (20/11/9). Layering is a valid Go build order: types/consts/config/struct → validators/hash → init → state machine → commands/eval/output → logging.
+
+## Deficiency List
+
+None. The verdict is PASS — all 11 dimensions pass with every in-scope requirement covered, and all 7 round-1 deficiencies are resolved.
