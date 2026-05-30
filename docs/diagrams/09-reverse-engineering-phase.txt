@@ -1,0 +1,142 @@
+================================================================================
+                 FORGECTL — Reverse Engineering Phase
+================================================================================
+
+  Role: Systems Architect (inverse flow — specs derived FROM code)
+  State file: .forgectl/state/forgectl-state.json
+
+  The inverse of the specifying phase. Instead of code implementing specs,
+  specs are extracted from existing code. Init takes a concept (work scope)
+  and an ordered list of domains. Forgectl drives the entire workflow from
+  the Go CLI: it emits action output telling the orchestrating agent what to
+  do at each state, but invokes no subprocess and writes no specs itself.
+
+  Input:  reverse-engineering-init.json   { concept, domains[] }
+  Output: <domain>/specs/*.md  (contracts extracted from code, read-only codebase)
+
+
+  PER-DOMAIN ANALYSIS LOOP
+  ═══════════════════════════════════════════════════════════════════════════
+
+  ORIENT
+    │  (confirm concept scope + domain order; domain index = 1)
+    ▼
+  ┌─────────────────────────────────────────────────────────────────────────┐
+  │  For each domain, in init order:                                        │
+  │                                                                         │
+  │  SURVEY ──────► GAP_ANALYSIS ──────► DECOMPOSE ──────► QUEUE             │
+  │  (read         (find code           (synthesize       (write/append     │
+  │   existing      behavior not         specs to          entries to the   │
+  │   specs in      covered by a         create/update;    single queue     │
+  │   <domain>/     spec; assign a       define topic,     file at the      │
+  │   specs/)       topic of concern)    file, roots,      fixed path)      │
+  │                                      depends_on)                        │
+  │                                                                         │
+  │  ◄──── (more domains: QUEUE → SURVEY, domain index += 1) ────────────┐  │
+  └──────────────────────────────────────────────────────────────────────┼──┘
+                                 │ (all domains queued)                    │
+                                 ▼                                         │
+                                                                           │
+  Single queue file accumulates entries across ALL domains: ───────────────┘
+    .forgectl/state/reverse-engineering-queue.json
+
+
+  PER-ITEM EXECUTION LOOP  (across all queued items, in queue order)
+  ═══════════════════════════════════════════════════════════════════════════
+
+  EXECUTE_REVERSE_ENGINEER (item 1) ──────► POST_REVERSE_ENGINEER (item 1)
+    ▲   (write the final spec for one          (STOP / clear-context
+    │    item from code under its               checkpoint before the
+    │    code_search_roots — no draft,          next item)
+    │    no eval, single pass)                       │
+    │                                                │ more items
+    └────────────────────────────────────────────────┘
+                                                      │ last item
+                                                      ▼
+                                          RECONCILE (domain 1, round 1)
+
+  Notes:
+  - Empty queue on loop entry → ERROR "Queue contains zero entries."
+  - If the agent writes no file for an item, the item is skipped silently;
+    no failure state is entered.
+  - specs/ directory is created (if absent) before each item's action output.
+
+
+  PER-DOMAIN RECONCILIATION LOOP
+  ═══════════════════════════════════════════════════════════════════════════
+
+  ┌─────────────────────────────────────────────────────────────────────────┐
+  │  For each domain, in the same order as the analysis loop:               │
+  │                                                                         │
+  │  RECONCILE ──────► RECONCILE_EVAL                                       │
+  │  (wire depends_on        │                                              │
+  │   into Depends On  ┌─────┴─────┐                                        │
+  │   + symmetric      │           │                                        │
+  │   Integration    PASS>=min   FAIL<max                                   │
+  │   Points; stage  or FAIL>=max  or PASS<min                              │
+  │   git changes)     │           │                                        │
+  │                    │           └──► RECONCILE (round N, round += 1)      │
+  │                    ▼                                                     │
+  │            ┌───────────────┐                                            │
+  │            │ colleague_     │ enabled                                   │
+  │            │ review?        ├────────► COLLEAGUE_REVIEW                  │
+  │            └───────┬────────┘            │                              │
+  │                    │ disabled (default)  │                              │
+  │                    ▼                     ▼                              │
+  │              RECONCILE_ADVANCE ◄─────────┘                              │
+  │                    │                                                    │
+  │  ◄──── (more domains: → RECONCILE next domain, round resets to 1) ───┐  │
+  └──────────────────────────────────────────────────────────────────────┼──┘
+                                 │ (all domains reconciled)                │
+                                 ▼                                         │
+                               DONE                                        │
+                                                                           │
+  RECONCILE_ADVANCE is the explicit domain-transition state. ───────────────┘
+
+
+  ═══════════════════════════════════════════════════════════════════════════
+  STATE-GATED COMMANDS
+  ═══════════════════════════════════════════════════════════════════════════
+
+  ┌──────────────────────┬──────────────────┬─────────────────────────────────┐
+  │ Command              │ Active state     │ Purpose                         │
+  ├──────────────────────┼──────────────────┼─────────────────────────────────┤
+  │ forgectl add-domain  │ QUEUE only       │ Append a domain to the init     │
+  │                      │                  │ list; does NOT re-run analysis  │
+  │ forgectl eval        │ RECONCILE_EVAL   │ Output embedded reconcile-eval  │
+  │                      │ only             │ prompt for the eval sub-agents  │
+  │ forgectl advance     │ QUEUE: no --file │ Queue path is fixed; --file is  │
+  │                      │                  │ rejected in QUEUE               │
+  └──────────────────────┴──────────────────┴─────────────────────────────────┘
+
+
+  ═══════════════════════════════════════════════════════════════════════════
+  STATE FILE TRACKING
+  ═══════════════════════════════════════════════════════════════════════════
+
+  The state file tracks, for this phase:
+    - current state
+    - current domain index        (drives both analysis loop and reconcile loop)
+    - total domain count
+    - execute item index          (drives EXECUTE → POST loop)
+    - reconcile round
+    - queue file path             (set on first QUEUE advance, fixed convention)
+    - queue file content hash     (change detection on subsequent QUEUE advances)
+    - colleague_review enabled flag
+
+
+  ═══════════════════════════════════════════════════════════════════════════
+  KEY
+  ═══════════════════════════════════════════════════════════════════════════
+
+  ──►  State transition (forgectl advance)
+  ◄──  Loop back
+  PASS/FAIL          Reconcile eval verdict (forgectl advance --verdict)
+  min / max          reverse_engineering.reconcile.min_rounds / max_rounds
+
+  COLLEAGUE_REVIEW disabled by default; when disabled, RECONCILE_EVAL advances
+  directly to RECONCILE_ADVANCE.
+
+  Distinct from the specifying phase: input is CODE, not planning documents.
+  EXECUTE writes the final spec in a single pass — there is no DRAFT / EVALUATE
+  / REFINE cycle per spec; adversarial evaluation happens only at reconcile.
