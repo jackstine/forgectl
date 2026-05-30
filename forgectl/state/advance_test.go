@@ -2574,3 +2574,159 @@ func TestREQueueUnchangedHash(t *testing.T) {
 		t.Errorf("state should stay QUEUE, got %s", s.State)
 	}
 }
+
+// reExecState builds an RE state positioned in the execution loop.
+func reExecState(domains []string, queue []REQueueEntry, st StateName, idx int) *ForgeState {
+	re := NewReverseEngineeringState("auth refactor", domains)
+	re.Queue = queue
+	re.ExecuteItemIndex = idx
+	return &ForgeState{
+		Phase:              PhaseReverseEngineering,
+		State:              st,
+		StartedAtPhase:     PhaseReverseEngineering,
+		ReverseEngineering: re,
+	}
+}
+
+func twoItemQueue() []REQueueEntry {
+	return []REQueueEntry{
+		{Name: "One", Domain: "optimizer", Topic: "t", File: "specs/one.md", Action: "create", CodeSearchRoots: []string{"src/"}, DependsOn: []string{}},
+		{Name: "Two", Domain: "api", Topic: "t", File: "specs/two.md", Action: "update", CodeSearchRoots: []string{"handlers/"}, DependsOn: []string{}},
+	}
+}
+
+// Functional: EXECUTE advances to POST for the same item (index unchanged).
+func TestREExecuteToPost(t *testing.T) {
+	dir := buildREProject(t, map[string][]string{"optimizer": {"src"}, "api": {"handlers"}})
+	s := reExecState([]string{"optimizer", "api"}, twoItemQueue(), StateExecuteReverseEngineer, 1)
+
+	if err := Advance(s, AdvanceInput{}, dir); err != nil {
+		t.Fatalf("EXECUTE→POST: %v", err)
+	}
+	if s.State != StatePostReverseEngineer {
+		t.Errorf("state = %s, want POST_REVERSE_ENGINEER", s.State)
+	}
+	if s.ReverseEngineering.ExecuteItemIndex != 1 {
+		t.Errorf("execute item index = %d, want 1 (unchanged)", s.ReverseEngineering.ExecuteItemIndex)
+	}
+}
+
+// Functional: POST advances to EXECUTE for the next item, incrementing the index
+// and creating that item's domain specs directory.
+func TestREPostToNextExecute(t *testing.T) {
+	dir := buildREProject(t, map[string][]string{"optimizer": {"src"}, "api": {"handlers"}})
+	s := reExecState([]string{"optimizer", "api"}, twoItemQueue(), StatePostReverseEngineer, 1)
+
+	if err := Advance(s, AdvanceInput{}, dir); err != nil {
+		t.Fatalf("POST→EXECUTE: %v", err)
+	}
+	if s.State != StateExecuteReverseEngineer {
+		t.Errorf("state = %s, want EXECUTE_REVERSE_ENGINEER", s.State)
+	}
+	if s.ReverseEngineering.ExecuteItemIndex != 2 {
+		t.Errorf("execute item index = %d, want 2", s.ReverseEngineering.ExecuteItemIndex)
+	}
+	// Item 2's domain specs dir must now exist.
+	if info, err := os.Stat(filepath.Join(dir, "api", "specs")); err != nil || !info.IsDir() {
+		t.Errorf("api/specs directory should have been created: %v", err)
+	}
+}
+
+// Functional: the full loop over all items ends in RECONCILE for domain 1, round 1.
+func TestREExecuteLoopToReconcile(t *testing.T) {
+	dir := buildREProject(t, map[string][]string{"optimizer": {"src"}, "api": {"handlers"}})
+	s := reExecState([]string{"optimizer", "api"}, twoItemQueue(), StateExecuteReverseEngineer, 1)
+
+	// item1: EXECUTE→POST→EXECUTE(item2)→POST→RECONCILE
+	seq := []StateName{
+		StatePostReverseEngineer,    // EXECUTE item1 → POST
+		StateExecuteReverseEngineer, // POST item1 → EXECUTE item2
+		StatePostReverseEngineer,    // EXECUTE item2 → POST
+		StateReconcile,              // POST item2 (last) → RECONCILE
+	}
+	for i, want := range seq {
+		if err := Advance(s, AdvanceInput{}, dir); err != nil {
+			t.Fatalf("loop step %d: %v", i, err)
+		}
+		if s.State != want {
+			t.Fatalf("loop step %d: state = %s, want %s", i, s.State, want)
+		}
+	}
+	if s.ReverseEngineering.DomainIndex != 1 || s.ReverseEngineering.ReconcileRound != 1 {
+		t.Errorf("reconcile entry: domainIndex=%d round=%d, want 1/1",
+			s.ReverseEngineering.DomainIndex, s.ReverseEngineering.ReconcileRound)
+	}
+}
+
+// Rejection: an empty queue at EXECUTE entry errors and stays in EXECUTE.
+func TestREExecuteEmptyQueueRejected(t *testing.T) {
+	dir := buildREProject(t, map[string][]string{"optimizer": {"src"}})
+	s := reExecState([]string{"optimizer"}, []REQueueEntry{}, StateExecuteReverseEngineer, 1)
+
+	err := Advance(s, AdvanceInput{}, dir)
+	if err == nil || !strings.Contains(err.Error(), "Queue contains zero entries. Nothing to execute.") {
+		t.Fatalf("expected zero-entries error, got: %v", err)
+	}
+	if s.State != StateExecuteReverseEngineer {
+		t.Errorf("state should stay EXECUTE, got %s", s.State)
+	}
+}
+
+// Rejection: a specs-dir creation failure surfaces an error naming the path.
+func TestREExecuteMkdirFailure(t *testing.T) {
+	dir := buildREProject(t, map[string][]string{"optimizer": {"src"}, "api": {"handlers"}})
+	// Block api/specs by placing a regular file where the directory must go.
+	if err := os.WriteFile(filepath.Join(dir, "api", "specs"), []byte("x"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	s := reExecState([]string{"optimizer", "api"}, twoItemQueue(), StatePostReverseEngineer, 1)
+
+	err := Advance(s, AdvanceInput{}, dir)
+	if err == nil {
+		t.Fatal("expected mkdir failure advancing to item 2 (api)")
+	}
+	if !strings.Contains(err.Error(), filepath.Join(dir, "api", "specs")) {
+		t.Errorf("error should name the specs path, got: %v", err)
+	}
+}
+
+// Edge case: depends_on is ignored — the loop walks stored order even when an
+// earlier item depends on a later one.
+func TestREExecuteIgnoresDependsOn(t *testing.T) {
+	dir := buildREProject(t, map[string][]string{"optimizer": {"src"}, "api": {"handlers"}})
+	q := twoItemQueue()
+	q[0].DependsOn = []string{"Two"} // item 1 depends on item 2 — must NOT reorder
+	s := reExecState([]string{"optimizer", "api"}, q, StateExecuteReverseEngineer, 1)
+
+	// EXECUTE item1 → POST → EXECUTE item2 : index must go 1 → 2 in stored order.
+	if err := Advance(s, AdvanceInput{}, dir); err != nil { // → POST
+		t.Fatal(err)
+	}
+	if err := Advance(s, AdvanceInput{}, dir); err != nil { // → EXECUTE item2
+		t.Fatal(err)
+	}
+	if s.ReverseEngineering.ExecuteItemIndex != 2 {
+		t.Errorf("index = %d, want 2 (stored order, deps ignored)", s.ReverseEngineering.ExecuteItemIndex)
+	}
+}
+
+// Edge case: items that produced no file (and a code_search_roots dir deleted
+// after QUEUE) take no failure path — the loop still completes.
+func TestREExecuteNoFilesWritten(t *testing.T) {
+	dir := buildREProject(t, map[string][]string{"optimizer": {"src"}, "api": {"handlers"}})
+	// Delete a code_search_roots directory that QUEUE had validated.
+	if err := os.RemoveAll(filepath.Join(dir, "optimizer", "src")); err != nil {
+		t.Fatal(err)
+	}
+	s := reExecState([]string{"optimizer", "api"}, twoItemQueue(), StateExecuteReverseEngineer, 1)
+
+	// Never write any spec file; the loop must still reach RECONCILE.
+	for i := 0; i < 4; i++ {
+		if err := Advance(s, AdvanceInput{}, dir); err != nil {
+			t.Fatalf("advance %d should not fail on missing files: %v", i, err)
+		}
+	}
+	if s.State != StateReconcile {
+		t.Errorf("state = %s, want RECONCILE after a file-less loop", s.State)
+	}
+}

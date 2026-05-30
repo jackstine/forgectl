@@ -1262,9 +1262,47 @@ func advanceReverseEngineering(s *ForgeState, in AdvanceInput, dir string) error
 	case StateQueue:
 		return advanceREQueue(s, in, dir)
 
+	case StateExecuteReverseEngineer:
+		// Defensive: the loop is never entered with an empty queue (QUEUE rejects
+		// that), but guard anyway and stay in EXECUTE if it somehow happens.
+		if len(re.Queue) == 0 {
+			return fmt.Errorf("Queue contains zero entries. Nothing to execute.")
+		}
+		s.State = StatePostReverseEngineer
+		return nil
+
+	case StatePostReverseEngineer:
+		// depends_on is RECONCILE metadata only — the execution loop walks the
+		// queue purely in stored order via ExecuteItemIndex.
+		if re.ExecuteItemIndex < len(re.Queue) {
+			re.ExecuteItemIndex++
+			s.State = StateExecuteReverseEngineer
+			return ensureItemSpecsDir(re, dir)
+		}
+		// Last item done — begin the per-domain reconcile loop.
+		re.DomainIndex = 1
+		re.ReconcileRound = 1
+		s.State = StateReconcile
+		return nil
+
 	default:
 		return fmt.Errorf("unexpected state %q in reverse_engineering phase", s.State)
 	}
+}
+
+// ensureItemSpecsDir creates the current execution item's domain specs directory
+// (<project_root>/<domain>/specs/) before its action output is emitted. Paths
+// resolve against the absolute project root, never the current working directory.
+func ensureItemSpecsDir(re *ReverseEngineeringState, dir string) error {
+	if re.ExecuteItemIndex < 1 || re.ExecuteItemIndex > len(re.Queue) {
+		return nil
+	}
+	item := re.Queue[re.ExecuteItemIndex-1]
+	specsDir := filepath.Join(dir, item.Domain, "specs")
+	if err := os.MkdirAll(specsDir, 0755); err != nil {
+		return fmt.Errorf("creating domain specs directory %s: %w", specsDir, err)
+	}
+	return nil
 }
 
 // advanceREQueue handles the QUEUE state: it reads the fixed-path queue file,
@@ -1318,7 +1356,7 @@ func advanceREQueue(s *ForgeState, in AdvanceInput, dir string) error {
 	}
 	re.ExecuteItemIndex = 1
 	s.State = StateExecuteReverseEngineer
-	return nil
+	return ensureItemSpecsDir(re, dir)
 }
 
 // ValidationError wraps multiple validation errors.
