@@ -24,7 +24,7 @@ var initCmd = &cobra.Command{
 
 func init() {
 	initCmd.Flags().StringVar(&initFrom, "from", "", "Path to input file (required)")
-	initCmd.Flags().StringVar(&initPhase, "phase", "specifying", "Starting phase: specifying, planning, implementing")
+	initCmd.Flags().StringVar(&initPhase, "phase", "specifying", "Starting phase: specifying, planning, implementing, reverse_engineering")
 	_ = initCmd.MarkFlagRequired("from")
 	rootCmd.AddCommand(initCmd)
 }
@@ -35,9 +35,9 @@ func runInit(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("generate_planning_queue requires a completed specifying phase. Use --phase specifying instead.")
 	}
 
-	validPhases := map[string]bool{"specifying": true, "planning": true, "implementing": true}
+	validPhases := map[string]bool{"specifying": true, "planning": true, "implementing": true, "reverse_engineering": true}
 	if !validPhases[initPhase] {
-		return fmt.Errorf("--phase must be specifying, planning, or implementing")
+		return fmt.Errorf("--phase must be specifying, planning, implementing, or reverse_engineering")
 	}
 
 	// Discover project root, load and validate config.
