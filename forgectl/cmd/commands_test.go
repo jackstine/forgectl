@@ -176,16 +176,17 @@ func TestInitRejectsInvalidPhase(t *testing.T) {
 	}
 }
 
-// Functional: reverse_engineering is now an initializable phase. The phase
-// passes validation and the session is created at Phase=reverse_engineering.
-// (Full RE init wiring lands in re.init; here only the phase string is parsed.)
+// Functional: a valid {concept, domains} input initializes a reverse_engineering
+// session — RE state built with domain index 1, count N, ORIENT, and
+// colleague_review carried from the locked config.
 func TestInitAcceptsReverseEngineeringPhase(t *testing.T) {
 	dir := setupProjectDir(t)
+	// Enable colleague_review in config so we can assert it locks into state.
+	os.WriteFile(filepath.Join(dir, ".forgectl", "config"),
+		[]byte("[reverse_engineering.reconcile]\ncolleague_review = true\n"), 0644)
 
-	// Any existing file satisfies the read; there is no RE init switch case yet,
-	// so the phase block is skipped and the session is saved at this phase.
 	inputFile := filepath.Join(dir, "input.json")
-	os.WriteFile(inputFile, []byte("{}"), 0644)
+	os.WriteFile(inputFile, []byte(`{"concept": "auth refactor", "domains": ["optimizer", "api", "portal"]}`), 0644)
 
 	initFrom = inputFile
 	initPhase = "reverse_engineering"
@@ -205,8 +206,46 @@ func TestInitAcceptsReverseEngineeringPhase(t *testing.T) {
 	if s.Phase != state.PhaseReverseEngineering {
 		t.Errorf("phase = %s, want reverse_engineering", s.Phase)
 	}
+	if s.State != state.StateOrient {
+		t.Errorf("state = %s, want ORIENT", s.State)
+	}
 	if s.StartedAtPhase != state.PhaseReverseEngineering {
 		t.Errorf("started_at_phase = %s, want reverse_engineering", s.StartedAtPhase)
+	}
+	re := s.ReverseEngineering
+	if re == nil {
+		t.Fatal("reverse_engineering state not built")
+	}
+	if re.Concept != "auth refactor" {
+		t.Errorf("concept = %q, want auth refactor", re.Concept)
+	}
+	if re.DomainIndex != 1 || re.DomainCount != 3 {
+		t.Errorf("domain index/count = %d/%d, want 1/3", re.DomainIndex, re.DomainCount)
+	}
+	if !re.ColleagueReview {
+		t.Error("colleague_review should be locked from config (true)")
+	}
+}
+
+// Rejection: an invalid RE init input (missing concept) is rejected.
+func TestInitRejectsInvalidReverseEngineeringInput(t *testing.T) {
+	dir := setupProjectDir(t)
+	inputFile := filepath.Join(dir, "input.json")
+	os.WriteFile(inputFile, []byte(`{"domains": ["api"]}`), 0644)
+
+	initFrom = inputFile
+	initPhase = "reverse_engineering"
+
+	var buf bytes.Buffer
+	rootCmd.SetOut(&buf)
+
+	err := runInit(initCmd, nil)
+	if err == nil {
+		t.Fatal("expected error for RE input missing concept")
+	}
+	// No state file should have been written.
+	if state.Exists(resolvedStateDir(dir)) {
+		t.Error("state file should not exist after a rejected init")
 	}
 }
 
