@@ -407,3 +407,216 @@ func TestOutputDoneDomainVariantWhenPlansRemain(t *testing.T) {
 		t.Errorf("expected 'Advance to continue to next domain.' in DONE output, got:\n%s", out)
 	}
 }
+
+// reOutputState builds a reverse_engineering ForgeState with default config in
+// the given state, domain index, and queue.
+func reOutputState(st StateName, domains []string, domainIndex int, queue []REQueueEntry) *ForgeState {
+	re := NewReverseEngineeringState("auth refactor", domains)
+	re.DomainIndex = domainIndex
+	re.Queue = queue
+	return &ForgeState{
+		Phase:              PhaseReverseEngineering,
+		State:              st,
+		Config:             DefaultForgeConfig(),
+		StartedAtPhase:     PhaseReverseEngineering,
+		ReverseEngineering: re,
+	}
+}
+
+// Functional: ORIENT lists every domain with its 1-based index and the domain
+// processing order.
+func TestREOutputOrientListsDomainsAndOrder(t *testing.T) {
+	dir := t.TempDir()
+	s := reOutputState(StateOrient, []string{"optimizer", "api", "portal"}, 1, nil)
+
+	out := outputOf(s, dir)
+	if !strings.Contains(out, "Phase: reverse_engineering") {
+		t.Errorf("expected RE phase header, got:\n%s", out)
+	}
+	if !strings.Contains(out, "optimizer (1/3)") || !strings.Contains(out, "portal (3/3)") {
+		t.Errorf("expected indexed domain list, got:\n%s", out)
+	}
+	if !strings.Contains(out, "optimizer → api → portal") {
+		t.Errorf("expected domain order arrow line, got:\n%s", out)
+	}
+	if !strings.Contains(out, "Advance to begin SURVEY on domain: optimizer") {
+		t.Errorf("expected SURVEY advance hint, got:\n%s", out)
+	}
+}
+
+// Functional: SURVEY and GAP_ANALYSIS interpolate the configured sub-agent
+// counts/models/types, and GAP_ANALYSIS includes topic-of-concern rules.
+func TestREOutputSurveyAndGapAnalysisConfig(t *testing.T) {
+	dir := t.TempDir()
+
+	survey := outputOf(reOutputState(StateSurvey, []string{"optimizer"}, 1, nil), dir)
+	if !strings.Contains(survey, "Spawn 2 haiku explorer sub-agents") {
+		t.Errorf("SURVEY should reflect configured sub-agents, got:\n%s", survey)
+	}
+	if !strings.Contains(survey, "optimizer/specs/") {
+		t.Errorf("SURVEY should scope to the domain specs dir, got:\n%s", survey)
+	}
+
+	gap := outputOf(reOutputState(StateGapAnalysis, []string{"optimizer"}, 1, nil), dir)
+	if !strings.Contains(gap, "Spawn 5 sonnet explorer sub-agents") {
+		t.Errorf("GAP_ANALYSIS should reflect configured sub-agents, got:\n%s", gap)
+	}
+	if !strings.Contains(gap, "Must not contain \"and\" conjoining unrelated capabilities") {
+		t.Errorf("GAP_ANALYSIS should include topic-of-concern rules, got:\n%s", gap)
+	}
+}
+
+// Functional: EXECUTE_REVERSE_ENGINEER renders the current item's index, domain,
+// spec, action, target file, topic, code_search_roots (domain-relative, with the
+// root-of-core-code definition), and the configured execute sub-agents.
+func TestREOutputExecuteItem(t *testing.T) {
+	dir := t.TempDir()
+	queue := []REQueueEntry{
+		{Name: "Repository Loading", Domain: "optimizer", Topic: "loads a repo", File: "specs/repo.md", Action: "create", CodeSearchRoots: []string{"src/repo/", "src/config/"}, DependsOn: []string{}},
+	}
+	s := reOutputState(StateExecuteReverseEngineer, []string{"optimizer"}, 1, queue)
+	s.ReverseEngineering.ExecuteItemIndex = 1
+
+	out := outputOf(s, dir)
+	for _, want := range []string{
+		"EXECUTE_REVERSE_ENGINEER",
+		"Item: 1/1",
+		"Spec: Repository Loading  (create)",
+		"Target file: optimizer/specs/repo.md",
+		"Topic of concern: \"loads a repo\"",
+		"- optimizer/src/repo/",
+		"- optimizer/src/config/",
+		"root of the core",
+		"Spawn 3 haiku explorer sub-agents",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("EXECUTE output missing %q, got:\n%s", want, out)
+		}
+	}
+}
+
+// Functional: RECONCILE lists the current domain's specs with depends_on, and
+// RECONCILE_EVAL instructs running forgectl eval with the configured sub-agents.
+func TestREOutputReconcileAndEval(t *testing.T) {
+	dir := t.TempDir()
+	queue := []REQueueEntry{
+		{Name: "A", Domain: "optimizer", File: "specs/a.md", Action: "create", DependsOn: []string{"B"}},
+		{Name: "B", Domain: "optimizer", File: "specs/b.md", Action: "update", DependsOn: []string{}},
+		{Name: "C", Domain: "api", File: "specs/c.md", Action: "create", DependsOn: []string{}},
+	}
+	rec := reOutputState(StateReconcile, []string{"optimizer", "api"}, 1, queue)
+	rec.ReverseEngineering.ReconcileRound = 1
+	out := outputOf(rec, dir)
+	if !strings.Contains(out, "optimizer/specs/a.md  (create)") || !strings.Contains(out, "depends_on: [B]") {
+		t.Errorf("RECONCILE should list domain specs with depends_on, got:\n%s", out)
+	}
+	if strings.Contains(out, "api/specs/c.md") {
+		t.Errorf("RECONCILE should not list other-domain specs, got:\n%s", out)
+	}
+
+	ev := reOutputState(StateReconcileEval, []string{"optimizer", "api"}, 1, queue)
+	ev.ReverseEngineering.ReconcileRound = 2
+	evOut := outputOf(ev, dir)
+	if !strings.Contains(evOut, "Round: 2/3") {
+		t.Errorf("RECONCILE_EVAL should show round/max, got:\n%s", evOut)
+	}
+	if !strings.Contains(evOut, "forgectl eval") {
+		t.Errorf("RECONCILE_EVAL should instruct running forgectl eval, got:\n%s", evOut)
+	}
+	if !strings.Contains(evOut, "Spawn 1 opus general-purpose sub-agents") {
+		t.Errorf("RECONCILE_EVAL should reflect configured eval sub-agents, got:\n%s", evOut)
+	}
+	if !strings.Contains(evOut, filepath.Join("optimizer", "specs", ".eval", "reconciliation-r2.md")) {
+		t.Errorf("RECONCILE_EVAL should show the report path, got:\n%s", evOut)
+	}
+}
+
+// Functional: POST_REVERSE_ENGINEER emits the STOP / clear-context message and
+// points to the next item (mid-loop) or to RECONCILE (last item).
+func TestREOutputPostReverseEngineer(t *testing.T) {
+	dir := t.TempDir()
+	queue := []REQueueEntry{
+		{Name: "One", Domain: "optimizer", File: "specs/one.md", Action: "create"},
+		{Name: "Two", Domain: "optimizer", File: "specs/two.md", Action: "create"},
+	}
+
+	// Mid-loop: item 1 of 2 → points to the next item.
+	mid := reOutputState(StatePostReverseEngineer, []string{"optimizer"}, 1, queue)
+	mid.ReverseEngineering.ExecuteItemIndex = 1
+	midOut := outputOf(mid, dir)
+	if !strings.Contains(midOut, "STOP ensure you have created the specification that you need,") {
+		t.Errorf("POST should emit the STOP message, got:\n%s", midOut)
+	}
+	if !strings.Contains(midOut, "clear your context window for the next iteration.") {
+		t.Errorf("POST should emit the clear-context message, got:\n%s", midOut)
+	}
+	if !strings.Contains(midOut, "continue with item 2/2") {
+		t.Errorf("POST mid-loop should point to the next item, got:\n%s", midOut)
+	}
+
+	// Last item: item 2 of 2 → points to RECONCILE.
+	last := reOutputState(StatePostReverseEngineer, []string{"optimizer"}, 1, queue)
+	last.ReverseEngineering.ExecuteItemIndex = 2
+	lastOut := outputOf(last, dir)
+	if !strings.Contains(lastOut, "proceed to RECONCILE") {
+		t.Errorf("POST on last item should point to RECONCILE, got:\n%s", lastOut)
+	}
+}
+
+// Edge case: SURVEY notes when the domain has no specs/ directory, and omits the
+// note once the directory exists.
+func TestREOutputSurveyNotesMissingSpecsDir(t *testing.T) {
+	dir := t.TempDir()
+	s := reOutputState(StateSurvey, []string{"optimizer"}, 1, nil)
+
+	// No optimizer/specs/ yet — the absence must be noted.
+	missing := outputOf(s, dir)
+	if !strings.Contains(missing, "optimizer/specs/ does not exist") {
+		t.Errorf("SURVEY should note the missing specs dir, got:\n%s", missing)
+	}
+
+	// Create the directory — the note must disappear.
+	if err := os.MkdirAll(filepath.Join(dir, "optimizer", "specs"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	present := outputOf(s, dir)
+	if strings.Contains(present, "does not exist") {
+		t.Errorf("SURVEY should not note absence once specs/ exists, got:\n%s", present)
+	}
+}
+
+// Edge case: QUEUE shows the "write" variant on the first advance (no stored
+// hash) and the "add entries" variant on subsequent advances (hash present);
+// RECONCILE_ADVANCE shows the next-domain vs DONE variant by domain position.
+func TestREOutputQueueAndReconcileAdvanceVariants(t *testing.T) {
+	dir := t.TempDir()
+
+	// First QUEUE advance — no stored hash.
+	first := reOutputState(StateQueue, []string{"optimizer", "api"}, 1, nil)
+	firstOut := outputOf(first, dir)
+	if !strings.Contains(firstOut, "Write the reverse engineering queue file") {
+		t.Errorf("first QUEUE should show the write variant, got:\n%s", firstOut)
+	}
+
+	// Subsequent QUEUE advance — hash already recorded.
+	sub := reOutputState(StateQueue, []string{"optimizer", "api"}, 2, nil)
+	sub.ReverseEngineering.QueueContentHash = "deadbeef"
+	subOut := outputOf(sub, dir)
+	if !strings.Contains(subOut, "Add entries for domain api to the existing queue file.") {
+		t.Errorf("subsequent QUEUE should show the add-entries variant, got:\n%s", subOut)
+	}
+
+	// RECONCILE_ADVANCE with a domain remaining → next domain.
+	next := reOutputState(StateReconcileAdvance, []string{"optimizer", "api"}, 1, nil)
+	nextOut := outputOf(next, dir)
+	if !strings.Contains(nextOut, "Next: RECONCILE for domain api (2/2)") {
+		t.Errorf("RECONCILE_ADVANCE should point to the next domain, got:\n%s", nextOut)
+	}
+
+	// RECONCILE_ADVANCE on the last domain → DONE.
+	last := reOutputState(StateReconcileAdvance, []string{"optimizer", "api"}, 2, nil)
+	lastOut := outputOf(last, dir)
+	if !strings.Contains(lastOut, "All domains reconciled. Advancing to DONE.") {
+		t.Errorf("RECONCILE_ADVANCE on last domain should advance to DONE, got:\n%s", lastOut)
+	}
+}

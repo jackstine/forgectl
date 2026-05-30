@@ -932,6 +932,85 @@ func TestEvalCommandInDraftReturnsErrorNamingState(t *testing.T) {
 	}
 }
 
+// Functional: forgectl eval during reverse_engineering RECONCILE_EVAL outputs
+// the reconciliation evaluator prompt populated with the current domain's spec
+// list, depends_on, round, and the report path.
+func TestEvalCommandReverseEngineeringReconcileEval(t *testing.T) {
+	dir := setupProjectDir(t)
+	re := state.NewReverseEngineeringState("auth refactor", []string{"optimizer", "api"})
+	re.DomainIndex = 1
+	re.ReconcileRound = 2
+	re.Queue = []state.REQueueEntry{
+		{Name: "Repo Loading", Domain: "optimizer", File: "specs/repo.md", Action: "create", DependsOn: []string{"Config"}},
+		{Name: "Config", Domain: "optimizer", File: "specs/config.md", Action: "update", DependsOn: []string{}},
+		{Name: "Handlers", Domain: "api", File: "specs/handlers.md", Action: "create", DependsOn: []string{}},
+	}
+	forgeState := &state.ForgeState{
+		Phase:              state.PhaseReverseEngineering,
+		State:              state.StateReconcileEval,
+		Config:             state.DefaultForgeConfig(),
+		StartedAtPhase:     state.PhaseReverseEngineering,
+		ReverseEngineering: re,
+	}
+	setupSpecifyingState(t, dir, forgeState)
+
+	var buf bytes.Buffer
+	evalCmd.SetOut(&buf)
+
+	if err := runEval(evalCmd, nil); err != nil {
+		t.Fatalf("eval at RE RECONCILE_EVAL: %v", err)
+	}
+	out := buf.String()
+
+	// Evaluator prompt + 7-dimension checklist surfaced.
+	if !strings.Contains(out, "RECONCILIATION EVALUATION ROUND 2/3") {
+		t.Errorf("expected round 2/3 header, got:\n%s", out)
+	}
+	if !strings.Contains(out, "Topic of concern") {
+		t.Errorf("expected 7-dimension checklist content, got:\n%s", out)
+	}
+	// Current domain's specs only (optimizer), with depends_on.
+	if !strings.Contains(out, "optimizer/specs/repo.md") || !strings.Contains(out, "optimizer/specs/config.md") {
+		t.Errorf("expected optimizer spec files listed, got:\n%s", out)
+	}
+	if strings.Contains(out, "api/specs/handlers.md") {
+		t.Errorf("api (other domain) spec should not be listed, got:\n%s", out)
+	}
+	if !strings.Contains(out, "depends_on: [Config]") {
+		t.Errorf("expected depends_on rendered, got:\n%s", out)
+	}
+	// Report path for the current domain and round.
+	if !strings.Contains(out, filepath.Join("optimizer", "specs", ".eval", "reconciliation-r2.md")) {
+		t.Errorf("expected report path, got:\n%s", out)
+	}
+}
+
+// Rejection: forgectl eval in a reverse_engineering state other than
+// RECONCILE_EVAL is blocked with the spec message.
+func TestEvalCommandReverseEngineeringBlockedOutsideReconcileEval(t *testing.T) {
+	dir := setupProjectDir(t)
+	re := state.NewReverseEngineeringState("auth refactor", []string{"optimizer"})
+	forgeState := &state.ForgeState{
+		Phase:              state.PhaseReverseEngineering,
+		State:              state.StateReconcile,
+		Config:             state.DefaultForgeConfig(),
+		StartedAtPhase:     state.PhaseReverseEngineering,
+		ReverseEngineering: re,
+	}
+	setupSpecifyingState(t, dir, forgeState)
+
+	var buf bytes.Buffer
+	evalCmd.SetOut(&buf)
+
+	err := runEval(evalCmd, nil)
+	if err == nil {
+		t.Fatal("expected error when calling eval outside RECONCILE_EVAL")
+	}
+	if !strings.Contains(err.Error(), "forgectl eval is only available during RECONCILE_EVAL.") {
+		t.Errorf("unexpected error: %v", err)
+	}
+}
+
 // --- validate command tests ---
 
 func writeValidSpecQueueFile(t *testing.T, dir string) string {
@@ -972,7 +1051,7 @@ func writeValidPlanFileForValidate(t *testing.T, dir string) string {
 		"items": []interface{}{map[string]interface{}{
 			"id": "item.a", "name": "Item A", "description": "desc",
 			"depends_on": []string{}, "passes": "pending", "rounds": 0,
-			"refs": []string{"notes/notes.md"},
+			"refs":  []string{"notes/notes.md"},
 			"tests": []interface{}{map[string]interface{}{"category": "functional", "description": "works"}},
 		}},
 	}
@@ -1240,6 +1319,74 @@ func TestValidateTypePlanExplicit(t *testing.T) {
 	out := buf.String()
 	if !strings.Contains(out, "Validated:") || !strings.Contains(out, "no errors") {
 		t.Errorf("expected 'Validated:' with 'no errors' with explicit --type plan, got: %s", out)
+	}
+}
+
+// newREForgeState builds a reverse_engineering ForgeState in the given state
+// with the supplied domain list locked in.
+func newREForgeState(st state.StateName, domains []string) *state.ForgeState {
+	re := state.NewReverseEngineeringState("auth refactor", domains)
+	return &state.ForgeState{
+		Phase:              state.PhaseReverseEngineering,
+		State:              st,
+		Config:             state.DefaultForgeConfig(),
+		StartedAtPhase:     state.PhaseReverseEngineering,
+		ReverseEngineering: re,
+	}
+}
+
+// Functional: add-domain during QUEUE appends the domain and updates the count.
+func TestAddDomainInQueueState(t *testing.T) {
+	dir := setupProjectDir(t)
+	forgeState := newREForgeState(state.StateQueue, []string{"optimizer", "api"})
+	sd := setupSpecifyingState(t, dir, forgeState)
+
+	if err := runAddDomain(addDomainCmd, []string{"portal"}); err != nil {
+		t.Fatalf("add-domain: %v", err)
+	}
+
+	s, _ := state.Load(sd)
+	want := []string{"optimizer", "api", "portal"}
+	if len(s.ReverseEngineering.Domains) != 3 {
+		t.Fatalf("domains = %v, want %v", s.ReverseEngineering.Domains, want)
+	}
+	for i, d := range want {
+		if s.ReverseEngineering.Domains[i] != d {
+			t.Errorf("domain[%d] = %q, want %q", i, s.ReverseEngineering.Domains[i], d)
+		}
+	}
+	if s.ReverseEngineering.DomainCount != 3 {
+		t.Errorf("domain count = %d, want 3", s.ReverseEngineering.DomainCount)
+	}
+}
+
+// Rejection: add-domain is blocked outside QUEUE and rejects a duplicate domain.
+func TestAddDomainRejections(t *testing.T) {
+	// Blocked outside QUEUE.
+	dir := setupProjectDir(t)
+	forgeState := newREForgeState(state.StateSurvey, []string{"optimizer", "api"})
+	setupSpecifyingState(t, dir, forgeState)
+
+	if err := runAddDomain(addDomainCmd, []string{"portal"}); err == nil {
+		t.Error("expected error when not in QUEUE state")
+	} else if !strings.Contains(err.Error(), "only available during the QUEUE state") {
+		t.Errorf("unexpected wrong-state error: %v", err)
+	}
+
+	// Duplicate domain rejected during QUEUE.
+	dir2 := setupProjectDir(t)
+	qState := newREForgeState(state.StateQueue, []string{"optimizer", "api"})
+	sd := setupSpecifyingState(t, dir2, qState)
+
+	if err := runAddDomain(addDomainCmd, []string{"api"}); err == nil {
+		t.Error("expected error for duplicate domain")
+	} else if !strings.Contains(err.Error(), `domain "api" already exists`) {
+		t.Errorf("unexpected duplicate error: %v", err)
+	}
+	// State unchanged: still two domains.
+	s, _ := state.Load(sd)
+	if len(s.ReverseEngineering.Domains) != 2 {
+		t.Errorf("domain list should be unchanged on rejection, got %v", s.ReverseEngineering.Domains)
 	}
 }
 

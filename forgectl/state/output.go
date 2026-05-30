@@ -21,6 +21,8 @@ func PrintAdvanceOutput(w io.Writer, s *ForgeState, dir string) {
 		printPlanningOutput(w, s, dir)
 	case PhaseImplementing:
 		printImplementingOutput(w, s, dir)
+	case PhaseReverseEngineering:
+		printReverseEngineeringOutput(w, s, dir)
 	}
 
 	// Phase shift output is printed regardless of phase.
@@ -1015,6 +1017,327 @@ func printPhaseShiftOutput(w io.Writer, s *ForgeState) {
 	}
 }
 
+// --- Reverse Engineering ---
+
+func printReverseEngineeringOutput(w io.Writer, s *ForgeState, dir string) {
+	re := s.ReverseEngineering
+	if re == nil {
+		return
+	}
+	cfg := s.Config.ReverseEngineering
+
+	n := re.DomainCount
+	domain := ""
+	if re.DomainIndex >= 1 && re.DomainIndex <= len(re.Domains) {
+		domain = re.Domains[re.DomainIndex-1]
+	}
+
+	// spawnLine renders the configured sub-agent spawn instruction for a block.
+	spawn := func(ac AgentConfig) string {
+		return fmt.Sprintf("Spawn %d %s %s sub-agents", ac.Count, ac.Model, ac.Type)
+	}
+	// topicRules emits the shared topic-of-concern formatting rules.
+	topicRules := func() {
+		fmt.Fprintf(w, "    - Must be a single topic that fits in one sentence\n")
+		fmt.Fprintf(w, "    - Must not contain \"and\" conjoining unrelated capabilities\n")
+		fmt.Fprintf(w, "    - Must describe an activity, not a vague statement\n")
+		fmt.Fprintf(w, "    - Valid:   \"The optimizer validates repository URLs before cloning\"\n")
+		fmt.Fprintf(w, "    - Invalid: \"The optimizer handles repos, validation, and caching\"\n")
+	}
+
+	fmt.Fprintf(w, "Phase: reverse_engineering\n")
+
+	switch s.State {
+	case StateOrient:
+		fmt.Fprintf(w, "State: ORIENT\n")
+		fmt.Fprintf(w, "Concept: %q\n", re.Concept)
+		parts := make([]string, len(re.Domains))
+		for i, d := range re.Domains {
+			parts[i] = fmt.Sprintf("%s (%d/%d)", d, i+1, n)
+		}
+		fmt.Fprintf(w, "Domains: %s\n", strings.Join(parts, ", "))
+		fmt.Fprintf(w, "\nAction:\n")
+		fmt.Fprintf(w, "  Prepare for reverse engineering across %d domains.\n", n)
+		fmt.Fprintf(w, "  Domain order: %s\n", strings.Join(re.Domains, " → "))
+		fmt.Fprintf(w, "\n  Requirements before advancing:\n")
+		fmt.Fprintf(w, "  - Confirm you are familiar with the work concept scope\n")
+		fmt.Fprintf(w, "  - Confirm domain ordering is correct\n")
+		fmt.Fprintf(w, "    (SURVEY → GAP_ANALYSIS → DECOMPOSE → QUEUE runs per domain in this order)\n")
+		if len(re.Domains) > 0 {
+			fmt.Fprintf(w, "\n  Advance to begin SURVEY on domain: %s\n", re.Domains[0])
+		}
+
+	case StateSurvey:
+		fmt.Fprintf(w, "State: SURVEY\n")
+		fmt.Fprintf(w, "Domain: %s (%d/%d)\n", domain, re.DomainIndex, n)
+		fmt.Fprintf(w, "Concept: %q\n", re.Concept)
+		fmt.Fprintf(w, "\nAction:\n")
+		fmt.Fprintf(w, "  Survey existing specifications in %s/specs/.\n", domain)
+		// Note the absence of a specs/ directory: the user proceeds with an
+		// empty spec inventory for this domain (GAP_ANALYSIS treats all
+		// behavior as unspecified).
+		if domain != "" {
+			if info, err := os.Stat(filepath.Join(dir, domain, "specs")); err != nil || !info.IsDir() {
+				fmt.Fprintf(w, "\n  NOTE: %s/specs/ does not exist. Proceed with an empty spec\n", domain)
+				fmt.Fprintf(w, "  inventory for this domain — all behavior is unspecified.\n")
+			}
+		}
+		fmt.Fprintf(w, "\n  %s\n", spawn(cfg.Survey))
+		fmt.Fprintf(w, "  scoped to %s/specs/.\n", domain)
+		fmt.Fprintf(w, "\n  Read all spec files in the directory to understand what is specified.\n")
+		fmt.Fprintf(w, "  Identify which specs pertain to the concept.\n")
+		fmt.Fprintf(w, "\n  For each spec, extract:\n")
+		fmt.Fprintf(w, "    - Spec file name\n")
+		fmt.Fprintf(w, "    - Topic of concern\n")
+		fmt.Fprintf(w, "    - Behaviors defined\n")
+		fmt.Fprintf(w, "    - Integration points\n")
+		fmt.Fprintf(w, "    - Dependencies\n")
+		fmt.Fprintf(w, "    - Relevance: whether this spec pertains to the concept\n")
+		fmt.Fprintf(w, "\n  Disregard specs that do not pertain to the concept.\n")
+		fmt.Fprintf(w, "\n  Advance when complete.\n")
+
+	case StateGapAnalysis:
+		fmt.Fprintf(w, "State: GAP_ANALYSIS\n")
+		fmt.Fprintf(w, "Domain: %s (%d/%d)\n", domain, re.DomainIndex, n)
+		fmt.Fprintf(w, "Concept: %q\n", re.Concept)
+		fmt.Fprintf(w, "\nAction:\n")
+		fmt.Fprintf(w, "  Identify unspecified behavior in the %s source code\n", domain)
+		fmt.Fprintf(w, "  that pertains to the concept.\n")
+		fmt.Fprintf(w, "\n  %s scoped to the %s source code.\n", spawn(cfg.GapAnalysis), domain)
+		fmt.Fprintf(w, "\n  For each behavior found in code that is not covered by an existing spec:\n")
+		fmt.Fprintf(w, "    - Describe what the behavior does\n")
+		fmt.Fprintf(w, "    - Identify a topic of concern for it:\n")
+		topicRules()
+		fmt.Fprintf(w, "    - Note where in the code it is implemented\n")
+		fmt.Fprintf(w, "    - Note if an existing spec partially covers it (and what the gap is)\n")
+		fmt.Fprintf(w, "\n  Advance when complete.\n")
+		fmt.Fprintf(w, "  Next: DECOMPOSE for domain %s\n", domain)
+
+	case StateDecompose:
+		fmt.Fprintf(w, "State: DECOMPOSE\n")
+		fmt.Fprintf(w, "Domain: %s (%d/%d)\n", domain, re.DomainIndex, n)
+		fmt.Fprintf(w, "Concept: %q\n", re.Concept)
+		fmt.Fprintf(w, "\nAction:\n")
+		fmt.Fprintf(w, "  Synthesize findings from domain %s.\n", domain)
+		fmt.Fprintf(w, "\n  From the SURVEY and GAP_ANALYSIS results for this domain,\n")
+		fmt.Fprintf(w, "  determine which specifications need to be created or updated.\n")
+		fmt.Fprintf(w, "\n  For each spec, define:\n")
+		fmt.Fprintf(w, "    - Name (display name)\n")
+		fmt.Fprintf(w, "    - Domain: %s\n", domain)
+		fmt.Fprintf(w, "    - Topic of concern:\n")
+		topicRules()
+		fmt.Fprintf(w, "    - File: target path relative to domain root (specs/<kebab-case-name>.md)\n")
+		fmt.Fprintf(w, "    - Action: \"create\" for new specs, \"update\" for existing specs with gaps\n")
+		fmt.Fprintf(w, "    - Code search roots:\n")
+		fmt.Fprintf(w, "        - The directory (or directories) forming the root of the core\n")
+		fmt.Fprintf(w, "          code implementing this topic of concern.\n")
+		fmt.Fprintf(w, "        - Go as deep as needed: the root is the deepest directory that\n")
+		fmt.Fprintf(w, "          still contains ALL the files for that one capability — often a\n")
+		fmt.Fprintf(w, "          nested package several levels down (e.g. net/http/internal/\n")
+		fmt.Fprintf(w, "          httpcommon/), not a broad top-level directory.\n")
+		fmt.Fprintf(w, "        - A topic may span multiple such directories; list each one.\n")
+		fmt.Fprintf(w, "        - Directories, not single files; relative to the domain root.\n")
+		fmt.Fprintf(w, "        - Must be non-empty for every spec.\n")
+		fmt.Fprintf(w, "    - Dependencies on other specs\n")
+		fmt.Fprintf(w, "\n  Decide:\n")
+		fmt.Fprintf(w, "    - Which gaps warrant new specs vs. updates to existing specs\n")
+		fmt.Fprintf(w, "    - How to group related behaviors into single-topic specs\n")
+		fmt.Fprintf(w, "\n  Advance when the spec list for this domain is finalized.\n")
+
+	case StateQueue:
+		queuePath := filepath.Join(s.Config.Paths.StateDir, "reverse-engineering-queue.json")
+		fmt.Fprintf(w, "State: QUEUE\n")
+		fmt.Fprintf(w, "Domain: %s (%d/%d)\n", domain, re.DomainIndex, n)
+		fmt.Fprintf(w, "Concept: %q\n", re.Concept)
+		fmt.Fprintf(w, "Queue file: %s\n", queuePath)
+		fmt.Fprintf(w, "\nAction:\n")
+		if re.QueueContentHash == "" {
+			// First advance — the file has not been read yet.
+			fmt.Fprintf(w, "  Write the reverse engineering queue file with entries for domain %s\n", domain)
+			fmt.Fprintf(w, "  at: %s\n", queuePath)
+			fmt.Fprintf(w, "\n  Requirements:\n")
+			fmt.Fprintf(w, "    - All paths relative to domain root (<project_root>/%s/)\n", domain)
+			fmt.Fprintf(w, "    - Order entries by dependency: specs with no dependencies first\n")
+			fmt.Fprintf(w, "    - code_search_roots must be non-empty for every entry\n")
+			fmt.Fprintf(w, "    - No circular dependencies\n")
+		} else {
+			// Subsequent advance — accumulate this domain's entries.
+			fmt.Fprintf(w, "  Add entries for domain %s to the existing queue file.\n", domain)
+			fmt.Fprintf(w, "\n  Update the queue file at: %s\n", queuePath)
+			fmt.Fprintf(w, "  Add new entries for this domain alongside existing entries.\n")
+		}
+		fmt.Fprintf(w, "\n  Advance when the file is written:\n")
+		fmt.Fprintf(w, "    forgectl advance\n")
+
+	case StateExecuteReverseEngineer:
+		m := len(re.Queue)
+		var item *REQueueEntry
+		if re.ExecuteItemIndex >= 1 && re.ExecuteItemIndex <= m {
+			item = &re.Queue[re.ExecuteItemIndex-1]
+		}
+		fmt.Fprintf(w, "State: EXECUTE_REVERSE_ENGINEER\n")
+		if item == nil {
+			fmt.Fprintf(w, "\nAction:\n  No item to execute.\n")
+			break
+		}
+		fmt.Fprintf(w, "Item: %d/%d\n", re.ExecuteItemIndex, m)
+		fmt.Fprintf(w, "Domain: %s\n", item.Domain)
+		fmt.Fprintf(w, "Spec: %s  (%s)\n", item.Name, item.Action)
+		fmt.Fprintf(w, "Target file: %s/%s\n", item.Domain, item.File)
+		fmt.Fprintf(w, "Topic of concern: %q\n", item.Topic)
+		fmt.Fprintf(w, "\ncode_search_roots:\n")
+		for _, root := range item.CodeSearchRoots {
+			fmt.Fprintf(w, "  - %s/%s\n", item.Domain, root)
+		}
+		fmt.Fprintf(w, "\n  code_search_roots are the directories forming the root of the core\n")
+		fmt.Fprintf(w, "  code that implements this spec's topic of concern. A topic of concern\n")
+		fmt.Fprintf(w, "  may span multiple directories within a module — every listed root, and\n")
+		fmt.Fprintf(w, "  every file recursively beneath it, is in scope. These are directories,\n")
+		fmt.Fprintf(w, "  not single files, relative to the domain root. Read the core code in\n")
+		fmt.Fprintf(w, "  full before writing.\n")
+		verb := "Create"
+		if item.Action == "update" {
+			verb = "Update"
+		}
+		fmt.Fprintf(w, "\nAction:\n")
+		fmt.Fprintf(w, "  %s the specification\n", verb)
+		fmt.Fprintf(w, "  at %s/%s from the code under the search roots above.\n", item.Domain, item.File)
+		fmt.Fprintf(w, "\n  %s\n", spawn(cfg.Execute))
+		fmt.Fprintf(w, "  scoped to the search roots to examine the implementation.\n")
+		fmt.Fprintf(w, "\n  Write the specification in the standard spec format, capturing the\n")
+		fmt.Fprintf(w, "  contracts, behaviors, invariants, edge cases, and testing criteria\n")
+		fmt.Fprintf(w, "  that the code currently implements for this topic of concern.\n")
+		if item.Action == "update" {
+			fmt.Fprintf(w, "  The file already exists — preserve content that is still correct and\n")
+			fmt.Fprintf(w, "  revise the rest to match the current implementation.\n")
+		}
+		fmt.Fprintf(w, "\n  Advance when the specification file is written:\n")
+		fmt.Fprintf(w, "    forgectl advance\n")
+
+	case StatePostReverseEngineer:
+		m := len(re.Queue)
+		var item *REQueueEntry
+		if re.ExecuteItemIndex >= 1 && re.ExecuteItemIndex <= m {
+			item = &re.Queue[re.ExecuteItemIndex-1]
+		}
+		fmt.Fprintf(w, "State: POST_REVERSE_ENGINEER\n")
+		if item != nil {
+			fmt.Fprintf(w, "Item: %d/%d\n", re.ExecuteItemIndex, m)
+			fmt.Fprintf(w, "Spec: %s\n", item.Name)
+			fmt.Fprintf(w, "Target file: %s/%s\n", item.Domain, item.File)
+		}
+		fmt.Fprintf(w, "\nSTOP ensure you have created the specification that you need,\n")
+		fmt.Fprintf(w, "please tell your user to clear your context window for the next iteration.\n")
+		if re.ExecuteItemIndex < m {
+			fmt.Fprintf(w, "\nAdvance to continue with item %d/%d:\n", re.ExecuteItemIndex+1, m)
+		} else {
+			fmt.Fprintf(w, "\nAdvance to proceed to RECONCILE:\n")
+		}
+		fmt.Fprintf(w, "  forgectl advance\n")
+
+	case StateReconcile:
+		fmt.Fprintf(w, "State: RECONCILE\n")
+		fmt.Fprintf(w, "Domain: %s (%d/%d)\n", domain, re.DomainIndex, n)
+		fmt.Fprintf(w, "Concept: %q\n", re.Concept)
+		fmt.Fprintf(w, "Round: %d\n", re.ReconcileRound)
+		fmt.Fprintf(w, "\nSpecs created or updated for this domain:\n")
+		printREDomainSpecs(w, re, domain)
+		// Surface any expected-but-missing spec files for this domain.
+		if gaps := ReverseEngineeringDomainGaps(re, dir); len(gaps) > 0 {
+			fmt.Fprintf(w, "\nMissing spec files (report the gap; do not fabricate):\n")
+			for _, g := range gaps {
+				fmt.Fprintf(w, "  - %s/%s\n", domain, g)
+			}
+		}
+		fmt.Fprintf(w, "\nAction:\n")
+		if re.ReconcileRound > 1 {
+			fmt.Fprintf(w, "  Reconciliation evaluation failed on the previous round.\n")
+			fmt.Fprintf(w, "  Address the findings from the evaluation report and re-reconcile.\n\n")
+		}
+		fmt.Fprintf(w, "  Cross-reference specifications for domain %s.\n", domain)
+		fmt.Fprintf(w, "\n  For every spec that was created or updated, use its depends_on\n")
+		fmt.Fprintf(w, "  to add cross-references to the corresponding specs.\n")
+		fmt.Fprintf(w, "  Update both the new/updated spec and the spec it references:\n")
+		fmt.Fprintf(w, "    - Add Depends On entries in the new/updated spec\n")
+		fmt.Fprintf(w, "    - Add Integration Points in both directions\n")
+		fmt.Fprintf(w, "      (if A depends on B, both A and B reference each other)\n")
+		fmt.Fprintf(w, "\n  Verify consistency:\n")
+		fmt.Fprintf(w, "    - Every Depends On reference points to a spec that exists\n")
+		fmt.Fprintf(w, "    - Every Depends On has a corresponding Integration Points row\n")
+		fmt.Fprintf(w, "      in the referenced spec\n")
+		fmt.Fprintf(w, "    - Integration Points are symmetric (A ↔ B)\n")
+		fmt.Fprintf(w, "    - Spec names are consistent across all references\n")
+		fmt.Fprintf(w, "    - No circular dependencies in the Depends On graph\n")
+		fmt.Fprintf(w, "\n  Stage all changes:\n")
+		fmt.Fprintf(w, "    git add the modified spec files.\n")
+		fmt.Fprintf(w, "\n  Advance when reconciliation is complete and changes are staged.\n")
+
+	case StateReconcileEval:
+		maxRounds := cfg.Reconcile.MaxRounds
+		fmt.Fprintf(w, "State: RECONCILE_EVAL\n")
+		fmt.Fprintf(w, "Domain: %s (%d/%d)\n", domain, re.DomainIndex, n)
+		fmt.Fprintf(w, "Concept: %q\n", re.Concept)
+		fmt.Fprintf(w, "Round: %d/%d\n", re.ReconcileRound, maxRounds)
+		fmt.Fprintf(w, "\nAction:\n")
+		fmt.Fprintf(w, "  Evaluate cross-spec consistency for domain %s.\n", domain)
+		fmt.Fprintf(w, "\n  %s to evaluate the reconciliation.\n", spawn(cfg.Reconcile.Eval))
+		fmt.Fprintf(w, "\n  Instruct your sub-agents to run:\n")
+		fmt.Fprintf(w, "    forgectl eval\n")
+		fmt.Fprintf(w, "\n  This outputs the evaluation prompt with the full spec files\n")
+		fmt.Fprintf(w, "  and consistency checklist for the sub-agents to review.\n")
+		fmt.Fprintf(w, "\n  After the sub-agents complete their evaluation, advance with the verdict:\n")
+		fmt.Fprintf(w, "    forgectl advance --verdict PASS --eval-report <path>\n")
+		fmt.Fprintf(w, "    forgectl advance --verdict FAIL --eval-report <path>\n")
+		reportFile := filepath.Join(domain, "specs", ".eval", fmt.Sprintf("reconciliation-r%d.md", re.ReconcileRound))
+		fmt.Fprintf(w, "\n  Eval reports are written to: %s\n", reportFile)
+
+	case StateColleagueReview:
+		fmt.Fprintf(w, "State: COLLEAGUE_REVIEW\n")
+		fmt.Fprintf(w, "Domain: %s (%d/%d)\n", domain, re.DomainIndex, n)
+		fmt.Fprintf(w, "Concept: %q\n", re.Concept)
+		fmt.Fprintf(w, "\nAction:\n")
+		fmt.Fprintf(w, "  STOP and review the specifications with your colleague.\n")
+		fmt.Fprintf(w, "\n  Advance when the review is complete:\n")
+		fmt.Fprintf(w, "    forgectl advance\n")
+
+	case StateReconcileAdvance:
+		fmt.Fprintf(w, "State: RECONCILE_ADVANCE\n")
+		if re.DomainIndex < re.DomainCount {
+			next := ""
+			if re.DomainIndex < len(re.Domains) {
+				next = re.Domains[re.DomainIndex]
+			}
+			fmt.Fprintf(w, "Domain: %s (%d/%d) → %s\n", domain, re.DomainIndex, n, next)
+			fmt.Fprintf(w, "\nAction:\n")
+			fmt.Fprintf(w, "  Domain %s reconciliation complete.\n", domain)
+			fmt.Fprintf(w, "\n  Next: RECONCILE for domain %s (%d/%d)\n", next, re.DomainIndex+1, n)
+		} else {
+			fmt.Fprintf(w, "Domain: %s (%d/%d) → DONE\n", domain, re.DomainIndex, n)
+			fmt.Fprintf(w, "\nAction:\n")
+			fmt.Fprintf(w, "  Domain %s reconciliation complete.\n", domain)
+			fmt.Fprintf(w, "\n  All domains reconciled. Advancing to DONE.\n")
+		}
+		fmt.Fprintf(w, "\n  Advance to proceed.\n")
+
+	case StateDone:
+		fmt.Fprintf(w, "State: DONE\n")
+		fmt.Fprintf(w, "\nThe reverse engineering workflow is complete. All spec files have been\n")
+		fmt.Fprintf(w, "produced, verified, and reconciled across all domains.\n")
+	}
+}
+
+// printREDomainSpecs lists the queue entries for a domain with their action and
+// depends_on, used by the RECONCILE action output.
+func printREDomainSpecs(w io.Writer, re *ReverseEngineeringState, domain string) {
+	for _, entry := range re.Queue {
+		if entry.Domain != domain {
+			continue
+		}
+		fmt.Fprintf(w, "  - %s/%s  (%s)\n", entry.Domain, entry.File, entry.Action)
+		fmt.Fprintf(w, "    depends_on: %v\n", entry.DependsOn)
+	}
+}
+
 // --- Status ---
 
 // PrintStatus prints the session status. When verbose is true, full phase
@@ -1155,6 +1478,47 @@ func PrintStatus(w io.Writer, s *ForgeState, dir string, verbose bool) {
 		}
 		fmt.Fprintln(w)
 	}
+
+	// Verbose: Reverse Engineering section.
+	if s.ReverseEngineering != nil {
+		re := s.ReverseEngineering
+		fmt.Fprintf(w, "--- Reverse Engineering ---\n\n")
+		fmt.Fprintf(w, "  Concept: %q\n", re.Concept)
+		fmt.Fprintf(w, "  Domains (%d):\n", re.DomainCount)
+		for i, d := range re.Domains {
+			marker := "  "
+			if i+1 == re.DomainIndex {
+				marker = "→ "
+			}
+			fmt.Fprintf(w, "    %s[%d] %s\n", marker, i+1, d)
+		}
+
+		if len(re.Queue) > 0 {
+			fmt.Fprintf(w, "\n--- Queue ---\n\n")
+			for i, q := range re.Queue {
+				fmt.Fprintf(w, "  [%d] %s (%s)  %s/%s  (%s)\n", i+1, q.Name, q.Domain, q.Domain, q.File, q.Action)
+			}
+		}
+
+		if len(re.DomainReconcile) > 0 {
+			fmt.Fprintf(w, "\n--- Reconcile ---\n\n")
+			for _, d := range re.Domains {
+				rec, ok := re.DomainReconcile[d]
+				if !ok {
+					continue
+				}
+				fmt.Fprintf(w, "  %s: round %d\n", d, rec.Round)
+				for _, e := range rec.Evals {
+					fmt.Fprintf(w, "    Round %d: %s", e.Round, e.Verdict)
+					if e.EvalReport != "" {
+						fmt.Fprintf(w, " — %s", e.EvalReport)
+					}
+					fmt.Fprintln(w)
+				}
+			}
+		}
+		fmt.Fprintln(w)
+	}
 }
 
 // phaseConfig returns the batch size and round bounds for the current phase.
@@ -1164,6 +1528,9 @@ func phaseConfig(s *ForgeState) (batch, minRounds, maxRounds int) {
 		return s.Config.Specifying.Batch, s.Config.Specifying.Eval.MinRounds, s.Config.Specifying.Eval.MaxRounds
 	case PhasePlanning:
 		return s.Config.Planning.Batch, s.Config.Planning.Eval.MinRounds, s.Config.Planning.Eval.MaxRounds
+	case PhaseReverseEngineering:
+		// Reverse engineering has no batch; report the reconcile round bounds.
+		return 0, s.Config.ReverseEngineering.Reconcile.MinRounds, s.Config.ReverseEngineering.Reconcile.MaxRounds
 	default: // implementing
 		return s.Config.Implementing.Batch, s.Config.Implementing.Eval.MinRounds, s.Config.Implementing.Eval.MaxRounds
 	}
@@ -1204,6 +1571,13 @@ func printProgressLine(w io.Writer, s *ForgeState, dir string) {
 		}
 		total := passed + failed + remaining
 		fmt.Fprintf(w, "Progress: %d/%d passed, %d failed, %d remaining\n", passed, total, failed, remaining)
+
+	case PhaseReverseEngineering:
+		if s.ReverseEngineering == nil {
+			return
+		}
+		re := s.ReverseEngineering
+		fmt.Fprintf(w, "Progress: domain %d/%d, %d queued specs\n", re.DomainIndex, re.DomainCount, len(re.Queue))
 	}
 }
 
@@ -1457,6 +1831,57 @@ func PrintCrossRefEvalOutput(w io.Writer, s *ForgeState) error {
 		fmt.Fprintf(w, "Write your evaluation report to:\n")
 		fmt.Fprintf(w, "  %s\n", reportFile)
 	}
+
+	return nil
+}
+
+// PrintReverseEngineeringEvalOutput prints the reconciliation evaluation context
+// for the sub-agent during the reverse_engineering RECONCILE_EVAL state. It
+// populates the embedded reconcile evaluator prompt with the current domain's
+// spec list (each with its depends_on), the current round, and the report path.
+func PrintReverseEngineeringEvalOutput(w io.Writer, s *ForgeState) error {
+	if s.Phase != PhaseReverseEngineering || s.State != StateReconcileEval {
+		return fmt.Errorf("forgectl eval is only available during RECONCILE_EVAL.")
+	}
+	re := s.ReverseEngineering
+	if re == nil {
+		return fmt.Errorf("reverse_engineering state is not initialized")
+	}
+
+	round := re.ReconcileRound
+	maxRounds := s.Config.ReverseEngineering.Reconcile.MaxRounds
+
+	domain := ""
+	if re.DomainIndex >= 1 && re.DomainIndex <= len(re.Domains) {
+		domain = re.Domains[re.DomainIndex-1]
+	}
+
+	fmt.Fprintf(w, "=== RECONCILIATION EVALUATION ROUND %d/%d ===\n", round, maxRounds)
+	fmt.Fprintf(w, "\n--- EVALUATOR INSTRUCTIONS ---\n\n")
+	fmt.Fprintf(w, "%s\n", evaluators.ReconcileEval)
+
+	// Specs created or updated for the current domain, with their depends_on.
+	fmt.Fprintf(w, "\n--- DOMAIN ---\n\n")
+	fmt.Fprintf(w, "%s (%d/%d)\n", domain, re.DomainIndex, re.DomainCount)
+
+	fmt.Fprintf(w, "\n--- SPECS ---\n\n")
+	count := 0
+	for _, entry := range re.Queue {
+		if entry.Domain != domain {
+			continue
+		}
+		count++
+		fmt.Fprintf(w, "  [%d] %s/%s  (%s)\n", count, entry.Domain, entry.File, entry.Action)
+		fmt.Fprintf(w, "      depends_on: %v\n", entry.DependsOn)
+	}
+	if count == 0 {
+		fmt.Fprintf(w, "  (no specs queued for this domain)\n")
+	}
+
+	reportFile := filepath.Join(domain, "specs", ".eval", fmt.Sprintf("reconciliation-r%d.md", round))
+	fmt.Fprintf(w, "\n--- REPORT OUTPUT ---\n\n")
+	fmt.Fprintf(w, "Write your evaluation report to:\n")
+	fmt.Fprintf(w, "  %s\n", reportFile)
 
 	return nil
 }

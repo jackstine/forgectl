@@ -1,0 +1,40 @@
+{
+  "plans": [
+    {
+      "name": "Reverse Engineering Phase",
+      "domain": "forgectl",
+      "file": "forgectl/.forgectl_workspace/implementation_plan/reverse-engineering/plan.json",
+      "specs": [
+        "forgectl/specs/reverse-engineering.md",
+        "forgectl/specs/session-init.md",
+        "forgectl/specs/state-persistence.md",
+        "forgectl/specs/activity-logging.md",
+        "forgectl/specs/validate-command.md"
+      ],
+      "spec_commits": [],
+      "code_search_roots": [
+        "forgectl/cmd/",
+        "forgectl/state/",
+        "forgectl/evaluators/"
+      ]
+    },
+    {
+      "name": "Phase Feature Updates",
+      "domain": "forgectl",
+      "file": "forgectl/.forgectl_workspace/implementation_plan/phase-feature-updates/plan.json",
+      "specs": [
+        "forgectl/specs/plan-production.md",
+        "forgectl/specs/batch-implementation.md",
+        "forgectl/specs/spec-lifecycle.md",
+        "forgectl/specs/spec-reconciliation.md",
+        "forgectl/specs/phase-transitions.md"
+      ],
+      "spec_commits": [],
+      "code_search_roots": [
+        "forgectl/cmd/",
+        "forgectl/state/",
+        "forgectl/evaluators/"
+      ]
+    }
+  ]
+}
