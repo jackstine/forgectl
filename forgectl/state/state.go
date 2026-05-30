@@ -199,3 +199,18 @@ func NewImplementingState() *ImplementingState {
 		LayerHistory: []LayerHistory{},
 	}
 }
+
+// NewReverseEngineeringState creates initial reverse_engineering state. The
+// domain index is 1-based; the queue and per-domain reconcile map start empty.
+func NewReverseEngineeringState(concept string, domains []string) *ReverseEngineeringState {
+	doms := make([]string, len(domains))
+	copy(doms, domains)
+	return &ReverseEngineeringState{
+		Concept:         concept,
+		Domains:         doms,
+		DomainIndex:     1,
+		DomainCount:     len(doms),
+		Queue:           []REQueueEntry{},
+		DomainReconcile: map[string]*ReconcileState{},
+	}
+}

@@ -213,3 +213,105 @@ func TestArchiveSessionCreatesSessionsDir(t *testing.T) {
 		t.Errorf("sessions dir should exist after archive: %v", err)
 	}
 }
+
+// Functional: NewReverseEngineeringState seeds the tracking fields, and a
+// populated reverse_engineering state round-trips through Save/Load.
+func TestNewReverseEngineeringStateAndRoundTrip(t *testing.T) {
+	re := NewReverseEngineeringState("auth refactor", []string{"optimizer", "api", "portal"})
+	if re.DomainIndex != 1 {
+		t.Errorf("DomainIndex = %d, want 1", re.DomainIndex)
+	}
+	if re.DomainCount != 3 {
+		t.Errorf("DomainCount = %d, want 3", re.DomainCount)
+	}
+	if re.Concept != "auth refactor" {
+		t.Errorf("Concept = %q, want auth refactor", re.Concept)
+	}
+	if re.Queue == nil || len(re.Queue) != 0 {
+		t.Errorf("Queue = %v, want empty non-nil", re.Queue)
+	}
+	if re.DomainReconcile == nil {
+		t.Error("DomainReconcile should be a non-nil map")
+	}
+
+	// Populate state with a queue entry and a per-domain reconcile record, then
+	// persist and reload.
+	re.Queue = append(re.Queue, REQueueEntry{
+		Name:            "Repository Loading",
+		Domain:          "optimizer",
+		Topic:           "loads a repo",
+		File:            "specs/repository-loading.md",
+		Action:          "create",
+		CodeSearchRoots: []string{"src/repo/"},
+		DependsOn:       []string{},
+	})
+	re.QueueFilePath = ".forgectl/state/reverse-engineering-queue.json"
+	re.QueueContentHash = "abc123"
+	re.ColleagueReview = true
+	re.DomainReconcile["optimizer"] = &ReconcileState{Round: 2}
+
+	dir := t.TempDir()
+	s := &ForgeState{
+		Phase:              PhaseReverseEngineering,
+		State:              StateSurvey,
+		StartedAtPhase:     PhaseReverseEngineering,
+		ReverseEngineering: re,
+	}
+	if err := Save(dir, s); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+	loaded, err := Load(dir)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+
+	got := loaded.ReverseEngineering
+	if got == nil {
+		t.Fatal("ReverseEngineering pointer lost on reload")
+	}
+	if got.DomainCount != 3 || got.DomainIndex != 1 {
+		t.Errorf("indices = %d/%d, want 1/3", got.DomainIndex, got.DomainCount)
+	}
+	if got.QueueFilePath != ".forgectl/state/reverse-engineering-queue.json" || got.QueueContentHash != "abc123" {
+		t.Errorf("queue path/hash not preserved: %+v", got)
+	}
+	if !got.ColleagueReview {
+		t.Error("ColleagueReview not preserved")
+	}
+	if len(got.Queue) != 1 || got.Queue[0].Action != "create" || got.Queue[0].File != "specs/repository-loading.md" {
+		t.Errorf("queue not preserved: %+v", got.Queue)
+	}
+	if r := got.DomainReconcile["optimizer"]; r == nil || r.Round != 2 {
+		t.Errorf("per-domain reconcile not preserved: %+v", got.DomainReconcile)
+	}
+}
+
+// Edge case: an empty domains list yields DomainCount 0 with non-nil empty
+// collections, and a non-RE state leaves the ReverseEngineering pointer nil
+// through Save/Load.
+func TestReverseEngineeringStateEdgeCases(t *testing.T) {
+	re := NewReverseEngineeringState("c", []string{})
+	if re.DomainCount != 0 {
+		t.Errorf("DomainCount = %d, want 0", re.DomainCount)
+	}
+	if re.Domains == nil || len(re.Domains) != 0 {
+		t.Errorf("Domains = %v, want empty non-nil", re.Domains)
+	}
+	if re.DomainReconcile == nil {
+		t.Error("DomainReconcile should be non-nil even with no domains")
+	}
+
+	// A specifying-phase state must not gain a reverse_engineering section.
+	dir := t.TempDir()
+	s := &ForgeState{Phase: PhaseSpecifying, State: StateOrient}
+	if err := Save(dir, s); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+	loaded, err := Load(dir)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if loaded.ReverseEngineering != nil {
+		t.Errorf("ReverseEngineering should be nil for a specifying state, got %+v", loaded.ReverseEngineering)
+	}
+}

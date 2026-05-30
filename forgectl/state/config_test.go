@@ -289,3 +289,106 @@ func TestValidateConfigLogsRetentionDaysNegative(t *testing.T) {
 		t.Error("expected violation for logs.retention_days=-1")
 	}
 }
+
+// Functional: DefaultForgeConfig seeds the reverse_engineering block with the
+// spec-defined defaults.
+func TestDefaultReverseEngineeringConfig(t *testing.T) {
+	re := DefaultForgeConfig().ReverseEngineering
+
+	checkAgent := func(name string, got AgentConfig, model, typ string, count int) {
+		if got.Model != model || got.Type != typ || got.Count != count {
+			t.Errorf("%s = %+v, want {model:%s type:%s count:%d}", name, got, model, typ, count)
+		}
+	}
+	checkAgent("execute", re.Execute, "haiku", "explorer", 3)
+	checkAgent("survey", re.Survey, "haiku", "explorer", 2)
+	checkAgent("gap_analysis", re.GapAnalysis, "sonnet", "explorer", 5)
+
+	if re.Reconcile.MinRounds != 1 || re.Reconcile.MaxRounds != 3 {
+		t.Errorf("reconcile rounds = %d-%d, want 1-3", re.Reconcile.MinRounds, re.Reconcile.MaxRounds)
+	}
+	if re.Reconcile.ColleagueReview {
+		t.Error("reconcile.colleague_review: want false by default")
+	}
+	checkAgent("reconcile.eval", re.Reconcile.Eval, "opus", "general-purpose", 1)
+}
+
+// Functional: a [reverse_engineering] TOML block overrides the defaults, and an
+// explicit colleague_review = true is honored.
+func TestLoadConfigReverseEngineering(t *testing.T) {
+	dir := t.TempDir()
+	forgectlDir := filepath.Join(dir, ".forgectl")
+	if err := os.MkdirAll(forgectlDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	tomlContent := `
+[reverse_engineering.execute]
+model = "opus"
+type  = "general-purpose"
+count = 4
+
+[reverse_engineering.reconcile]
+min_rounds       = 2
+max_rounds       = 5
+colleague_review = true
+
+[reverse_engineering.reconcile.eval]
+model = "sonnet"
+count = 2
+
+[reverse_engineering.survey]
+count = 7
+`
+	if err := os.WriteFile(filepath.Join(forgectlDir, "config"), []byte(tomlContent), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := LoadConfig(dir)
+	if err != nil {
+		t.Fatalf("LoadConfig: %v", err)
+	}
+	re := cfg.ReverseEngineering
+
+	if re.Execute.Model != "opus" || re.Execute.Type != "general-purpose" || re.Execute.Count != 4 {
+		t.Errorf("execute = %+v, want {opus general-purpose 4}", re.Execute)
+	}
+	if re.Reconcile.MinRounds != 2 || re.Reconcile.MaxRounds != 5 {
+		t.Errorf("reconcile rounds = %d-%d, want 2-5", re.Reconcile.MinRounds, re.Reconcile.MaxRounds)
+	}
+	if !re.Reconcile.ColleagueReview {
+		t.Error("reconcile.colleague_review: want true (explicit)")
+	}
+	// eval.model overridden, count overridden, type falls back to the default.
+	if re.Reconcile.Eval.Model != "sonnet" || re.Reconcile.Eval.Count != 2 {
+		t.Errorf("reconcile.eval = %+v, want model sonnet / count 2", re.Reconcile.Eval)
+	}
+	if re.Reconcile.Eval.Type != "general-purpose" {
+		t.Errorf("reconcile.eval.type = %q, want default general-purpose", re.Reconcile.Eval.Type)
+	}
+	// survey.count overridden; model/type retain defaults.
+	if re.Survey.Count != 7 || re.Survey.Model != "haiku" || re.Survey.Type != "explorer" {
+		t.Errorf("survey = %+v, want count 7 with haiku/explorer defaults", re.Survey)
+	}
+	// gap_analysis untouched — full defaults.
+	if re.GapAnalysis.Model != "sonnet" || re.GapAnalysis.Count != 5 {
+		t.Errorf("gap_analysis = %+v, want defaults sonnet/5", re.GapAnalysis)
+	}
+}
+
+// Rejection: reverse_engineering.reconcile.min_rounds may not exceed max_rounds.
+func TestValidateConfigReverseEngineeringMinExceedsMax(t *testing.T) {
+	cfg := DefaultForgeConfig()
+	cfg.ReverseEngineering.Reconcile.MinRounds = 5
+	cfg.ReverseEngineering.Reconcile.MaxRounds = 3
+	errs := ValidateConfig(cfg)
+	found := false
+	for _, e := range errs {
+		if strings.Contains(e, "reverse_engineering.reconcile.min_rounds cannot exceed max_rounds") {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("expected reverse_engineering.reconcile min>max violation, got: %v", errs)
+	}
+}
