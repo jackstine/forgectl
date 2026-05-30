@@ -45,10 +45,10 @@ This spec covers the spec lifecycle from ORIENT through DONE. Cross-domain recon
 | State | Flags |
 |-------|-------|
 | DRAFT | (no flags) |
-| EVALUATE | `--verdict PASS\|FAIL` (required), `--eval-report <path>` (required when `enable_eval_output: true`) |
+| EVALUATE | `--verdict PASS\|FAIL` (required), `--eval-report <path>` (required when `eval_mode: "report"`) |
 | REFINE | (no flags) |
 | CROSS_REFERENCE | (no flags) |
-| CROSS_REFERENCE_EVAL | `--verdict PASS\|FAIL` (required), `--eval-report <path>` (required when `enable_eval_output: true`) |
+| CROSS_REFERENCE_EVAL | `--verdict PASS\|FAIL` (required), `--eval-report <path>` (required when `eval_mode: "report"`) |
 | CROSS_REFERENCE_REVIEW | (no flags) |
 
 The `--guided` / `--no-guided` flags are accepted on any `advance` call regardless of state.
@@ -96,15 +96,15 @@ Specs:
   [1] Repository Loading
       File:    repository-loading.md
       Topic:   The optimizer clones or locates a repository and provides its path for downstream modules
-      Sources: .forge_workspace/planning/optimizer/repo-snapshot-loading.md
+      Sources: .forgectl_workspace/planning/optimizer/repo-snapshot-loading.md
   [2] Snapshot Diffing
       File:    snapshot-diffing.md
       Topic:   The optimizer compares repository snapshots to detect meaningful changes
-      Sources: .forge_workspace/planning/optimizer/snapshot-diffing.md
+      Sources: .forgectl_workspace/planning/optimizer/snapshot-diffing.md
   [3] Cache Invalidation
       File:    cache-invalidation.md
       Topic:   The optimizer invalidates cached results when upstream inputs change
-      Sources: .forge_workspace/planning/optimizer/cache-invalidation.md
+      Sources: .forgectl_workspace/planning/optimizer/cache-invalidation.md
 Action:  Study each planning source.
          Study each spec doc that exists.
          STOP please review and discuss with user before continuing.
@@ -123,11 +123,11 @@ Path:    optimizer/
 Batch:   3 specs
 Specs:
   [1] repository-loading.md
-      Sources: .forge_workspace/planning/optimizer/repo-snapshot-loading.md
+      Sources: .forgectl_workspace/planning/optimizer/repo-snapshot-loading.md
   [2] snapshot-diffing.md
-      Sources: .forge_workspace/planning/optimizer/snapshot-diffing.md
+      Sources: .forgectl_workspace/planning/optimizer/snapshot-diffing.md
   [3] cache-invalidation.md
-      Sources: .forge_workspace/planning/optimizer/cache-invalidation.md
+      Sources: .forgectl_workspace/planning/optimizer/cache-invalidation.md
 Action:  Draft all specs in the batch using the spec skill.
          Format:    references/spec-format.md
          Process:   references/spec-generation-skill.md
@@ -138,7 +138,7 @@ Action:  Draft all specs in the batch using the spec skill.
          After completion of the above, advance to begin evaluation.
 ```
 
-**Entering EVALUATE** (after DRAFT or REFINE, `enable_eval_output: true`):
+**Entering EVALUATE** (after DRAFT or REFINE, `eval_mode: "report"`):
 
 ```
 State:   EVALUATE
@@ -156,7 +156,26 @@ Action:  Please spawn 1 opus sub-agent to evaluate the spec batch.
          After completion of the above, advance with --verdict PASS|FAIL --eval-report <path>
 ```
 
-**Entering EVALUATE** (after DRAFT or REFINE, `enable_eval_output: false`):
+**Entering EVALUATE** (after DRAFT or REFINE, `eval_mode: "direct"`):
+
+```
+State:   EVALUATE
+Phase:   specifying
+Domain:  optimizer
+Path:    optimizer/
+Batch:   3 specs
+Round:   1/3
+Specs:
+  [1] repository-loading.md
+  [2] snapshot-diffing.md
+  [3] cache-invalidation.md
+Action:  Please spawn 1 opus sub-agent to evaluate and correct the spec.
+         Sub-agent runs: forgectl eval
+         Spec files have been staged. Sub-agent makes corrections directly.
+         After completion of the above, advance with --verdict PASS|FAIL
+```
+
+**Entering EVALUATE** (after DRAFT or REFINE, `eval_mode: "conversational"`):
 
 ```
 State:   EVALUATE
@@ -174,7 +193,7 @@ Action:  Please spawn 1 opus sub-agent to evaluate the spec batch.
          After completion of the above, advance with --verdict PASS|FAIL
 ```
 
-**Entering REFINE** (after EVALUATE FAIL or PASS below min_rounds, `enable_eval_output: true`):
+**Entering REFINE** (after EVALUATE FAIL or PASS below min_rounds, `eval_mode: "report"`):
 
 ```
 State:   REFINE
@@ -198,7 +217,27 @@ Action:  Study the eval file "optimizer/specs/.eval/batch-1-r1.md"
          After completion of the above, advance to continue evaluation.
 ```
 
-**Entering REFINE** (after EVALUATE FAIL or PASS below min_rounds, `enable_eval_output: false`):
+**Entering REFINE** (after EVALUATE FAIL or PASS below min_rounds, `eval_mode: "direct"`):
+
+```
+State:   REFINE
+Phase:   specifying
+Domain:  optimizer
+Path:    optimizer/
+Batch:   3 specs
+Round:   1/3
+Specs:
+  [1] repository-loading.md
+  [2] snapshot-diffing.md
+  [3] cache-invalidation.md
+Action:  Review unstaged changes from the evaluator (git diff).
+         Accept, revise, or revert corrections as needed.
+         Apply "fresh" eyes and a tightened lens when reviewing the work,
+         then apply corrections as needed.
+         After completion of the above, advance to continue.
+```
+
+**Entering REFINE** (after EVALUATE FAIL or PASS below min_rounds, `eval_mode: "conversational"`):
 
 ```
 State:   REFINE
@@ -257,7 +296,7 @@ Action:  Please spawn 3 haiku sub-agents to cross-reference ALL specs in this do
          After completion of the above, advance to begin evaluation.
 ```
 
-**Entering CROSS_REFERENCE_EVAL** (after CROSS_REFERENCE, `enable_eval_output: true`):
+**Entering CROSS_REFERENCE_EVAL** (after CROSS_REFERENCE, `eval_mode: "report"`):
 
 ```
 State:   CROSS_REFERENCE_EVAL
@@ -271,7 +310,22 @@ Action:  Please spawn 1 opus sub-agent to evaluate cross-reference consistency.
          After completion of the above, advance with --verdict PASS|FAIL --eval-report <path>
 ```
 
-**Entering CROSS_REFERENCE_EVAL** (after CROSS_REFERENCE, `enable_eval_output: false`):
+**Entering CROSS_REFERENCE_EVAL** (after CROSS_REFERENCE, `eval_mode: "direct"`):
+
+```
+State:   CROSS_REFERENCE_EVAL
+Phase:   specifying
+Domain:  optimizer
+Path:    optimizer/
+Round:   1/2
+
+Action:  Please spawn 1 opus sub-agent to evaluate and correct cross-references.
+         Sub-agent runs: forgectl eval
+         Spec files have been staged. Sub-agent makes corrections directly.
+         After completion of the above, advance with --verdict PASS|FAIL
+```
+
+**Entering CROSS_REFERENCE_EVAL** (after CROSS_REFERENCE, `eval_mode: "conversational"`):
 
 ```
 State:   CROSS_REFERENCE_EVAL
@@ -361,7 +415,7 @@ Cross-reference eval reports:
 
 The compact `status` output for specifying shows the current batch, round, action, and a one-line progress summary.
 
-When `enable_eval_output: true`:
+When `eval_mode: "report"`:
 
 ```
 Batch:   Repository Loading, Snapshot Diffing, Cache Invalidation (optimizer)
@@ -379,7 +433,22 @@ Action:  Study the eval file "optimizer/specs/.eval/batch-1-r1.md"
 Progress: 1/5 specs completed, 2 queued
 ```
 
-When `enable_eval_output: false`:
+When `eval_mode: "direct"`:
+
+```
+Batch:   Repository Loading, Snapshot Diffing, Cache Invalidation (optimizer)
+Round:   1/3
+
+Action:  Review unstaged changes from the evaluator (git diff).
+         Accept, revise, or revert corrections as needed.
+         Apply "fresh" eyes and a tightened lens when reviewing the work,
+         then apply corrections as needed.
+         After completion of the above, advance to continue.
+
+Progress: 1/5 specs completed, 2 queued
+```
+
+When `eval_mode: "conversational"`:
 
 ```
 Batch:   Repository Loading, Snapshot Diffing, Cache Invalidation (optimizer)
@@ -401,7 +470,7 @@ Progress: 1/5 specs completed, 2 queued
 
 With `--verbose`, the full queue, completed list with eval history, and prior phase summaries are appended.
 
-When `enable_eval_output: true`:
+When `eval_mode: "report"`:
 
 ```
 --- Queue ---
@@ -416,7 +485,22 @@ When `enable_eval_output: true`:
        Round 2: PASS — optimizer/specs/.eval/configuration-models-r2.md
 ```
 
-When `enable_eval_output: false`:
+When `eval_mode: "direct"`:
+
+```
+--- Queue ---
+
+  [4] Portal Rendering (portal)
+  [5] Portal Caching (portal)
+
+--- Completed ---
+
+  [1] Configuration Models (optimizer)  — 2 rounds
+       Round 1: FAIL — (direct corrections)
+       Round 2: PASS — (direct corrections)
+```
+
+When `eval_mode: "conversational"`:
 
 ```
 --- Queue ---
@@ -433,7 +517,7 @@ When `enable_eval_output: false`:
 
 #### `eval` output — Specifying EVALUATE
 
-When `enable_eval_output: true`:
+When `eval_mode: "report"`:
 
 ```
 === SPEC EVALUATION ROUND 1/3 ===
@@ -464,7 +548,7 @@ Write your evaluation report to:
   optimizer/specs/.eval/batch-1-r1.md
 ```
 
-Subsequent rounds with `enable_eval_output: true` include previous evaluations:
+Subsequent rounds with `eval_mode: "report"` include previous evaluations:
 
 ```
 === SPEC EVALUATION ROUND 2/3 ===
@@ -480,7 +564,50 @@ Write your evaluation report to:
   optimizer/specs/.eval/batch-1-r2.md
 ```
 
-When `enable_eval_output: false`, the `--- REPORT OUTPUT ---` and `--- PREVIOUS EVALUATIONS ---` sections are omitted. The eval sub-agent receives spec details and evaluator instructions but does not write a file. It communicates its verdict directly to the architect.
+When `eval_mode: "direct"`, the `--- REPORT OUTPUT ---` section instructs the sub-agent to make corrections directly. The `--- PREVIOUS EVALUATIONS ---` section is included in subsequent rounds.
+
+```
+=== SPEC EVALUATION ROUND 1/3 ===
+Domain: optimizer
+Batch:  1
+
+--- EVALUATOR INSTRUCTIONS ---
+
+<contents of evaluators/spec-eval.md>
+
+--- SPECS TO EVALUATE ---
+
+[1] repository-loading.md
+    Topic: The scaffold loads repository snapshots for diffing.
+    File:  optimizer/specs/repository-loading.md
+
+[2] snapshot-diffing.md
+    ...
+
+[3] cache-invalidation.md
+    ...
+
+--- REPORT OUTPUT ---
+
+Make corrections directly to the spec files.
+```
+
+Subsequent rounds with `eval_mode: "direct"`:
+
+```
+=== SPEC EVALUATION ROUND 2/3 ===
+...
+
+--- PREVIOUS EVALUATIONS ---
+
+Round 1: FAIL — (direct corrections)
+
+--- REPORT OUTPUT ---
+
+Make corrections directly to the spec files.
+```
+
+When `eval_mode: "conversational"`, the `--- REPORT OUTPUT ---` and `--- PREVIOUS EVALUATIONS ---` sections are omitted. The eval sub-agent receives spec details and evaluator instructions but does not write a file. It communicates its verdict directly to the architect.
 
 ```
 === SPEC EVALUATION ROUND 1/3 ===
@@ -504,7 +631,7 @@ Batch:  1
     ...
 ```
 
-Subsequent rounds with `enable_eval_output: false`:
+Subsequent rounds with `eval_mode: "conversational"`:
 
 ```
 === SPEC EVALUATION ROUND 2/3 ===
@@ -517,7 +644,7 @@ Round 1: FAIL
 
 #### `eval` output — CROSS_REFERENCE_EVAL
 
-When `enable_eval_output: true`:
+When `eval_mode: "report"`:
 
 ```
 === CROSS-REFERENCE EVALUATION ROUND 1/2 ===
@@ -543,7 +670,32 @@ Write your evaluation report to:
   optimizer/specs/.eval/cross-reference-r1.md
 ```
 
-When `enable_eval_output: false`, the `--- REPORT OUTPUT ---` section is omitted.
+When `eval_mode: "direct"`:
+
+```
+=== CROSS-REFERENCE EVALUATION ROUND 1/2 ===
+Domain: optimizer
+
+--- EVALUATOR INSTRUCTIONS ---
+
+<contents of evaluators/cross-reference-eval.md>
+
+--- SPECS IN DOMAIN ---
+
+[session — completed]
+  repository-loading.md   — optimizer/specs/repository-loading.md
+  snapshot-diffing.md      — optimizer/specs/snapshot-diffing.md
+  cache-invalidation.md    — optimizer/specs/cache-invalidation.md
+[existing — not in queue]
+  configuration-models.md  — optimizer/specs/configuration-models.md
+  telemetry-pipeline.md    — optimizer/specs/telemetry-pipeline.md
+
+--- REPORT OUTPUT ---
+
+Make corrections directly to the spec files.
+```
+
+When `eval_mode: "conversational"`, the `--- REPORT OUTPUT ---` section is omitted.
 
 #### Eval Report Locations
 
@@ -559,11 +711,11 @@ Specifying eval reports:
 |-----------|--------|-----------|
 | `advance --verdict` outside of EVALUATE, CROSS_REFERENCE_EVAL | Error naming the current state. Exit code 1. | Verdict is only valid in evaluation states |
 | `advance` in specifying EVALUATE without `--verdict` | Error. Exit code 1. | Verdict determines the transition |
-| `advance` in specifying EVALUATE without `--eval-report` when `enable_eval_output: true` | Error. Exit code 1. | Every evaluation must reference its report when eval output is enabled |
+| `advance` in specifying EVALUATE without `--eval-report` when `eval_mode: "report"` | Error. Exit code 1. | Every evaluation must reference its report when eval_mode is report |
 | `advance --eval-report` pointing to non-existent file | Error naming the path. Exit code 1. | Report must exist to be recorded |
-| `advance --eval-report` when `enable_eval_output: false` | Warning: `--eval-report is ignored, eval output is not enabled`. Command proceeds. | Consistent with `--message` warning pattern |
+| `advance --eval-report` when `eval_mode` is not `"report"` | Warning: `--eval-report is ignored, --eval-report is only used in report mode`. Command proceeds. | Consistent with `--message` warning pattern |
 | `advance` in CROSS_REFERENCE_EVAL without `--verdict` | Error. Exit code 1. | Verdict determines the transition |
-| `advance` in CROSS_REFERENCE_EVAL without `--eval-report` when `enable_eval_output: true` | Error. Exit code 1. | Every evaluation must reference its report when eval output is enabled |
+| `advance` in CROSS_REFERENCE_EVAL without `--eval-report` when `eval_mode: "report"` | Error. Exit code 1. | Every evaluation must reference its report when eval_mode is report |
 | `add-queue-item` outside of DRAFT, CROSS_REFERENCE_REVIEW, DONE, or RECONCILE_REVIEW | Error: "add-queue-item is only valid in DRAFT, CROSS_REFERENCE_REVIEW, DONE, or RECONCILE_REVIEW states (current state: \<state\>)." Exit code 1. | Queue modifications are restricted to states where the architect has sufficient context to identify gaps |
 | `add-queue-item` outside of specifying phase | Error: "add-queue-item is only valid in the specifying phase (current phase: \<phase\>)." Exit code 1. | Queue items are specs; only the specifying phase manages the spec queue |
 | `add-queue-item` with `--file` pointing to non-existent file | Error: "file \<path\> does not exist. add-queue-item registers specs that have already been written. Create the spec file first, then register it." Exit code 1. | The architect must write the spec before registering it; `add-queue-item` is for tracking existing work through evaluation, not queuing future work |
@@ -651,9 +803,17 @@ CROSS_REFERENCE → CROSS_REFERENCE_EVAL
 | DONE | queue non-empty (via add-queue-item) | ORIENT | Pull next batch from queue. Re-enters drafting loop. |
 | DONE | queue empty | RECONCILE | Begin cross-domain reconciliation (see spec-reconciliation). |
 
+### Eval Mode
+
+The `specifying.eval.eval_mode` config key controls how the eval sub-agent communicates its findings:
+
+- `"report"` — Sub-agent writes a structured markdown report file. `--eval-report` is required on advance.
+- `"direct"` — Sub-agent makes corrections directly to spec files. `--eval-report` is ignored with a warning.
+- `"conversational"` — Sub-agent communicates verdict verbally. `--eval-report` is ignored with a warning.
+
 ### Eval Output Convention
 
-The specifying evaluation sub-agent writes structured markdown to a known directory:
+The specifying evaluation sub-agent writes structured markdown to a known directory (when `eval_mode: "report"`):
 
 ```
 <domain>/specs/.eval/
@@ -747,6 +907,10 @@ Calling `set-roots` for a domain that already has roots overwrites the previous 
 - **Scenario:** Domain has fewer specs remaining than `specifying.batch`.
   - **Expected:** Batch contains all remaining specs for that domain.
   - **Rationale:** Batches are capped at `specifying.batch` but may be smaller. No padding occurs.
+
+- **Scenario:** `advance --eval-report <path>` when `eval_mode` is `"direct"` or `"conversational"`.
+  - **Expected:** Warning printed: `--eval-report is ignored, --eval-report is only used in report mode`. Command proceeds.
+  - **Rationale:** Consistent with `--message` warning pattern. Non-report modes do not use report files.
 
 - **Scenario:** `enable_commits` is `false` and architect provides `--message` at any specifying state.
   - **Expected:** Warning printed: `--message is ignored, commits are not enabled`. Command proceeds. The warning does not instruct how to enable commits.

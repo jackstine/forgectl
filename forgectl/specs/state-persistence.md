@@ -57,7 +57,7 @@ The `status` command reads and displays the state file:
 │       ├── forgectl-state.json.tmp             ← write-in-progress (transient, gitignored)
 │       └── sessions/                           ← archived completed sessions (git tracked)
 ├── <domain>/
-│   ├── .forge_workspace/                       ← domain artifacts (plans, notes)
+│   ├── .forgectl_workspace/                       ← domain artifacts (plans, notes)
 │   │   └── implementation_plan/
 │   └── specs/
 └── ...
@@ -117,7 +117,7 @@ State:   EVALUATE
 Config:  batch=1, rounds=1-3
 
 Plan:    Service Configuration (launcher)
-File:    launcher/.forge_workspace/implementation_plan/plan.json
+File:    launcher/.forgectl_workspace/implementation_plan/plan.json
 Round:   1/3
 
 Action:  Run evaluation sub-agent against the plan (round 1/3).
@@ -178,8 +178,8 @@ The verbose output appends the full session overview below the compact output. F
 --- Planning ---
 
   Accepted (2 rounds)
-    Round 1: FAIL — launcher/.forge_workspace/implementation_plan/evals/round-1.md
-    Round 2: PASS — launcher/.forge_workspace/implementation_plan/evals/round-2.md
+    Round 1: FAIL — launcher/.forgectl_workspace/implementation_plan/evals/round-1.md
+    Round 2: PASS — launcher/.forgectl_workspace/implementation_plan/evals/round-2.md
 
 --- Implementing ---
 
@@ -251,7 +251,7 @@ Completed session state files are archived to a permanent directory within `stat
     "specifying": {
       "batch": 3,
       "commit_strategy": "all-specs",
-      "eval": { "min_rounds": 1, "max_rounds": 3, "model": "opus", "type": "eval", "count": 1, "enable_eval_output": false },
+      "eval": { "min_rounds": 1, "max_rounds": 3, "model": "opus", "type": "eval", "count": 1, "eval_mode": "conversational" },
       "cross_reference": {
         "min_rounds": 1,
         "max_rounds": 2,
@@ -269,17 +269,17 @@ Completed session state files are archived to a permanent directory within `stat
       "self_review": false,
       "plan_all_before_implementing": false,
       "study_code": { "model": "haiku", "type": "explore", "count": 3 },
-      "eval": { "min_rounds": 1, "max_rounds": 3, "model": "opus", "type": "eval", "count": 1, "enable_eval_output": false },
+      "eval": { "min_rounds": 1, "max_rounds": 3, "model": "opus", "type": "eval", "count": 1, "eval_mode": "conversational" },
       "refine": { "model": "opus", "type": "refine", "count": 1 }
     },
     "implementing": {
       "batch": 2,
       "commit_strategy": "scoped",
-      "eval": { "min_rounds": 1, "max_rounds": 3, "model": "opus", "type": "eval", "count": 1, "enable_eval_output": false }
+      "eval": { "min_rounds": 1, "max_rounds": 3, "model": "opus", "type": "eval", "count": 1, "eval_mode": "conversational" }
     },
     "paths": {
       "state_dir": ".forgectl/state",
-      "workspace_dir": ".forge_workspace"
+      "workspace_dir": ".forgectl_workspace"
     },
     "general": {
       "user_guided": true,
@@ -329,15 +329,15 @@ Completed session state files are archived to a permanent directory within `stat
       "id": 1,
       "name": "Launcher Implementation Plan",
       "domain": "launcher",
-      "file": "launcher/.forge_workspace/implementation_plan/plan.json",
+      "file": "launcher/.forgectl_workspace/implementation_plan/plan.json",
       "specs": ["launcher/specs/service-configuration.md"],
       "spec_commits": ["7cede10", "8743b1d"],
       "code_search_roots": ["launcher/"]
     },
     "round": 2,
     "evals": [
-      { "round": 1, "verdict": "FAIL", "eval_report": "launcher/.forge_workspace/implementation_plan/evals/round-1.md" },
-      { "round": 2, "verdict": "PASS", "eval_report": "launcher/.forge_workspace/implementation_plan/evals/round-2.md" }
+      { "round": 1, "verdict": "FAIL", "eval_report": "launcher/.forgectl_workspace/implementation_plan/evals/round-1.md" },
+      { "round": 2, "verdict": "PASS", "eval_report": "launcher/.forgectl_workspace/implementation_plan/evals/round-2.md" }
     ],
     "queue": [],
     "completed": []
@@ -361,7 +361,7 @@ Completed session state files are archived to a permanent directory within `stat
             "items": ["bootstrap"],
             "eval_rounds": 1,
             "evals": [
-              { "round": 1, "verdict": "PASS", "eval_report": "launcher/.forge_workspace/implementation_plan/evals/batch-1-round-1.md" }
+              { "round": 1, "verdict": "PASS", "eval_report": "launcher/.forgectl_workspace/implementation_plan/evals/batch-1-round-1.md" }
             ]
           }
         ]
@@ -382,7 +382,7 @@ Completed session state files are archived to a permanent directory within `stat
 | `config.domains[].path` | string | Domain directory path relative to project root |
 | `config.specifying.batch` | integer | Specs per specifying cycle (domain-grouped) |
 | `config.specifying.commit_strategy` | string | Git staging strategy for specifying commits: `strict`, `all-specs`, `scoped`, `tracked`, `all` (default: `all-specs`) |
-| `config.specifying.eval.enable_eval_output` | boolean | Whether eval sub-agents write report files (default: `false`) |
+| `config.specifying.eval.eval_mode` | string | Evaluation mode. `"report"`: eval agent writes a report file, `--eval-report` required. `"direct"`: eval agent makes corrections directly to files. `"conversational"`: eval agent communicates verdict verbally. (default: `"conversational"`) |
 | `config.specifying.eval.*` | object | Eval round limits and agent config for specifying |
 | `config.specifying.cross_reference.*` | object | Cross-reference round limits, agent config, and user_review flag |
 | `config.specifying.cross_reference.eval.*` | object | Agent config for cross-reference evaluation |
@@ -392,12 +392,12 @@ Completed session state files are archived to a permanent directory within `stat
 | `config.planning.self_review` | boolean | Whether SELF_REVIEW state is entered between validation and EVALUATE (default: `false`) |
 | `config.planning.plan_all_before_implementing` | boolean | When `false` (default): interleaved plan-implement per domain. When `true`: all planning then all implementing. |
 | `config.planning.study_code.*` | object | Agent config for codebase exploration |
-| `config.planning.eval.enable_eval_output` | boolean | Whether eval sub-agents write report files (default: `false`) |
+| `config.planning.eval.eval_mode` | string | Evaluation mode. `"report"`: eval agent writes a report file, `--eval-report` required. `"direct"`: eval agent makes corrections directly to files. `"conversational"`: eval agent communicates verdict verbally. (default: `"conversational"`) |
 | `config.planning.eval.*` | object | Eval round limits and agent config for planning |
 | `config.planning.refine.*` | object | Agent config for plan refinement |
 | `config.implementing.batch` | integer | Plan items per implementing batch |
 | `config.implementing.commit_strategy` | string | Git staging strategy for implementing commits: `strict`, `all-specs`, `scoped`, `tracked`, `all` (default: `scoped`) |
-| `config.implementing.eval.enable_eval_output` | boolean | Whether eval sub-agents write report files (default: `false`) |
+| `config.implementing.eval.eval_mode` | string | Evaluation mode. `"report"`: eval agent writes a report file, `--eval-report` required. `"direct"`: eval agent makes corrections directly to files. `"conversational"`: eval agent communicates verdict verbally. (default: `"conversational"`) |
 | `config.implementing.eval.*` | object | Eval round limits and agent config for implementing |
 | `config.paths.state_dir` | string | State file directory |
 | `config.paths.workspace_dir` | string | Domain artifact directory name |
@@ -509,6 +509,6 @@ Phase sections that haven't been reached yet are `null` in the state file. When 
 - State file schema for all four phases with phase-scoped `config` object
 - Project root discovery via `.forgectl/` directory walk
 - Configurable state directory (`paths.state_dir`)
-- Domain artifacts in configurable workspace directory (`paths.workspace_dir` = `.forge_workspace`)
+- Domain artifacts in configurable workspace directory (`paths.workspace_dir` = `.forgectl_workspace`)
 - Session archiving to `state_dir/sessions/`
 - Status command: session overview assembled from all phase sections

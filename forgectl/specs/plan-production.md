@@ -31,7 +31,7 @@ The planning phase guides the architect through studying specs, codebase, and pa
 
 | State | Flags |
 |-------|-------|
-| EVALUATE | `--verdict PASS\|FAIL` (required), `--eval-report <path>` (required when `enable_eval_output: true`) |
+| EVALUATE | `--verdict PASS\|FAIL` (required), `--eval-report <path>` (required when `eval_mode: "report"`) |
 | ACCEPT | `--message <text>` / `-m` (required when `enable_commits: true`) |
 
 #### `eval` command
@@ -51,7 +51,7 @@ State:   ORIENT
 Phase:   planning
 Plan:    Service Configuration
 Domain:  launcher
-File:    launcher/.forge_workspace/implementation_plan/plan.json
+File:    launcher/.forgectl_workspace/implementation_plan/plan.json
 Action:  After completion of the above, advance to begin studying specs.
 ```
 
@@ -62,11 +62,12 @@ State:   STUDY_SPECS
 Phase:   planning
 Plan:    Service Configuration
 Domain:  launcher
-File:    launcher/.forge_workspace/implementation_plan/plan.json
+File:    launcher/.forgectl_workspace/implementation_plan/plan.json
 Specs:   launcher/specs/service-configuration.md, ...
+Commits: abc1234, def5678
 Roots:   launcher/, api/
 Action:  Study the specs: launcher/specs/service-configuration.md, ...
-         Review git diffs for spec commits.
+         Review git diffs for spec commits: abc1234, def5678.
          After completion of the above, advance to continue.
 ```
 
@@ -77,7 +78,7 @@ State:   STUDY_CODE
 Phase:   planning
 Plan:    Service Configuration
 Domain:  launcher
-File:    launcher/.forge_workspace/implementation_plan/plan.json
+File:    launcher/.forgectl_workspace/implementation_plan/plan.json
 Roots:   launcher/, api/
 Specs:   launcher/specs/service-configuration.md
          launcher/specs/config-validation.md
@@ -94,20 +95,25 @@ State:   STUDY_PACKAGES
 Phase:   planning
 Plan:    Service Configuration
 Domain:  launcher
-File:    launcher/.forge_workspace/implementation_plan/plan.json
-Action:  Study the project's technical stack: package manifests, library docs, CLAUDE.md references.
+File:    launcher/.forgectl_workspace/implementation_plan/plan.json
+Action:  Study the packages and libraries needed to implement the specs under study.
+         Use git diffs for spec commits: abc1234, def5678.
+         Identify relevant packages from: package manifests, CLAUDE.md references, library docs.
+         For each package, write a notes file with code examples relevant to the specs.
+         Output: notes/ at launcher/.forgectl_workspace/implementation_plan/
          After completion of the above, advance to continue.
 ```
 
-**Entering REVIEW** (after STUDY_PACKAGES):
+**Entering REVIEW** (after STUDY_PACKAGES, only when `user_guided: true`):
 
 ```
 State:   REVIEW
 Phase:   planning
 Plan:    Service Configuration
 Domain:  launcher
-File:    launcher/.forge_workspace/implementation_plan/plan.json
-Action:  Review study findings before drafting.
+File:    launcher/.forgectl_workspace/implementation_plan/plan.json
+Notes:   launcher/.forgectl_workspace/implementation_plan/notes/
+Action:  Review the package notes for completeness.
          Plan format: PLAN_FORMAT.md
          STOP please review and discuss with user before continuing.
          After completion of the above, advance to begin drafting.
@@ -120,9 +126,12 @@ State:   DRAFT
 Phase:   planning
 Plan:    Service Configuration
 Domain:  launcher
-File:    launcher/.forge_workspace/implementation_plan/plan.json
-Action:  Draft the implementation plan.
-         Output: plan.json + notes/ at launcher/.forge_workspace/implementation_plan/
+File:    launcher/.forgectl_workspace/implementation_plan/plan.json
+Notes:   launcher/.forgectl_workspace/implementation_plan/notes/
+Action:  Draft the implementation plan using the package notes as reference.
+         Use git diffs for spec commits: abc1234, def5678.
+         Output: plan.json at launcher/.forgectl_workspace/implementation_plan/
+         Update notes as needed.
          Format: PLAN_FORMAT.md
          After completion of the above, advance to validate.
 ```
@@ -134,7 +143,7 @@ State:   VALIDATE
 Phase:   planning
 Plan:    Service Configuration
 Domain:  launcher
-File:    launcher/.forge_workspace/implementation_plan/plan.json
+File:    launcher/.forgectl_workspace/implementation_plan/plan.json
 Action:  Plan validation failed. Fix the plan.
          After completion of the above, advance to re-validate.
          Format: PLAN_FORMAT.md
@@ -158,70 +167,101 @@ State:   SELF_REVIEW
 Phase:   planning
 Plan:    Service Configuration
 Domain:  launcher
-File:    launcher/.forge_workspace/implementation_plan/plan.json
+File:    launcher/.forgectl_workspace/implementation_plan/plan.json
 Round:   1/3
 Specs:   launcher/specs/service-configuration.md
          launcher/specs/config-validation.md
-Notes:   launcher/.forge_workspace/implementation_plan/notes/
+Notes:   launcher/.forgectl_workspace/implementation_plan/notes/
 Action:  Review your plan against the specs and your study notes.
          Verify coverage, dependency ordering, and layer structure.
          Revise plan.json and notes as needed before evaluation.
          After completion of the above, advance to continue.
 ```
 
-**Entering EVALUATE** (after SELF_REVIEW, or after VALIDATE passes when `planning.self_review: false`, `enable_eval_output: true`):
+**Entering EVALUATE** (after SELF_REVIEW, or after VALIDATE passes when `planning.self_review: false`, `eval_mode: "report"`):
 
 ```
 State:   EVALUATE
 Phase:   planning
 Plan:    Service Configuration
 Domain:  launcher
-File:    launcher/.forge_workspace/implementation_plan/plan.json
+File:    launcher/.forgectl_workspace/implementation_plan/plan.json
 Round:   1/3
 Action:  Please spawn 1 opus sub-agent to evaluate the plan.
          Sub-agent runs: forgectl eval
          After completion of the above, advance with --verdict PASS|FAIL --eval-report <path>
 ```
 
-**Entering EVALUATE** (`enable_eval_output: false`):
+**Entering EVALUATE** (`eval_mode: "direct"`):
 
 ```
 State:   EVALUATE
 Phase:   planning
 Plan:    Service Configuration
 Domain:  launcher
-File:    launcher/.forge_workspace/implementation_plan/plan.json
+File:    launcher/.forgectl_workspace/implementation_plan/plan.json
+Round:   1/3
+Action:  Please spawn 1 opus sub-agent to evaluate and correct the plan.
+         Sub-agent runs: forgectl eval
+         Plan files have been staged. Sub-agent makes corrections directly.
+         After completion of the above, advance with --verdict PASS|FAIL
+```
+
+**Entering EVALUATE** (`eval_mode: "conversational"`):
+
+```
+State:   EVALUATE
+Phase:   planning
+Plan:    Service Configuration
+Domain:  launcher
+File:    launcher/.forgectl_workspace/implementation_plan/plan.json
 Round:   1/3
 Action:  Please spawn 1 opus sub-agent to evaluate the plan.
          Sub-agent runs: forgectl eval
          After completion of the above, advance with --verdict PASS|FAIL
 ```
 
-**Entering REFINE** (after EVALUATE with FAIL verdict, `enable_eval_output: true`):
+**Entering REFINE** (after EVALUATE with FAIL verdict, `eval_mode: "report"`):
 
 ```
 State:   REFINE
 Phase:   planning
 Plan:    Service Configuration
 Domain:  launcher
-File:    launcher/.forge_workspace/implementation_plan/plan.json
+File:    launcher/.forgectl_workspace/implementation_plan/plan.json
 Round:   1/3
-Eval:    launcher/.forge_workspace/implementation_plan/evals/round-1.md
-Action:  Study the eval file "launcher/.forge_workspace/implementation_plan/evals/round-1.md"
+Eval:    launcher/.forgectl_workspace/implementation_plan/evals/round-1.md
+Action:  Study the eval file "launcher/.forgectl_workspace/implementation_plan/evals/round-1.md"
          and implement any corrections as needed.
          Apply "fresh" eyes and a tightened lens when reviewing the work,
          then apply corrections as needed.
          After completion of the above, advance to continue.
 ```
 
-**Entering REFINE** (after EVALUATE with FAIL verdict, `enable_eval_output: false`):
+**Entering REFINE** (after EVALUATE with FAIL verdict, `eval_mode: "direct"`):
 
 ```
 State:   REFINE
 Phase:   planning
 Plan:    Service Configuration
 Domain:  launcher
-File:    launcher/.forge_workspace/implementation_plan/plan.json
+File:    launcher/.forgectl_workspace/implementation_plan/plan.json
+Round:   1/3
+Action:  Review unstaged changes from the evaluator (git diff).
+         Accept, revise, or revert corrections as needed.
+         Apply "fresh" eyes and a tightened lens when reviewing the work,
+         then apply corrections as needed.
+         After completion of the above, advance to continue.
+```
+
+**Entering REFINE** (after EVALUATE with FAIL verdict, `eval_mode: "conversational"`):
+
+```
+State:   REFINE
+Phase:   planning
+Plan:    Service Configuration
+Domain:  launcher
+File:    launcher/.forgectl_workspace/implementation_plan/plan.json
 Round:   1/3
 Action:  Make corrections based off communication with the evaluator.
          Implement any corrections as needed.
@@ -230,32 +270,49 @@ Action:  Make corrections based off communication with the evaluator.
          After completion of the above, advance to continue.
 ```
 
-**Entering REFINE** (after EVALUATE with PASS verdict, below min_rounds, `enable_eval_output: true`):
+**Entering REFINE** (after EVALUATE with PASS verdict, below min_rounds, `eval_mode: "report"`):
 
 ```
 State:   REFINE
 Phase:   planning
 Plan:    Service Configuration
 Domain:  launcher
-File:    launcher/.forge_workspace/implementation_plan/plan.json
+File:    launcher/.forgectl_workspace/implementation_plan/plan.json
 Round:   1/3
-Eval:    launcher/.forge_workspace/implementation_plan/evals/round-1.md
+Eval:    launcher/.forgectl_workspace/implementation_plan/evals/round-1.md
 Action:  Minimum evaluation rounds not met.
-         Study the eval file "launcher/.forge_workspace/implementation_plan/evals/round-1.md"
+         Study the eval file "launcher/.forgectl_workspace/implementation_plan/evals/round-1.md"
          and implement any corrections as needed.
          Apply "fresh" eyes and a tightened lens when reviewing the work,
          then apply corrections as needed.
          After completion of the above, advance to continue.
 ```
 
-**Entering REFINE** (after EVALUATE with PASS verdict, below min_rounds, `enable_eval_output: false`):
+**Entering REFINE** (after EVALUATE with PASS verdict, below min_rounds, `eval_mode: "direct"`):
 
 ```
 State:   REFINE
 Phase:   planning
 Plan:    Service Configuration
 Domain:  launcher
-File:    launcher/.forge_workspace/implementation_plan/plan.json
+File:    launcher/.forgectl_workspace/implementation_plan/plan.json
+Round:   1/3
+Action:  Minimum evaluation rounds not met.
+         Review unstaged changes from the evaluator (git diff).
+         Accept, revise, or revert corrections as needed.
+         Apply "fresh" eyes and a tightened lens when reviewing the work,
+         then apply corrections as needed.
+         After completion of the above, advance to continue.
+```
+
+**Entering REFINE** (after EVALUATE with PASS verdict, below min_rounds, `eval_mode: "conversational"`):
+
+```
+State:   REFINE
+Phase:   planning
+Plan:    Service Configuration
+Domain:  launcher
+File:    launcher/.forgectl_workspace/implementation_plan/plan.json
 Round:   1/3
 Action:  Minimum evaluation rounds not met.
          Make corrections based off communication with the evaluator.
@@ -274,7 +331,7 @@ State:   ACCEPT
 Phase:   planning
 Plan:    Service Configuration
 Domain:  launcher
-File:    launcher/.forge_workspace/implementation_plan/plan.json
+File:    launcher/.forgectl_workspace/implementation_plan/plan.json
 Round:   2/3
 Action:  Plan accepted.
          Advance with --message "your commit message" to commit and continue.
@@ -287,7 +344,7 @@ State:   ACCEPT
 Phase:   planning
 Plan:    Service Configuration
 Domain:  launcher
-File:    launcher/.forge_workspace/implementation_plan/plan.json
+File:    launcher/.forgectl_workspace/implementation_plan/plan.json
 Round:   2/3
 Action:  Plan accepted.
          After completion of the above, advance to continue.
@@ -300,7 +357,7 @@ State:   ACCEPT
 Phase:   planning
 Plan:    Service Configuration
 Domain:  launcher
-File:    launcher/.forge_workspace/implementation_plan/plan.json
+File:    launcher/.forgectl_workspace/implementation_plan/plan.json
 Round:   3/3
 Action:  Plan accepted (max rounds reached).
          After completion of the above, advance to continue.
@@ -320,13 +377,13 @@ Action:  All plans complete. Advance to continue.
 
 #### `eval` output
 
-When `enable_eval_output: true`:
+When `eval_mode: "report"`:
 
 ```
 === PLAN EVALUATION ROUND 1/3 ===
 Plan:   Service Configuration
 Domain: launcher
-File:   launcher/.forge_workspace/implementation_plan/plan.json
+File:   launcher/.forgectl_workspace/implementation_plan/plan.json
 
 --- EVALUATOR INSTRUCTIONS ---
 
@@ -334,7 +391,7 @@ File:   launcher/.forge_workspace/implementation_plan/plan.json
 
 --- PLAN REFERENCES ---
 
-Plan:    launcher/.forge_workspace/implementation_plan/plan.json
+Plan:    launcher/.forgectl_workspace/implementation_plan/plan.json
 Format:  PLAN_FORMAT.md
 Specs:
   - launcher/specs/service-configuration.md
@@ -342,10 +399,10 @@ Specs:
 --- REPORT OUTPUT ---
 
 Write your evaluation report to:
-  launcher/.forge_workspace/implementation_plan/evals/round-1.md
+  launcher/.forgectl_workspace/implementation_plan/evals/round-1.md
 ```
 
-Subsequent rounds with `enable_eval_output: true` include previous evaluations:
+Subsequent rounds with `eval_mode: "report"` include previous evaluations:
 
 ```
 === PLAN EVALUATION ROUND 2/3 ===
@@ -353,21 +410,21 @@ Subsequent rounds with `enable_eval_output: true` include previous evaluations:
 
 --- PREVIOUS EVALUATIONS ---
 
-Round 1: FAIL — launcher/.forge_workspace/implementation_plan/evals/round-1.md
+Round 1: FAIL — launcher/.forgectl_workspace/implementation_plan/evals/round-1.md
 
 --- REPORT OUTPUT ---
 
 Write your evaluation report to:
-  launcher/.forge_workspace/implementation_plan/evals/round-2.md
+  launcher/.forgectl_workspace/implementation_plan/evals/round-2.md
 ```
 
-When `enable_eval_output: false`, the `--- REPORT OUTPUT ---` and `--- PREVIOUS EVALUATIONS ---` sections are omitted. The eval sub-agent receives plan references and evaluator instructions but does not write a file. It communicates its verdict directly to the architect.
+When `eval_mode: "direct"`, the `--- REPORT OUTPUT ---` section is included but instructs the evaluator to make corrections directly rather than write a report file. The `--- PREVIOUS EVALUATIONS ---` section is included on subsequent rounds.
 
 ```
 === PLAN EVALUATION ROUND 1/3 ===
 Plan:   Service Configuration
 Domain: launcher
-File:   launcher/.forge_workspace/implementation_plan/plan.json
+File:   launcher/.forgectl_workspace/implementation_plan/plan.json
 
 --- EVALUATOR INSTRUCTIONS ---
 
@@ -375,13 +432,52 @@ File:   launcher/.forge_workspace/implementation_plan/plan.json
 
 --- PLAN REFERENCES ---
 
-Plan:    launcher/.forge_workspace/implementation_plan/plan.json
+Plan:    launcher/.forgectl_workspace/implementation_plan/plan.json
+Format:  PLAN_FORMAT.md
+Specs:
+  - launcher/specs/service-configuration.md
+
+--- REPORT OUTPUT ---
+
+Make corrections directly to the plan files.
+```
+
+Subsequent rounds with `eval_mode: "direct"`:
+
+```
+=== PLAN EVALUATION ROUND 2/3 ===
+...
+
+--- PREVIOUS EVALUATIONS ---
+
+Round 1: FAIL
+
+--- REPORT OUTPUT ---
+
+Make corrections directly to the plan files.
+```
+
+When `eval_mode: "conversational"`, the `--- REPORT OUTPUT ---` and `--- PREVIOUS EVALUATIONS ---` sections are omitted. The eval sub-agent receives plan references and evaluator instructions but does not write a file. It communicates its verdict directly to the architect.
+
+```
+=== PLAN EVALUATION ROUND 1/3 ===
+Plan:   Service Configuration
+Domain: launcher
+File:   launcher/.forgectl_workspace/implementation_plan/plan.json
+
+--- EVALUATOR INSTRUCTIONS ---
+
+<contents of evaluators/plan-eval.md>
+
+--- PLAN REFERENCES ---
+
+Plan:    launcher/.forgectl_workspace/implementation_plan/plan.json
 Format:  PLAN_FORMAT.md
 Specs:
   - launcher/specs/service-configuration.md
 ```
 
-Subsequent rounds with `enable_eval_output: false`:
+Subsequent rounds with `eval_mode: "conversational"`:
 
 ```
 === PLAN EVALUATION ROUND 2/3 ===
@@ -396,18 +492,18 @@ Round 1: FAIL
 
 Planning eval reports:
 ```
-<domain>/.forge_workspace/implementation_plan/evals/round-N.md
+<domain>/.forgectl_workspace/implementation_plan/evals/round-N.md
 ```
 
 #### `status` output — Planning (compact)
 
 The compact `status` output for planning shows the current plan, round, action, and progress:
 
-When `enable_eval_output: true`:
+When `eval_mode: "report"`:
 
 ```
 Plan:    Service Configuration (launcher)
-File:    launcher/.forge_workspace/implementation_plan/plan.json
+File:    launcher/.forgectl_workspace/implementation_plan/plan.json
 Round:   1/3
 
 Action:  Run evaluation sub-agent against the plan (round 1/3).
@@ -417,11 +513,11 @@ Action:  Run evaluation sub-agent against the plan (round 1/3).
 Progress: round 1 of 3
 ```
 
-When `enable_eval_output: false`:
+When `eval_mode: "direct"` or `eval_mode: "conversational"`:
 
 ```
 Plan:    Service Configuration (launcher)
-File:    launcher/.forge_workspace/implementation_plan/plan.json
+File:    launcher/.forgectl_workspace/implementation_plan/plan.json
 Round:   1/3
 
 Action:  Run evaluation sub-agent against the plan (round 1/3).
@@ -435,17 +531,17 @@ Progress: round 1 of 3
 
 With `--verbose`, the eval history is appended.
 
-When `enable_eval_output: true`:
+When `eval_mode: "report"`:
 
 ```
 --- Planning ---
 
   Accepted (2 rounds)
-    Round 1: FAIL — launcher/.forge_workspace/implementation_plan/evals/round-1.md
-    Round 2: PASS — launcher/.forge_workspace/implementation_plan/evals/round-2.md
+    Round 1: FAIL — launcher/.forgectl_workspace/implementation_plan/evals/round-1.md
+    Round 2: PASS — launcher/.forgectl_workspace/implementation_plan/evals/round-2.md
 ```
 
-When `enable_eval_output: false`:
+When `eval_mode: "direct"` or `eval_mode: "conversational"`:
 
 ```
 --- Planning ---
@@ -468,9 +564,9 @@ When no evals yet:
 | Condition | Signal | Rationale |
 |-----------|--------|-----------|
 | `advance` in planning EVALUATE without `--verdict` | Error. Exit code 1. | Verdict determines the transition |
-| `advance` in planning EVALUATE without `--eval-report` when `enable_eval_output: true` | Error. Exit code 1. | Every evaluation must reference its report when eval output is enabled |
+| `advance` in planning EVALUATE without `--eval-report` when `eval_mode: "report"` | Error. Exit code 1. | Every evaluation must reference its report when in report mode |
 | `advance --eval-report` pointing to non-existent file | Error naming the path. Exit code 1. | Report must exist to be recorded |
-| `advance --eval-report` when `enable_eval_output: false` | Warning: `--eval-report is ignored, eval output is not enabled`. Command proceeds. | Consistent with `--message` warning pattern |
+| `advance --eval-report` when `eval_mode` is not `"report"` | Warning: `--eval-report is ignored, --eval-report is only used in report mode`. Command proceeds. | Consistent with `--message` warning pattern |
 | `advance` in planning ACCEPT without `--message` when `enable_commits: true` | Error. Exit code 1. | Accepted plans need a commit message when commits are enabled |
 | `eval` outside of planning EVALUATE | Error naming current state and phase. Exit code 1. | Eval context only available in EVALUATE |
 | `advance` in DONE with any flags | Error: "DONE is a pass-through state. No flags accepted." Exit code 1. | DONE only transitions to PHASE_SHIFT |
@@ -482,7 +578,7 @@ When no evals yet:
 ### State Machine
 
 ```
-ORIENT → STUDY_SPECS → STUDY_CODE → STUDY_PACKAGES → REVIEW → DRAFT
+ORIENT → STUDY_SPECS → STUDY_CODE → STUDY_PACKAGES → REVIEW* → DRAFT
                                                                   │
                                                         ┌─────────┴─────────┐
                                                    plan valid          plan invalid
@@ -501,6 +597,7 @@ ORIENT → STUDY_SPECS → STUDY_CODE → STUDY_PACKAGES → REVIEW → DRAFT
                                            ACCEPT    REFINE    REFINE ◄────┘
 
 * SELF_REVIEW only entered when planning.self_review is true. Otherwise skipped.
+* REVIEW only entered when config.general.user_guided is true. Otherwise skipped.
                                               │         │         │
                                          ┌────┘         └────┬────┘
                                          │                   │
@@ -522,7 +619,8 @@ ORIENT → STUDY_SPECS → STUDY_CODE → STUDY_PACKAGES → REVIEW → DRAFT
 | ORIENT | always | STUDY_SPECS | — |
 | STUDY_SPECS | always | STUDY_CODE | — |
 | STUDY_CODE | always | STUDY_PACKAGES | — |
-| STUDY_PACKAGES | always | REVIEW | — |
+| STUDY_PACKAGES | `user_guided: true` | REVIEW | — |
+| STUDY_PACKAGES | `user_guided: false` | DRAFT | — |
 | REVIEW | always | DRAFT | — |
 | DRAFT | plan.json valid, `self_review: true` | SELF_REVIEW | Set round to 1. Two transitions in one advance. |
 | DRAFT | plan.json valid, `self_review: false` | EVALUATE | Set round to 1. Two transitions in one advance. |
@@ -550,24 +648,24 @@ ORIENT → STUDY_SPECS → STUDY_CODE → STUDY_PACKAGES → REVIEW → DRAFT
 Three study phases build context before drafting. No flags required — the architect studies, then advances.
 
 #### STUDY_SPECS
-Study the specs listed in `current_plan.specs` and the SPEC_MANIFEST.md: full spec files, git diffs, dependencies, cross-references.
+Study the specs listed in `current_plan.specs` and the SPEC_MANIFEST.md: full spec files, git diffs, dependencies, cross-references. When `SpecCommits` is empty, the `Commits:` line and commit hash references in the action text are omitted.
 
 #### STUDY_CODE
 Explore the codebase using sub-agents within `current_plan.code_search_roots`, focused on finding code relevant to the specs in `current_plan.specs`. The output lists both the search roots and the spec file paths so sub-agents know what to look for. Sub-agent count is configured via `planning.study_code.count` (default 3).
 
 #### STUDY_PACKAGES
-Study the project's technical stack: package manifests, library documentation, CLAUDE.md references.
+Study the packages and libraries needed to implement the specs under study. Identify relevant packages from package manifests, CLAUDE.md references, and library docs. For each package, write a notes file with code examples relevant to the specs. Notes are written to `<domain>/<workspace_dir>/implementation_plan/notes/`. When `SpecCommits` is non-empty, the commit hashes are included in the action text so the architect can use git diffs to understand spec changes. When `SpecCommits` is empty, the commit hash line is omitted.
 
 ### REVIEW Phase
 
-Lightweight checkpoint before drafting. Outputs the path to `PLAN_FORMAT.md`. The architect reviews study findings and the plan format, then advances to DRAFT.
+Checkpoint before drafting, entered only when `config.general.user_guided` is `true`. The architect reviews the package notes for completeness and discusses with the user before advancing to DRAFT. When `user_guided` is `false`, STUDY_PACKAGES transitions directly to DRAFT and REVIEW is skipped.
 
 ### DRAFT Phase
 
-The architect generates the implementation plan as structured JSON with accompanying notes:
+The architect drafts the implementation plan as structured JSON, using the package notes created during STUDY_PACKAGES as reference. Notes are updated as needed during drafting. When `SpecCommits` is non-empty, the commit hashes are included in the action text. The output structure:
 
 ```
-<domain>/.forge_workspace/implementation_plan/
+<domain>/.forgectl_workspace/implementation_plan/
 ├── plan.json
 └── notes/
     ├── <package>.md
@@ -605,9 +703,10 @@ Uses `eval` command to output full evaluation context for the sub-agent. The eva
 
 ### REFINE Phase
 
-Action varies by verdict and `enable_eval_output`:
-- When `enable_eval_output: true`: outputs the eval report path with "Study the eval file" instruction.
-- When `enable_eval_output: false`: "Make corrections based off communication with the evaluator."
+Action varies by verdict and `planning.eval.eval_mode`:
+- When `eval_mode: "report"`: outputs the eval report path with "Study the eval file" instruction.
+- When `eval_mode: "direct"`: "Review unstaged changes from the evaluator (git diff)."
+- When `eval_mode: "conversational"`: "Make corrections based off communication with the evaluator."
 - After PASS below min_rounds: prefixed with "Minimum evaluation rounds not met."
 
 Advancing from REFINE runs the validation gate.
@@ -616,13 +715,13 @@ Advancing from REFINE runs the validation gate.
 
 ## Invariants
 
-1. **Study phases precede REVIEW.** STUDY_SPECS → STUDY_CODE → STUDY_PACKAGES → REVIEW. No phase is skipped.
+1. **Study phases are sequential.** STUDY_SPECS → STUDY_CODE → STUDY_PACKAGES. No study phase is skipped. REVIEW is entered after STUDY_PACKAGES only when `user_guided` is `true`; otherwise STUDY_PACKAGES transitions directly to DRAFT.
 2. **Validation precedes evaluation.** The validation gate runs before every EVALUATE entry (and before SELF_REVIEW when enabled).
 3. **Self-review is optional.** When `planning.self_review` is `true`, SELF_REVIEW is entered between validation and EVALUATE on every round. When `false` (default), SELF_REVIEW is skipped. The validation gate also runs on advance from SELF_REVIEW in case the agent revised plan.json.
 4. **Round monotonicity.** The planning round counter only increments.
 5. **Min rounds enforced.** PASS below `planning.eval.min_rounds` forces another cycle.
 6. **Max rounds enforced.** FAIL at `planning.eval.max_rounds` forces acceptance.
-7. **Guided pauses.** When `config.general.user_guided` is true, REVIEW output includes "STOP please review and discuss with user before continuing."
+7. **REVIEW is guided-only.** REVIEW is only entered when `config.general.user_guided` is `true`. REVIEW output always includes "STOP please review and discuss with user before continuing."
 8. **Per-plan commits at ACCEPT.** When `enable_commits` is `true`, `--message` is required at ACCEPT and the scaffold auto-commits per `planning.commit_strategy`. When `enable_commits` is `false`, `--message` is not shown in output; if provided, a warning is printed: `--message is ignored, commits are not enabled`. The warning does not instruct how to enable commits. The commit hash is automatically registered on the accepted plan.
 9. **Batch limitation.** `planning.batch` > 1 is not yet supported. Reserved for future use.
 10. **DONE only reachable when `plan_all_before_implementing: true`.** When `false`, ACCEPT always transitions to PHASE_SHIFT (planning → implementing) — DONE is never entered. When `true`, DONE is entered when the queue is empty.
@@ -680,9 +779,15 @@ Advancing from REFINE runs the validation gate.
 
 ### Study phases advance sequentially
 - **Verifies:** Sequential state progression through study phases.
-- **Given:** ORIENT (planning).
+- **Given:** ORIENT (planning), `user_guided: true`.
 - **When:** advance through STUDY_SPECS → STUDY_CODE → STUDY_PACKAGES → REVIEW → DRAFT.
 - **Then:** Each transitions in order.
+
+### STUDY_PACKAGES skips REVIEW when not guided
+- **Verifies:** REVIEW is conditional on user_guided.
+- **Given:** STUDY_PACKAGES, `user_guided: false`.
+- **When:** `advance`
+- **Then:** State is DRAFT. REVIEW is never entered.
 
 ### DRAFT with valid plan goes to EVALUATE when self_review is false
 - **Verifies:** Validation gate passes transparently, self-review skipped.
@@ -770,6 +875,6 @@ Advancing from REFINE runs the validation gate.
 - Eval round enforcement (`planning.eval.min_rounds`/`max_rounds`) with forced acceptance
 - Per-plan auto-commit at ACCEPT with staging per `planning.commit_strategy` and automatic hash registration
 - DONE state after all plans accepted (no plan addition at DONE — plan-queue.json is authoritative)
-- Domain artifacts in `.forge_workspace/`
+- Domain artifacts in `.forgectl_workspace/`
 - Dual evaluator prompts: plan-eval.md for planning sub-agent
 - `planning.batch` > 1: reserved for future use

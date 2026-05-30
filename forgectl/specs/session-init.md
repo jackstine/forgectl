@@ -50,7 +50,7 @@ All other configuration is read from `.forgectl/config`.
       "topic": "The optimizer clones or locates a repository and provides its path for downstream modules",
       "file": "optimizer/specs/repository-loading.md",
       "planning_sources": [
-        ".forge_workspace/planning/optimizer/repo-snapshot-loading.md"
+        ".forgectl_workspace/planning/optimizer/repo-snapshot-loading.md"
       ],
       "depends_on": []
     }
@@ -78,7 +78,7 @@ No additional fields are permitted.
     {
       "name": "Protocols Implementation Plan",
       "domain": "protocols",
-      "file": "protocols/.forge_workspace/implementation_plan/plan.json",
+      "file": "protocols/.forgectl_workspace/implementation_plan/plan.json",
       "specs": [
         "protocols/ws1/specs/ws1-message-contract.md",
         "protocols/ws2/specs/ws2-message-contract.md"

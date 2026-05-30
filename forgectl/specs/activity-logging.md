@@ -5,7 +5,7 @@
 
 ## Context
 
-Forgectl writes structured log entries to `~/.forgectl/logs/` in JSONL format. Each session gets its own log file, named with the domain, phase, and session UUID. Logging captures state-mutating commands — `init` and `advance` — so the user can reconstruct what happened during a session.
+Forgectl writes structured log entries to `~/.forgectl/logs/` in JSONL format. Each session gets its own log file, named with the domain, phase, and session UUID. Logging captures state-mutating commands — `init` and `advance` — so the user can reconstruct what happened during a session. When a command fails due to incorrect usage (bad flags, validation errors, invalid state transitions), the error is also logged before the command exits.
 
 Read-only commands (`status`, `eval`, `validate`, `--version`) do not produce log entries.
 
@@ -68,6 +68,7 @@ Each line is a JSON object:
 {"ts":"2026-03-29T15:10:33Z","cmd":"advance","phase":"specifying","prev_state":"DRAFT","state":"EVALUATE","detail":{"round":1}}
 {"ts":"2026-03-29T15:12:01Z","cmd":"advance","phase":"specifying","prev_state":"EVALUATE","state":"REFINE","detail":{"round":1,"verdict":"FAIL","eval_report":"optimizer/specs/.eval/batch-1-r1.md"}}
 {"ts":"2026-03-29T15:30:00Z","cmd":"advance","phase":"specifying","prev_state":"EVALUATE","state":"ACCEPT","detail":{"round":2,"verdict":"PASS","forced":false}}
+{"ts":"2026-03-29T15:31:00Z","cmd":"error","phase":"specifying","state":"ACCEPT","detail":{"error":"--message is required in ACCEPT state when enable_commits is true","command":"advance","flags":{"verdict":"PASS"}}}
 ```
 
 #### Entry Fields
@@ -75,7 +76,7 @@ Each line is a JSON object:
 | Field | Type | Present | Description |
 |-------|------|---------|-------------|
 | `ts` | string (ISO 8601 UTC) | always | Timestamp of the command |
-| `cmd` | string | always | Command name: `init`, `advance` |
+| `cmd` | string | always | Command name: `init`, `advance`, `error` |
 | `phase` | string | always | Current phase at time of command |
 | `prev_state` | string | `advance` only | State before the transition |
 | `state` | string | always | State after the command completes |
@@ -100,6 +101,11 @@ Each line is a JSON object:
 - `item`: item ID (implementing phase, IMPLEMENT state)
 - `unblocked`: count of unblocked items (implementing ORIENT)
 - `remaining`: count of remaining items (implementing ORIENT)
+
+**`error`:**
+- `error`: error message string
+- `command`: the command that failed (`init` or `advance`)
+- `flags`: map of flags that were provided (for diagnosing incorrect usage)
 
 ### Rejection
 
@@ -126,6 +132,16 @@ For subsequent commands (`advance`):
 1. If `logs.enabled` is false: skip.
 2. Resolve the log file path from the session metadata in the state file.
 3. Append the log entry.
+
+### Error Logging
+
+When `init` or `advance` fails due to incorrect usage (bad flags, validation errors, invalid state transitions, missing required flags), the error is logged before the command exits:
+
+1. If `logs.enabled` is false: skip.
+2. If the logger has not been initialized (e.g., `init` failed before creating the log file): skip.
+3. Write an error entry with `cmd: "error"`, the error message, the originating command, and the flags that were provided.
+
+Error logging uses the same best-effort guarantee as normal logging — if the write fails, the command still exits with the original error. Error logging does not change the exit code or error output.
 
 ### Pruning
 
@@ -243,6 +259,18 @@ If the log directory cannot be created, the log file cannot be opened, or a writ
 - **When:** `forgectl advance`
 - **Then:** Warning printed to stderr. Command completes normally. Exit code 0.
 
+### failed advance logs error entry
+- **Verifies:** Incorrect usage is captured in the log.
+- **Given:** Active session in EVALUATE state. `logs.enabled: true`.
+- **When:** `forgectl advance` (missing required `--verdict` flag)
+- **Then:** Log entry appended with `cmd: "error"`, `detail.error` containing the error message, `detail.command: "advance"`.
+
+### error logging skipped when logger not initialized
+- **Verifies:** Error logging does not crash when logger is unavailable.
+- **Given:** No active session (state file does not exist).
+- **When:** `forgectl advance` (fails because no session)
+- **Then:** No log entry. Command exits with error. No crash or warning from logging.
+
 ### status does not log
 - **Verifies:** Read-only commands skip logging.
 - **Given:** Active session.
@@ -255,5 +283,6 @@ If the log directory cannot be created, the log file cannot be opened, or a writ
 - JSONL activity logging to `~/.forgectl/logs/`
 - Per-session log files named with domain, phase, and session UUID prefix
 - Log entries for state-mutating commands: init, advance
+- Error entries for failed commands (incorrect usage, validation failures, invalid transitions)
 - Configurable pruning at init: retention_days, max_files, enabled
 - Best-effort logging that never blocks primary workflow

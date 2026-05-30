@@ -37,7 +37,7 @@ The scaffold does not spawn sub-agents. It outputs instructions telling the arch
 
 | State | Flags |
 |-------|-------|
-| RECONCILE_EVAL | `--verdict PASS\|FAIL` (required), `--eval-report <path>` (required when `enable_eval_output: true`) |
+| RECONCILE_EVAL | `--verdict PASS\|FAIL` (required), `--eval-report <path>` (required when `eval_mode: "report"`) |
 | RECONCILE_REVIEW | (no flags) |
 | COMPLETE | `--message <text>` / `-m` (required when `enable_commits: true`) |
 
@@ -62,7 +62,7 @@ Action:  Cross-validate all specs across domains: verify Depends On entries,
          After completion of the above, advance to begin evaluation.
 ```
 
-**Entering RECONCILE_EVAL** (after RECONCILE, `enable_eval_output: true`):
+**Entering RECONCILE_EVAL** (after RECONCILE, `eval_mode: "report"`):
 
 ```
 State:   RECONCILE_EVAL
@@ -73,7 +73,19 @@ Action:  Please spawn 1 opus sub-agent to evaluate cross-domain reconciliation.
          After completion of the above, advance with --verdict PASS|FAIL --eval-report <path>
 ```
 
-**Entering RECONCILE_EVAL** (after RECONCILE, `enable_eval_output: false`):
+**Entering RECONCILE_EVAL** (after RECONCILE, `eval_mode: "direct"`):
+
+```
+State:   RECONCILE_EVAL
+Phase:   specifying
+Round:   1/3
+Action:  Please spawn 1 opus sub-agent to evaluate and correct the reconciliation.
+         Sub-agent runs: forgectl eval
+         Spec files have been staged. Sub-agent makes corrections directly.
+         After completion of the above, advance with --verdict PASS|FAIL
+```
+
+**Entering RECONCILE_EVAL** (after RECONCILE, `eval_mode: "conversational"`):
 
 ```
 State:   RECONCILE_EVAL
@@ -145,7 +157,7 @@ Action:  Specifying phase complete. Advance to continue.
 
 #### `eval` output — RECONCILE_EVAL
 
-When `enable_eval_output: true`:
+When `eval_mode: "report"`:
 
 ```
 === RECONCILIATION EVALUATION ROUND 1/3 ===
@@ -169,7 +181,7 @@ Write your evaluation report to:
   specs/.eval/reconciliation-r1.md
 ```
 
-When `enable_eval_output: false`, the `--- REPORT OUTPUT ---` section is omitted.
+When `eval_mode: "direct"` or `eval_mode: "conversational"`, the `--- REPORT OUTPUT ---` section is omitted.
 
 ```
 === RECONCILIATION EVALUATION ROUND 1/3 ===
@@ -201,8 +213,8 @@ specs/.eval/reconciliation-rN.md
 |-----------|--------|-----------|
 | `advance --verdict` outside of RECONCILE_EVAL | Error naming the current state. Exit code 1. | Verdict is only valid in evaluation states |
 | `advance` in RECONCILE_EVAL without `--verdict` | Error. Exit code 1. | Verdict determines the transition |
-| `advance` in RECONCILE_EVAL without `--eval-report` when `enable_eval_output: true` | Error. Exit code 1. | Every evaluation must reference its report when eval output is enabled |
-| `advance --eval-report` when `enable_eval_output: false` | Warning: `--eval-report is ignored, eval output is not enabled`. Command proceeds. | Consistent with `--message` warning pattern |
+| `advance` in RECONCILE_EVAL without `--eval-report` when `eval_mode: "report"` | Error. Exit code 1. | Every evaluation must reference its report when eval output is enabled |
+| `advance --eval-report` when `eval_mode` is not `"report"` | Warning: `--eval-report is ignored, --eval-report is only used in report mode`. Command proceeds. | Consistent with `--message` warning pattern |
 | `advance` in COMPLETE without `--message` when `enable_commits: true` | Error. Exit code 1. | Commit message required for the specifying phase commit |
 | `add-queue-item` outside of RECONCILE_REVIEW within reconciliation | Error: "add-queue-item is only valid in RECONCILE_REVIEW during reconciliation (current state: \<state\>)." Exit code 1. | Queue modifications during reconciliation are restricted to the review checkpoint |
 | `eval` outside of RECONCILE_EVAL | Error naming current state and phase. Exit code 1. | Eval context only available in RECONCILE_EVAL |
