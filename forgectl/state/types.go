@@ -124,6 +124,22 @@ type ImplementingConfig struct {
 	Eval           EvalConfig `json:"eval"`
 }
 
+// REReconcileConfig configures the reverse_engineering reconciliation loop.
+type REReconcileConfig struct {
+	MinRounds       int         `json:"min_rounds"`
+	MaxRounds       int         `json:"max_rounds"`
+	ColleagueReview bool        `json:"colleague_review"`
+	Eval            AgentConfig `json:"eval"` // sub-agents for reconciliation evaluation
+}
+
+// ReverseEngineeringConfig configures the reverse_engineering phase.
+type ReverseEngineeringConfig struct {
+	Execute     AgentConfig       `json:"execute"`
+	Survey      AgentConfig       `json:"survey"`
+	GapAnalysis AgentConfig       `json:"gap_analysis"`
+	Reconcile   REReconcileConfig `json:"reconcile"`
+}
+
 // DomainConfig identifies a domain within the project.
 type DomainConfig struct {
 	Name string `json:"name"`
@@ -158,8 +174,11 @@ type ForgeConfig struct {
 	Specifying   SpecifyingConfig   `json:"specifying"`
 	Planning     PlanningConfig     `json:"planning"`
 	Implementing ImplementingConfig `json:"implementing"`
-	Paths        PathsConfig        `json:"paths"`
-	Logs         LogsConfig         `json:"logs"`
+
+	ReverseEngineering ReverseEngineeringConfig `json:"reverse_engineering"`
+
+	Paths PathsConfig `json:"paths"`
+	Logs  LogsConfig  `json:"logs"`
 }
 
 // DefaultForgeConfig returns a ForgeConfig with all spec-defined default values applied.
@@ -206,6 +225,17 @@ func DefaultForgeConfig() ForgeConfig {
 					Type:  "eval",
 					Count: 1,
 				},
+			},
+		},
+		ReverseEngineering: ReverseEngineeringConfig{
+			Execute:     AgentConfig{Model: "haiku", Type: "explorer", Count: 3},
+			Survey:      AgentConfig{Model: "haiku", Type: "explorer", Count: 2},
+			GapAnalysis: AgentConfig{Model: "sonnet", Type: "explorer", Count: 5},
+			Reconcile: REReconcileConfig{
+				MinRounds:       1,
+				MaxRounds:       3,
+				ColleagueReview: false,
+				Eval:            AgentConfig{Model: "opus", Type: "general-purpose", Count: 1},
 			},
 		},
 		Paths: PathsConfig{
@@ -450,6 +480,49 @@ type ImplementingState struct {
 	PlanQueue         []PlanQueueEntry `json:"plan_queue,omitempty"`
 }
 
+// --- Reverse engineering phase state ---
+
+// ReverseEngineeringInitInput is the init input file for the reverse_engineering phase.
+type ReverseEngineeringInitInput struct {
+	Concept string   `json:"concept"`
+	Domains []string `json:"domains"`
+}
+
+// REQueueEntry is one spec to create or update in the reverse engineering queue.
+// Its file and code_search_roots paths resolve against the domain root
+// (<project_root>/<domain>/).
+type REQueueEntry struct {
+	Name            string   `json:"name"`
+	Domain          string   `json:"domain"`
+	Topic           string   `json:"topic"`
+	File            string   `json:"file"`
+	Action          string   `json:"action"` // "create" or "update"
+	CodeSearchRoots []string `json:"code_search_roots"`
+	DependsOn       []string `json:"depends_on"`
+}
+
+// ReverseEngineeringQueueInput is the queue file produced at the QUEUE state,
+// accumulating entries across all domains.
+type ReverseEngineeringQueueInput struct {
+	Specs []REQueueEntry `json:"specs"`
+}
+
+// ReverseEngineeringState holds reverse_engineering phase data. DomainIndex is
+// 1-based and drives both the SURVEY→QUEUE loop and the RECONCILE loop.
+type ReverseEngineeringState struct {
+	Concept          string                     `json:"concept"`
+	Domains          []string                   `json:"domains"`
+	DomainIndex      int                        `json:"domain_index"`
+	DomainCount      int                        `json:"domain_count"`
+	ExecuteItemIndex int                        `json:"execute_item_index"`
+	ReconcileRound   int                        `json:"reconcile_round"`
+	QueueFilePath    string                     `json:"queue_file_path,omitempty"`
+	QueueContentHash string                     `json:"queue_content_hash,omitempty"`
+	ColleagueReview  bool                       `json:"colleague_review"`
+	Queue            []REQueueEntry             `json:"queue"`
+	DomainReconcile  map[string]*ReconcileState `json:"domain_reconcile,omitempty"`
+}
+
 // --- Phase shift info ---
 
 // PhaseShiftInfo records the from→to of a phase shift.
@@ -472,6 +545,7 @@ type ForgeState struct {
 	GeneratePlanningQueue *GeneratePlanningQueueState `json:"generate_planning_queue,omitempty"`
 	Planning              *PlanningState              `json:"planning"`
 	Implementing          *ImplementingState          `json:"implementing"`
+	ReverseEngineering    *ReverseEngineeringState    `json:"reverse_engineering,omitempty"`
 }
 
 // AdvanceInput carries flags from the advance command.

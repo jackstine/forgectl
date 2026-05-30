@@ -89,6 +89,22 @@ type tomlImplementingConfig struct {
 	Eval           tomlEvalConfig `toml:"eval"`
 }
 
+// tomlREReconcileConfig mirrors REReconcileConfig for TOML decoding.
+type tomlREReconcileConfig struct {
+	MinRounds       int             `toml:"min_rounds"`
+	MaxRounds       int             `toml:"max_rounds"`
+	ColleagueReview *bool           `toml:"colleague_review"` // pointer so an explicit false overrides the default
+	Eval            tomlAgentConfig `toml:"eval"`
+}
+
+// tomlReverseEngineeringConfig mirrors ReverseEngineeringConfig for TOML decoding.
+type tomlReverseEngineeringConfig struct {
+	Execute     tomlAgentConfig       `toml:"execute"`
+	Survey      tomlAgentConfig       `toml:"survey"`
+	GapAnalysis tomlAgentConfig       `toml:"gap_analysis"`
+	Reconcile   tomlREReconcileConfig `toml:"reconcile"`
+}
+
 // tomlDomainConfig mirrors DomainConfig for TOML decoding.
 type tomlDomainConfig struct {
 	Name string `toml:"name"`
@@ -121,8 +137,11 @@ type tomlForgeConfig struct {
 	Specifying   tomlSpecifyingConfig   `toml:"specifying"`
 	Planning     tomlPlanningConfig     `toml:"planning"`
 	Implementing tomlImplementingConfig `toml:"implementing"`
-	Paths        tomlPathsConfig        `toml:"paths"`
-	Logs         tomlLogsConfig         `toml:"logs"`
+
+	ReverseEngineering tomlReverseEngineeringConfig `toml:"reverse_engineering"`
+
+	Paths tomlPathsConfig `toml:"paths"`
+	Logs  tomlLogsConfig  `toml:"logs"`
 }
 
 // FindProjectRoot walks up from startDir until it finds a directory containing .forgectl/.
@@ -239,6 +258,9 @@ func mergeTomlConfig(cfg *ForgeConfig, raw *tomlForgeConfig) {
 	}
 	mergeEvalConfig(&cfg.Implementing.Eval, &raw.Implementing.Eval)
 
+	// Reverse engineering
+	mergeReverseEngineeringConfig(&cfg.ReverseEngineering, &raw.ReverseEngineering)
+
 	// Paths
 	if raw.Paths.StateDir != "" {
 		cfg.Paths.StateDir = raw.Paths.StateDir
@@ -308,6 +330,36 @@ func mergeCrossRefConfig(dst *CrossRefConfig, src *tomlCrossRefConfig) {
 	if src.Eval.Count > 0 {
 		dst.Eval.Count = src.Eval.Count
 	}
+}
+
+// mergeAgentConfig copies non-zero model/type/count from a TOML agent config.
+func mergeAgentConfig(dst *AgentConfig, src *tomlAgentConfig) {
+	if src.Model != "" {
+		dst.Model = src.Model
+	}
+	if src.Type != "" {
+		dst.Type = src.Type
+	}
+	if src.Count > 0 {
+		dst.Count = src.Count
+	}
+}
+
+func mergeReverseEngineeringConfig(dst *ReverseEngineeringConfig, src *tomlReverseEngineeringConfig) {
+	mergeAgentConfig(&dst.Execute, &src.Execute)
+	mergeAgentConfig(&dst.Survey, &src.Survey)
+	mergeAgentConfig(&dst.GapAnalysis, &src.GapAnalysis)
+
+	if src.Reconcile.MinRounds > 0 {
+		dst.Reconcile.MinRounds = src.Reconcile.MinRounds
+	}
+	if src.Reconcile.MaxRounds > 0 {
+		dst.Reconcile.MaxRounds = src.Reconcile.MaxRounds
+	}
+	if src.Reconcile.ColleagueReview != nil {
+		dst.Reconcile.ColleagueReview = *src.Reconcile.ColleagueReview
+	}
+	mergeAgentConfig(&dst.Reconcile.Eval, &src.Reconcile.Eval)
 }
 
 func mergeReconciliationConfig(dst *ReconciliationConfig, src *tomlReconciliationConfig) {
@@ -392,6 +444,9 @@ func ValidateConfig(cfg ForgeConfig) []string {
 	}
 	if cfg.Implementing.Eval.MinRounds > cfg.Implementing.Eval.MaxRounds {
 		errs = append(errs, "implementing.eval.min_rounds cannot exceed max_rounds")
+	}
+	if cfg.ReverseEngineering.Reconcile.MinRounds > cfg.ReverseEngineering.Reconcile.MaxRounds {
+		errs = append(errs, "reverse_engineering.reconcile.min_rounds cannot exceed max_rounds")
 	}
 
 	// No domain path is a prefix of another domain path.
