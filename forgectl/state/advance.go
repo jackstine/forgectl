@@ -1285,9 +1285,101 @@ func advanceReverseEngineering(s *ForgeState, in AdvanceInput, dir string) error
 		s.State = StateReconcile
 		return nil
 
+	case StateReconcile:
+		// RECONCILE takes no transition flags. Target spec files the queue
+		// expected for this domain that are absent on disk are surfaced as gaps
+		// by the action output (see ReverseEngineeringDomainGaps); a gap is
+		// reported, never fabricated, and never blocks the loop.
+		s.State = StateReconcileEval
+		return nil
+
+	case StateReconcileEval:
+		if in.Verdict == "" {
+			return fmt.Errorf("--verdict is required in RECONCILE_EVAL state")
+		}
+		if in.Verdict != "PASS" && in.Verdict != "FAIL" {
+			return fmt.Errorf("--verdict must be PASS or FAIL")
+		}
+		if in.EvalReport != "" {
+			if err := checkEvalReportExists(in.EvalReport); err != nil {
+				return err
+			}
+		}
+		if re.DomainIndex < 1 || re.DomainIndex > len(re.Domains) {
+			return fmt.Errorf("reconcile domain index %d out of range", re.DomainIndex)
+		}
+
+		// Append the verdict to the current domain's reconcile history.
+		domain := re.Domains[re.DomainIndex-1]
+		rec := re.DomainReconcile[domain]
+		if rec == nil {
+			rec = &ReconcileState{}
+			re.DomainReconcile[domain] = rec
+		}
+		rec.Round = re.ReconcileRound
+		rec.Evals = append(rec.Evals, EvalRecord{
+			Round:      re.ReconcileRound,
+			Verdict:    in.Verdict,
+			EvalReport: in.EvalReport,
+		})
+
+		cfg := s.Config.ReverseEngineering.Reconcile
+		passed := in.Verdict == "PASS" && re.ReconcileRound >= cfg.MinRounds
+		forced := in.Verdict == "FAIL" && re.ReconcileRound >= cfg.MaxRounds
+		if passed || forced {
+			// Terminal for this domain: gate through COLLEAGUE_REVIEW when
+			// enabled, otherwise straight to RECONCILE_ADVANCE.
+			if re.ColleagueReview {
+				s.State = StateColleagueReview
+			} else {
+				s.State = StateReconcileAdvance
+			}
+		} else {
+			// Minimum not yet met (PASS) or correctable failure — loop back.
+			re.ReconcileRound++
+			s.State = StateReconcile
+		}
+		return nil
+
+	case StateColleagueReview:
+		s.State = StateReconcileAdvance
+		return nil
+
+	case StateReconcileAdvance:
+		if re.DomainIndex < re.DomainCount {
+			re.DomainIndex++
+			re.ReconcileRound = 1
+			s.State = StateReconcile
+			return nil
+		}
+		// All domains reconciled.
+		s.State = StateDone
+		return nil
+
 	default:
 		return fmt.Errorf("unexpected state %q in reverse_engineering phase", s.State)
 	}
+}
+
+// ReverseEngineeringDomainGaps returns the queue-relative target spec files for
+// the current reconcile domain whose files are absent on disk. RECONCILE reports
+// these gaps rather than fabricating specs; a missing file never blocks the loop.
+// Paths resolve against the absolute project root, not the working directory.
+func ReverseEngineeringDomainGaps(re *ReverseEngineeringState, dir string) []string {
+	if re.DomainIndex < 1 || re.DomainIndex > len(re.Domains) {
+		return nil
+	}
+	domain := re.Domains[re.DomainIndex-1]
+	var gaps []string
+	for _, entry := range re.Queue {
+		if entry.Domain != domain {
+			continue
+		}
+		if _, err := os.Stat(filepath.Join(dir, entry.Domain, entry.File)); err != nil {
+			gaps = append(gaps, entry.File)
+		}
+	}
+	return gaps
 }
 
 // ensureItemSpecsDir creates the current execution item's domain specs directory

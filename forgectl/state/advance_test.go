@@ -2730,3 +2730,191 @@ func TestREExecuteNoFilesWritten(t *testing.T) {
 		t.Errorf("state = %s, want RECONCILE after a file-less loop", s.State)
 	}
 }
+
+// reReconcileState builds an RE state positioned in the reconcile loop with the
+// given reconcile config locked in.
+func reReconcileState(domains []string, st StateName, domainIndex, round, min, max int, colleague bool) *ForgeState {
+	re := NewReverseEngineeringState("auth refactor", domains)
+	re.DomainIndex = domainIndex
+	re.ReconcileRound = round
+	re.ColleagueReview = colleague
+	s := &ForgeState{
+		Phase:              PhaseReverseEngineering,
+		State:              st,
+		StartedAtPhase:     PhaseReverseEngineering,
+		ReverseEngineering: re,
+	}
+	s.Config.ReverseEngineering.Reconcile.MinRounds = min
+	s.Config.ReverseEngineering.Reconcile.MaxRounds = max
+	s.Config.ReverseEngineering.Reconcile.ColleagueReview = colleague
+	return s
+}
+
+// Functional: RECONCILE→RECONCILE_EVAL, a PASS at/above min rounds (colleague
+// review disabled) advances to RECONCILE_ADVANCE, which on the last domain
+// reaches DONE. The verdict is recorded against the domain's reconcile history.
+func TestREReconcilePassToDone(t *testing.T) {
+	dir := t.TempDir()
+	s := reReconcileState([]string{"optimizer"}, StateReconcile, 1, 1, 1, 3, false)
+
+	// RECONCILE → RECONCILE_EVAL (no flags).
+	if err := Advance(s, AdvanceInput{}, dir); err != nil {
+		t.Fatalf("RECONCILE→EVAL: %v", err)
+	}
+	if s.State != StateReconcileEval {
+		t.Fatalf("state = %s, want RECONCILE_EVAL", s.State)
+	}
+
+	// PASS at round 1 (min 1) → RECONCILE_ADVANCE (colleague disabled).
+	if err := Advance(s, AdvanceInput{Verdict: "PASS"}, dir); err != nil {
+		t.Fatalf("EVAL PASS: %v", err)
+	}
+	if s.State != StateReconcileAdvance {
+		t.Fatalf("state = %s, want RECONCILE_ADVANCE", s.State)
+	}
+	rec := s.ReverseEngineering.DomainReconcile["optimizer"]
+	if rec == nil || len(rec.Evals) != 1 || rec.Evals[0].Verdict != "PASS" || rec.Evals[0].Round != 1 {
+		t.Fatalf("domain reconcile history not recorded: %+v", rec)
+	}
+
+	// RECONCILE_ADVANCE on the last domain → DONE.
+	if err := Advance(s, AdvanceInput{}, dir); err != nil {
+		t.Fatalf("RECONCILE_ADVANCE→DONE: %v", err)
+	}
+	if s.State != StateDone {
+		t.Fatalf("state = %s, want DONE", s.State)
+	}
+}
+
+// Functional: RECONCILE_ADVANCE with a domain remaining moves to RECONCILE for
+// the next domain, resetting the round to 1 and bumping the domain index.
+func TestREReconcileAdvanceNextDomain(t *testing.T) {
+	dir := t.TempDir()
+	s := reReconcileState([]string{"optimizer", "api"}, StateReconcileAdvance, 1, 2, 1, 3, false)
+
+	if err := Advance(s, AdvanceInput{}, dir); err != nil {
+		t.Fatalf("RECONCILE_ADVANCE→next domain: %v", err)
+	}
+	if s.State != StateReconcile {
+		t.Fatalf("state = %s, want RECONCILE", s.State)
+	}
+	if s.ReverseEngineering.DomainIndex != 2 {
+		t.Errorf("domain index = %d, want 2", s.ReverseEngineering.DomainIndex)
+	}
+	if s.ReverseEngineering.ReconcileRound != 1 {
+		t.Errorf("round = %d, want 1 (reset for new domain)", s.ReverseEngineering.ReconcileRound)
+	}
+}
+
+// Edge case: a FAIL below max loops back to RECONCILE incrementing the round;
+// a FAIL at max rounds is force-accepted to RECONCILE_ADVANCE. Both verdicts are
+// recorded.
+func TestREReconcileEvalFailLoopsThenForces(t *testing.T) {
+	dir := t.TempDir()
+	s := reReconcileState([]string{"optimizer"}, StateReconcileEval, 1, 1, 1, 2, false)
+
+	// Round 1 FAIL (max 2) → back to RECONCILE, round 2.
+	if err := Advance(s, AdvanceInput{Verdict: "FAIL"}, dir); err != nil {
+		t.Fatalf("EVAL FAIL round 1: %v", err)
+	}
+	if s.State != StateReconcile {
+		t.Fatalf("state = %s, want RECONCILE after FAIL below max", s.State)
+	}
+	if s.ReverseEngineering.ReconcileRound != 2 {
+		t.Fatalf("round = %d, want 2", s.ReverseEngineering.ReconcileRound)
+	}
+
+	// RECONCILE → EVAL again.
+	if err := Advance(s, AdvanceInput{}, dir); err != nil {
+		t.Fatalf("RECONCILE→EVAL round 2: %v", err)
+	}
+	// Round 2 FAIL (>= max 2) → forced to RECONCILE_ADVANCE.
+	if err := Advance(s, AdvanceInput{Verdict: "FAIL"}, dir); err != nil {
+		t.Fatalf("EVAL FAIL round 2: %v", err)
+	}
+	if s.State != StateReconcileAdvance {
+		t.Fatalf("state = %s, want RECONCILE_ADVANCE (forced at max)", s.State)
+	}
+	rec := s.ReverseEngineering.DomainReconcile["optimizer"]
+	if rec == nil || len(rec.Evals) != 2 {
+		t.Fatalf("want 2 recorded evals, got %+v", rec)
+	}
+}
+
+// Edge case: a PASS below min rounds loops back to RECONCILE (round++), and with
+// colleague review enabled a terminal verdict gates through COLLEAGUE_REVIEW
+// before RECONCILE_ADVANCE.
+func TestREReconcileMinRoundsAndColleagueGate(t *testing.T) {
+	dir := t.TempDir()
+	// min 2, colleague enabled.
+	s := reReconcileState([]string{"optimizer"}, StateReconcileEval, 1, 1, 2, 3, true)
+
+	// PASS at round 1 < min 2 → loop back to RECONCILE, round 2.
+	if err := Advance(s, AdvanceInput{Verdict: "PASS"}, dir); err != nil {
+		t.Fatalf("EVAL PASS round 1: %v", err)
+	}
+	if s.State != StateReconcile || s.ReverseEngineering.ReconcileRound != 2 {
+		t.Fatalf("want RECONCILE round 2, got %s round %d", s.State, s.ReverseEngineering.ReconcileRound)
+	}
+
+	// RECONCILE → EVAL.
+	if err := Advance(s, AdvanceInput{}, dir); err != nil {
+		t.Fatalf("RECONCILE→EVAL: %v", err)
+	}
+	// PASS at round 2 >= min 2, colleague enabled → COLLEAGUE_REVIEW.
+	if err := Advance(s, AdvanceInput{Verdict: "PASS"}, dir); err != nil {
+		t.Fatalf("EVAL PASS round 2: %v", err)
+	}
+	if s.State != StateColleagueReview {
+		t.Fatalf("state = %s, want COLLEAGUE_REVIEW", s.State)
+	}
+	// COLLEAGUE_REVIEW → RECONCILE_ADVANCE.
+	if err := Advance(s, AdvanceInput{}, dir); err != nil {
+		t.Fatalf("COLLEAGUE_REVIEW→RECONCILE_ADVANCE: %v", err)
+	}
+	if s.State != StateReconcileAdvance {
+		t.Fatalf("state = %s, want RECONCILE_ADVANCE", s.State)
+	}
+}
+
+// Rejection: RECONCILE_EVAL requires a PASS/FAIL verdict.
+func TestREReconcileEvalRequiresVerdict(t *testing.T) {
+	dir := t.TempDir()
+	s := reReconcileState([]string{"optimizer"}, StateReconcileEval, 1, 1, 1, 3, false)
+
+	if err := Advance(s, AdvanceInput{}, dir); err == nil {
+		t.Error("expected error when --verdict is missing")
+	} else if !strings.Contains(err.Error(), "verdict is required") {
+		t.Errorf("unexpected error: %v", err)
+	}
+
+	s = reReconcileState([]string{"optimizer"}, StateReconcileEval, 1, 1, 1, 3, false)
+	if err := Advance(s, AdvanceInput{Verdict: "MAYBE"}, dir); err == nil {
+		t.Error("expected error for an invalid verdict")
+	} else if !strings.Contains(err.Error(), "must be PASS or FAIL") {
+		t.Errorf("unexpected error: %v", err)
+	}
+}
+
+// Edge case: ReverseEngineeringDomainGaps reports only the current domain's
+// queue entries whose target spec files are absent on disk, resolving against
+// the absolute project root.
+func TestREReconcileDomainGaps(t *testing.T) {
+	dir := buildREProject(t, map[string][]string{"optimizer": {"specs"}, "api": {"specs"}})
+	re := NewReverseEngineeringState("auth refactor", []string{"optimizer", "api"})
+	re.DomainIndex = 1
+	re.Queue = []REQueueEntry{
+		{Name: "Present", Domain: "optimizer", File: "specs/present.md", Action: "create"},
+		{Name: "Missing", Domain: "optimizer", File: "specs/missing.md", Action: "create"},
+		{Name: "Other", Domain: "api", File: "specs/other.md", Action: "create"},
+	}
+	// Only the "present" file exists.
+	if err := os.WriteFile(filepath.Join(dir, "optimizer", "specs", "present.md"), []byte("# spec"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	gaps := ReverseEngineeringDomainGaps(re, dir)
+	if len(gaps) != 1 || gaps[0] != "specs/missing.md" {
+		t.Fatalf("gaps = %v, want [specs/missing.md] (api entry excluded, present excluded)", gaps)
+	}
+}
