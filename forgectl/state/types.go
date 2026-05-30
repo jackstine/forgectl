@@ -8,6 +8,7 @@ const (
 	PhasePlanning              PhaseName = "planning"
 	PhaseGeneratePlanningQueue PhaseName = "generate_planning_queue"
 	PhaseImplementing          PhaseName = "implementing"
+	PhaseReverseEngineering    PhaseName = "reverse_engineering"
 )
 
 // StateName represents the current state within a phase.
@@ -37,6 +38,17 @@ const (
 	StateImplement             StateName = "IMPLEMENT"
 	StateCommit                StateName = "COMMIT"
 	StateSelfReview            StateName = "SELF_REVIEW"
+
+	// Reverse engineering phase states. ORIENT, RECONCILE, RECONCILE_EVAL, and
+	// DONE are reused from the constants above.
+	StateSurvey                 StateName = "SURVEY"
+	StateGapAnalysis            StateName = "GAP_ANALYSIS"
+	StateDecompose              StateName = "DECOMPOSE"
+	StateQueue                  StateName = "QUEUE"
+	StateExecuteReverseEngineer StateName = "EXECUTE_REVERSE_ENGINEER"
+	StatePostReverseEngineer    StateName = "POST_REVERSE_ENGINEER"
+	StateColleagueReview        StateName = "COLLEAGUE_REVIEW"
+	StateReconcileAdvance       StateName = "RECONCILE_ADVANCE"
 )
 
 // --- Configuration structs ---

@@ -176,6 +176,56 @@ func TestInitRejectsInvalidPhase(t *testing.T) {
 	}
 }
 
+// Functional: reverse_engineering is now an initializable phase. The phase
+// passes validation and the session is created at Phase=reverse_engineering.
+// (Full RE init wiring lands in re.init; here only the phase string is parsed.)
+func TestInitAcceptsReverseEngineeringPhase(t *testing.T) {
+	dir := setupProjectDir(t)
+
+	// Any existing file satisfies the read; there is no RE init switch case yet,
+	// so the phase block is skipped and the session is saved at this phase.
+	inputFile := filepath.Join(dir, "input.json")
+	os.WriteFile(inputFile, []byte("{}"), 0644)
+
+	initFrom = inputFile
+	initPhase = "reverse_engineering"
+
+	var buf bytes.Buffer
+	rootCmd.SetOut(&buf)
+
+	if err := runInit(initCmd, nil); err != nil {
+		t.Fatalf("init at reverse_engineering: %v", err)
+	}
+
+	sd := resolvedStateDir(dir)
+	s, err := state.Load(sd)
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	if s.Phase != state.PhaseReverseEngineering {
+		t.Errorf("phase = %s, want reverse_engineering", s.Phase)
+	}
+	if s.StartedAtPhase != state.PhaseReverseEngineering {
+		t.Errorf("started_at_phase = %s, want reverse_engineering", s.StartedAtPhase)
+	}
+}
+
+// Rejection: generate_planning_queue stays non-initializable even though
+// reverse_engineering was added to the valid set.
+func TestInitRejectsGeneratePlanningQueueStillNonInitializable(t *testing.T) {
+	setupProjectDir(t)
+	initFrom = "dummy"
+	initPhase = "generate_planning_queue"
+
+	err := runInit(initCmd, nil)
+	if err == nil {
+		t.Fatal("expected error for generate_planning_queue phase")
+	}
+	if err.Error() != "generate_planning_queue requires a completed specifying phase. Use --phase specifying instead." {
+		t.Errorf("unexpected error: %v", err)
+	}
+}
+
 func TestInitRejectsInvalidConfig(t *testing.T) {
 	dir := setupProjectDir(t)
 
