@@ -361,3 +361,185 @@ func PlanQueueSchema() string {
   ]
 }`
 }
+
+// ValidateReverseEngineeringInput validates the reverse_engineering init input
+// JSON: a non-empty concept, a non-empty domains list with no duplicates, and
+// no additional fields. Shared by init and any other entry point.
+func ValidateReverseEngineeringInput(data []byte) []string {
+	var errs []string
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return []string{fmt.Sprintf("invalid JSON: %s", err)}
+	}
+
+	allowedFields := map[string]bool{"concept": true, "domains": true}
+	for k := range raw {
+		if !allowedFields[k] {
+			errs = append(errs, fmt.Sprintf("unexpected field %q", k))
+		}
+	}
+
+	// concept: required, non-empty string.
+	if conceptRaw, ok := raw["concept"]; !ok {
+		errs = append(errs, "A concept is required to scope the reverse engineering effort.")
+	} else {
+		var concept string
+		if err := json.Unmarshal(conceptRaw, &concept); err != nil {
+			errs = append(errs, "\"concept\" must be a string")
+		} else if strings.TrimSpace(concept) == "" {
+			errs = append(errs, "A concept is required to scope the reverse engineering effort.")
+		}
+	}
+
+	// domains: required, non-empty array of strings, no duplicates.
+	if domainsRaw, ok := raw["domains"]; !ok {
+		errs = append(errs, "At least one domain is required.")
+	} else {
+		var domains []string
+		if err := json.Unmarshal(domainsRaw, &domains); err != nil {
+			errs = append(errs, "\"domains\" must be an array of strings")
+		} else if len(domains) == 0 {
+			errs = append(errs, "At least one domain is required.")
+		} else {
+			seen := map[string]bool{}
+			for _, d := range domains {
+				if seen[d] {
+					errs = append(errs, fmt.Sprintf("duplicate domain %q", d))
+				}
+				seen[d] = true
+			}
+		}
+	}
+
+	return errs
+}
+
+// ReverseEngineeringInitSchema returns the printable schema for the
+// reverse_engineering init input file.
+func ReverseEngineeringInitSchema() string {
+	return `{
+  "concept": "<string>",
+  "domains": ["<string>", ...]
+}`
+}
+
+// ValidateReverseEngineeringQueue validates the reverse engineering queue JSON.
+// projectRoot is the absolute project root; validDomains is the initialized
+// domain list. Each entry's file and code_search_roots paths resolve against
+// the domain root <projectRoot>/<domain>/. Shared by the QUEUE advance.
+func ValidateReverseEngineeringQueue(data []byte, projectRoot string, validDomains []string) []string {
+	var errs []string
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return []string{fmt.Sprintf("invalid JSON: %s", err)}
+	}
+
+	for k := range raw {
+		if k != "specs" {
+			errs = append(errs, fmt.Sprintf("unexpected field %q", k))
+		}
+	}
+
+	specsRaw, ok := raw["specs"]
+	if !ok {
+		return append(errs, "missing required field \"specs\"")
+	}
+	var specs []json.RawMessage
+	if err := json.Unmarshal(specsRaw, &specs); err != nil {
+		return append(errs, fmt.Sprintf("\"specs\" must be an array: %s", err))
+	}
+	if len(specs) == 0 {
+		return append(errs, "\"specs\" array must not be empty")
+	}
+
+	validDomainSet := map[string]bool{}
+	for _, d := range validDomains {
+		validDomainSet[d] = true
+	}
+
+	requiredFields := []string{"name", "domain", "topic", "file", "action", "code_search_roots", "depends_on"}
+	allowedFields := map[string]bool{
+		"name": true, "domain": true, "topic": true, "file": true,
+		"action": true, "code_search_roots": true, "depends_on": true,
+	}
+
+	entries := make([]REQueueEntry, 0, len(specs))
+	for i, specRaw := range specs {
+		var rawEntry map[string]json.RawMessage
+		if err := json.Unmarshal(specRaw, &rawEntry); err != nil {
+			errs = append(errs, fmt.Sprintf("specs[%d]: invalid object: %s", i, err))
+			continue
+		}
+		for _, field := range requiredFields {
+			if _, ok := rawEntry[field]; !ok {
+				errs = append(errs, fmt.Sprintf("specs[%d]: missing required field %q", i, field))
+			}
+		}
+		for k := range rawEntry {
+			if !allowedFields[k] {
+				errs = append(errs, fmt.Sprintf("specs[%d]: unexpected field %q", i, k))
+			}
+		}
+
+		var entry REQueueEntry
+		if err := json.Unmarshal(specRaw, &entry); err != nil {
+			errs = append(errs, fmt.Sprintf("specs[%d]: invalid object: %s", i, err))
+			continue
+		}
+		entries = append(entries, entry)
+
+		// action enum.
+		if entry.Action != "" && entry.Action != "create" && entry.Action != "update" {
+			errs = append(errs, fmt.Sprintf("specs[%d]: action %q must be \"create\" or \"update\"", i, entry.Action))
+		}
+
+		// domain membership.
+		if entry.Domain != "" && !validDomainSet[entry.Domain] {
+			errs = append(errs, fmt.Sprintf(
+				"Queue entry %q has domain %q which is not in the\ninitialized domain list.\n\nValid domains: %s\n\nTo add a new domain, run:\n  forgectl add-domain <domain>",
+				entry.Name, entry.Domain, strings.Join(validDomains, ", ")))
+		}
+
+		// code_search_roots: non-empty, and each directory exists under the domain root.
+		if _, ok := rawEntry["code_search_roots"]; ok {
+			if len(entry.CodeSearchRoots) == 0 {
+				errs = append(errs, fmt.Sprintf("specs[%d] %q: code_search_roots must not be empty", i, entry.Name))
+			}
+			for _, root := range entry.CodeSearchRoots {
+				resolved := filepath.Join(projectRoot, entry.Domain, root)
+				if info, err := os.Stat(resolved); err != nil || !info.IsDir() {
+					errs = append(errs, fmt.Sprintf("specs[%d] %q: code_search_roots directory does not exist: %s", i, entry.Name, resolved))
+				}
+			}
+		}
+	}
+
+	// Acyclic depends_on graph; entry names are the node IDs.
+	items := make([]PlanItem, 0, len(entries))
+	for _, e := range entries {
+		items = append(items, PlanItem{ID: e.Name, DependsOn: e.DependsOn})
+	}
+	if cycle := detectCycle(items); cycle != "" {
+		errs = append(errs, fmt.Sprintf("circular dependency detected: %s", cycle))
+	}
+
+	return errs
+}
+
+// ReverseEngineeringQueueSchema returns the printable schema for the reverse
+// engineering queue file.
+func ReverseEngineeringQueueSchema() string {
+	return `{
+  "specs": [
+    {
+      "name": "<string>",
+      "domain": "<string>",
+      "topic": "<string>",
+      "file": "<string>",
+      "action": "create" | "update",
+      "code_search_roots": ["<string>", ...],
+      "depends_on": ["<string>", ...]
+    }
+  ]
+}`
+}

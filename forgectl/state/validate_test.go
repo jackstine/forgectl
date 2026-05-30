@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -216,5 +217,147 @@ func TestValidatePlanJSON_LayerOrderViolation(t *testing.T) {
 	errs := ValidatePlanJSON(data, t.TempDir())
 	if len(errs) == 0 {
 		t.Error("expected error for layer order violation")
+	}
+}
+
+// Rejection: a missing/blank concept and an empty domains list are rejected
+// with the spec's error messages.
+func TestValidateReverseEngineeringInputRejectsMissingConceptAndDomains(t *testing.T) {
+	// Blank concept + empty domains.
+	errs := ValidateReverseEngineeringInput([]byte(`{"concept": "   ", "domains": []}`))
+	if !containsSubstr(errs, "A concept is required to scope the reverse engineering effort.") {
+		t.Errorf("expected concept-required error, got: %v", errs)
+	}
+	if !containsSubstr(errs, "At least one domain is required.") {
+		t.Errorf("expected domains-required error, got: %v", errs)
+	}
+
+	// Both keys absent.
+	errs = ValidateReverseEngineeringInput([]byte(`{}`))
+	if !containsSubstr(errs, "A concept is required to scope the reverse engineering effort.") {
+		t.Errorf("expected concept-required error for empty object, got: %v", errs)
+	}
+	if !containsSubstr(errs, "At least one domain is required.") {
+		t.Errorf("expected domains-required error for empty object, got: %v", errs)
+	}
+
+	// A well-formed input produces no errors (guards against false positives).
+	if errs := ValidateReverseEngineeringInput([]byte(`{"concept": "auth refactor", "domains": ["api"]}`)); len(errs) != 0 {
+		t.Errorf("valid input should produce no errors, got: %v", errs)
+	}
+}
+
+// Rejection: a duplicate domain and any extra top-level field are rejected.
+func TestValidateReverseEngineeringInputRejectsDuplicateAndExtraField(t *testing.T) {
+	errs := ValidateReverseEngineeringInput([]byte(`{"concept": "c", "domains": ["api", "portal", "api"]}`))
+	if !containsSubstr(errs, `duplicate domain "api"`) {
+		t.Errorf("expected duplicate-domain error, got: %v", errs)
+	}
+
+	errs = ValidateReverseEngineeringInput([]byte(`{"concept": "c", "domains": ["api"], "extra": true}`))
+	if !containsSubstr(errs, `unexpected field "extra"`) {
+		t.Errorf("expected unexpected-field error, got: %v", errs)
+	}
+}
+
+func containsSubstr(errs []string, want string) bool {
+	for _, e := range errs {
+		if e == want {
+			return true
+		}
+	}
+	return false
+}
+
+// buildREProject creates a temp project root with the given domain/subdir
+// directories and returns the project root.
+func buildREProject(t *testing.T, dirs map[string][]string) string {
+	t.Helper()
+	root := t.TempDir()
+	for domain, subs := range dirs {
+		for _, sub := range subs {
+			if err := os.MkdirAll(filepath.Join(root, domain, sub), 0755); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	return root
+}
+
+// Functional: a well-formed queue with existing code_search_roots passes.
+func TestValidateReverseEngineeringQueue_Valid(t *testing.T) {
+	root := buildREProject(t, map[string][]string{
+		"optimizer": {"src/repo", "src/config"},
+		"api":       {"handlers"},
+	})
+	queue := `{
+  "specs": [
+    {"name": "Repo Loading", "domain": "optimizer", "topic": "loads a repo",
+     "file": "specs/repo-loading.md", "action": "create",
+     "code_search_roots": ["src/repo/", "src/config/"], "depends_on": []},
+    {"name": "API Handlers", "domain": "api", "topic": "request handlers",
+     "file": "specs/handlers.md", "action": "update",
+     "code_search_roots": ["handlers/"], "depends_on": ["Repo Loading"]}
+  ]
+}`
+	errs := ValidateReverseEngineeringQueue([]byte(queue), root, []string{"optimizer", "api"})
+	if len(errs) != 0 {
+		t.Errorf("valid queue should produce no errors, got: %v", errs)
+	}
+}
+
+// Rejection: bad action, unknown domain, missing field, and a nonexistent
+// code_search_roots directory are all reported.
+func TestValidateReverseEngineeringQueue_Rejections(t *testing.T) {
+	root := buildREProject(t, map[string][]string{"api": {"handlers"}})
+
+	// Bad action + unknown domain + nonexistent root.
+	queue := `{
+  "specs": [
+    {"name": "Bad", "domain": "ghost", "topic": "t", "file": "specs/x.md",
+     "action": "delete", "code_search_roots": ["nope/"], "depends_on": []}
+  ]
+}`
+	errs := ValidateReverseEngineeringQueue([]byte(queue), root, []string{"api"})
+	joined := strings.Join(errs, "\n")
+	if !strings.Contains(joined, `action "delete" must be`) {
+		t.Errorf("expected action enum error, got: %v", errs)
+	}
+	if !strings.Contains(joined, `has domain "ghost"`) || !strings.Contains(joined, "forgectl add-domain") {
+		t.Errorf("expected domain-membership error with add-domain hint, got: %v", errs)
+	}
+	if !strings.Contains(joined, "code_search_roots directory does not exist") {
+		t.Errorf("expected missing-directory error, got: %v", errs)
+	}
+
+	// Missing required field (no "topic").
+	queue2 := `{"specs": [{"name": "X", "domain": "api", "file": "specs/x.md",
+     "action": "create", "code_search_roots": ["handlers/"], "depends_on": []}]}`
+	errs2 := ValidateReverseEngineeringQueue([]byte(queue2), root, []string{"api"})
+	if !strings.Contains(strings.Join(errs2, "\n"), `missing required field "topic"`) {
+		t.Errorf("expected missing-topic error, got: %v", errs2)
+	}
+
+	// Empty specs array.
+	errs3 := ValidateReverseEngineeringQueue([]byte(`{"specs": []}`), root, []string{"api"})
+	if len(errs3) == 0 {
+		t.Error("expected error for empty specs array")
+	}
+}
+
+// Edge case: a circular depends_on chain is detected.
+func TestValidateReverseEngineeringQueue_Cycle(t *testing.T) {
+	root := buildREProject(t, map[string][]string{"api": {"a", "b"}})
+	queue := `{
+  "specs": [
+    {"name": "A", "domain": "api", "topic": "t", "file": "specs/a.md",
+     "action": "create", "code_search_roots": ["a/"], "depends_on": ["B"]},
+    {"name": "B", "domain": "api", "topic": "t", "file": "specs/b.md",
+     "action": "create", "code_search_roots": ["b/"], "depends_on": ["A"]}
+  ]
+}`
+	errs := ValidateReverseEngineeringQueue([]byte(queue), root, []string{"api"})
+	if !strings.Contains(strings.Join(errs, "\n"), "circular dependency detected") {
+		t.Errorf("expected circular dependency error, got: %v", errs)
 	}
 }
