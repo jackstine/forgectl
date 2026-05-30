@@ -73,9 +73,12 @@ func runAdvance(cmd *cobra.Command, args []string) error {
 		Guided:     guided,
 	}
 
-	// Snapshot state before transition for logging.
+	// Snapshot state before transition for logging. The reverse_engineering
+	// domain and reconcile round are captured here because the transition
+	// mutates them in place (e.g. RECONCILE_ADVANCE increments the domain).
 	prevState := string(s.State)
 	prevPhase := string(s.Phase)
+	reCtx := captureRELogContext(s)
 
 	err = state.Advance(s, in, projectRoot)
 	if err != nil {
@@ -101,7 +104,7 @@ func runAdvance(cmd *cobra.Command, args []string) error {
 	}
 
 	// Activity logging.
-	detail := buildAdvanceDetail(in)
+	detail := buildAdvanceDetail(in, reCtx)
 	logger := state.NewLogger(s.Config.Logs, s.StartedAtPhase, s.SessionID)
 	logger.Write(state.LogEntry{
 		TS:        state.LogNow(),
@@ -125,14 +128,54 @@ func runAdvance(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
-// buildAdvanceDetail builds the log detail map from advance flags.
-func buildAdvanceDetail(in state.AdvanceInput) map[string]interface{} {
+// reLogContext carries the reverse_engineering domain/round context captured
+// before a transition mutates the state. It is nil for other phases.
+type reLogContext struct {
+	domain          string
+	round           int
+	inReconcileEval bool
+}
+
+// captureRELogContext snapshots the current reverse_engineering domain and
+// reconcile round before an advance transition mutates them. It returns nil
+// when the session is not in the reverse_engineering phase, so the detail
+// builder leaves the domain/round fields off for other phases.
+func captureRELogContext(s *state.ForgeState) *reLogContext {
+	if s.Phase != state.PhaseReverseEngineering || s.ReverseEngineering == nil {
+		return nil
+	}
+	re := s.ReverseEngineering
+	ctx := &reLogContext{
+		round:           re.ReconcileRound,
+		inReconcileEval: s.State == state.StateReconcileEval,
+	}
+	// DomainIndex is 1-based; guard the bounds so an uninitialised or
+	// out-of-range index simply omits the domain rather than panicking.
+	if re.DomainIndex >= 1 && re.DomainIndex <= len(re.Domains) {
+		ctx.domain = re.Domains[re.DomainIndex-1]
+	}
+	return ctx
+}
+
+// buildAdvanceDetail builds the log detail map from advance flags and the
+// pre-advance state context. For reverse_engineering advances it adds the
+// current domain, and the reconcile round when advancing from RECONCILE_EVAL
+// (where a verdict is also present).
+func buildAdvanceDetail(in state.AdvanceInput, reCtx *reLogContext) map[string]interface{} {
 	detail := map[string]interface{}{}
 	if in.Verdict != "" {
 		detail["verdict"] = in.Verdict
 	}
 	if in.EvalReport != "" {
 		detail["eval_report"] = in.EvalReport
+	}
+	if reCtx != nil {
+		if reCtx.domain != "" {
+			detail["domain"] = reCtx.domain
+		}
+		if reCtx.inReconcileEval {
+			detail["round"] = reCtx.round
+		}
 	}
 	return detail
 }

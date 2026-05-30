@@ -1011,6 +1011,123 @@ func TestEvalCommandReverseEngineeringBlockedOutsideReconcileEval(t *testing.T) 
 	}
 }
 
+// Functional: advancing in the reverse_engineering phase appends a JSONL log
+// entry carrying the domain and reconcile round/verdict, written best-effort to
+// the reverse_engineering-prefixed session log file under ~/.forgectl/logs/.
+func TestAdvanceReverseEngineeringLogsDomainDetail(t *testing.T) {
+	dir := setupProjectDir(t)
+	// Redirect the home directory so the best-effort logger writes into the
+	// test sandbox rather than the developer's real ~/.forgectl/logs/.
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	re := state.NewReverseEngineeringState("auth refactor", []string{"optimizer", "api"})
+	re.DomainIndex = 1
+	re.ReconcileRound = 1
+	forgeState := &state.ForgeState{
+		Phase:              state.PhaseReverseEngineering,
+		State:              state.StateReconcileEval,
+		Config:             state.DefaultForgeConfig(),
+		SessionID:          "abcd1234efgh5678",
+		StartedAtPhase:     state.PhaseReverseEngineering,
+		ReverseEngineering: re,
+	}
+	setupSpecifyingState(t, dir, forgeState)
+
+	// Drive a real advance with a PASS verdict (terminal for the domain).
+	advanceVerdict = "PASS"
+	t.Cleanup(func() { advanceVerdict = "" })
+
+	var buf bytes.Buffer
+	rootCmd.SetOut(&buf)
+	if err := runAdvance(advanceCmd, nil); err != nil {
+		t.Fatalf("advance at RE RECONCILE_EVAL: %v", err)
+	}
+
+	// Log file is named with the started-at phase prefix and the session id prefix.
+	logPath := filepath.Join(home, ".forgectl", "logs", "reverse_engineering-abcd1234.jsonl")
+	data, err := os.ReadFile(logPath)
+	if err != nil {
+		t.Fatalf("reading log file %s: %v", logPath, err)
+	}
+	lines := strings.Split(strings.TrimSpace(string(data)), "\n")
+	var entry map[string]interface{}
+	if err := json.Unmarshal([]byte(lines[len(lines)-1]), &entry); err != nil {
+		t.Fatalf("invalid JSON log line: %v", err)
+	}
+
+	if entry["cmd"] != "advance" {
+		t.Errorf("cmd = %v, want advance", entry["cmd"])
+	}
+	if entry["phase"] != "reverse_engineering" {
+		t.Errorf("phase = %v, want reverse_engineering", entry["phase"])
+	}
+	if entry["prev_state"] != "RECONCILE_EVAL" {
+		t.Errorf("prev_state = %v, want RECONCILE_EVAL", entry["prev_state"])
+	}
+	detail, ok := entry["detail"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("detail missing or wrong type: %v", entry["detail"])
+	}
+	if detail["domain"] != "optimizer" {
+		t.Errorf("detail.domain = %v, want optimizer", detail["domain"])
+	}
+	if detail["round"] != float64(1) {
+		t.Errorf("detail.round = %v, want 1", detail["round"])
+	}
+	if detail["verdict"] != "PASS" {
+		t.Errorf("detail.verdict = %v, want PASS", detail["verdict"])
+	}
+}
+
+// Edge case: the RE log context guards the 1-based domain index and only
+// attaches the round in RECONCILE_EVAL — an out-of-range index omits the domain
+// (no panic) and a non-eval state omits the round, while non-RE phases yield no
+// RE context at all.
+func TestBuildAdvanceDetailReverseEngineeringContext(t *testing.T) {
+	// Non-RE phase: no RE context captured.
+	if ctx := captureRELogContext(&state.ForgeState{Phase: state.PhaseSpecifying}); ctx != nil {
+		t.Errorf("expected nil context for non-RE phase, got %+v", ctx)
+	}
+
+	re := state.NewReverseEngineeringState("c", []string{"optimizer", "api"})
+
+	// Out-of-range domain index omits the domain but still records the round
+	// only when in RECONCILE_EVAL.
+	re.DomainIndex = 0
+	re.ReconcileRound = 2
+	ctxReconcile := captureRELogContext(&state.ForgeState{
+		Phase:              state.PhaseReverseEngineering,
+		State:              state.StateReconcileEval,
+		ReverseEngineering: re,
+	})
+	detail := buildAdvanceDetail(state.AdvanceInput{Verdict: "FAIL"}, ctxReconcile)
+	if _, has := detail["domain"]; has {
+		t.Errorf("expected no domain for out-of-range index, got %v", detail["domain"])
+	}
+	if detail["round"] != 2 {
+		t.Errorf("detail.round = %v, want 2", detail["round"])
+	}
+	if detail["verdict"] != "FAIL" {
+		t.Errorf("detail.verdict = %v, want FAIL", detail["verdict"])
+	}
+
+	// Non-eval RE state: domain present, round omitted.
+	re.DomainIndex = 2
+	ctxSurvey := captureRELogContext(&state.ForgeState{
+		Phase:              state.PhaseReverseEngineering,
+		State:              state.StateSurvey,
+		ReverseEngineering: re,
+	})
+	detail = buildAdvanceDetail(state.AdvanceInput{}, ctxSurvey)
+	if detail["domain"] != "api" {
+		t.Errorf("detail.domain = %v, want api", detail["domain"])
+	}
+	if _, has := detail["round"]; has {
+		t.Errorf("expected no round outside RECONCILE_EVAL, got %v", detail["round"])
+	}
+}
+
 // --- validate command tests ---
 
 func writeValidSpecQueueFile(t *testing.T, dir string) string {

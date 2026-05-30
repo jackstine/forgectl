@@ -1309,8 +1309,13 @@ func advanceReverseEngineering(s *ForgeState, in AdvanceInput, dir string) error
 			return fmt.Errorf("reconcile domain index %d out of range", re.DomainIndex)
 		}
 
-		// Append the verdict to the current domain's reconcile history.
+		// Append the verdict to the current domain's reconcile history. The map
+		// is created lazily: it is declared with `omitempty`, so a freshly
+		// initialised state serialises without it and loads back as nil.
 		domain := re.Domains[re.DomainIndex-1]
+		if re.DomainReconcile == nil {
+			re.DomainReconcile = map[string]*ReconcileState{}
+		}
 		rec := re.DomainReconcile[domain]
 		if rec == nil {
 			rec = &ReconcileState{}
