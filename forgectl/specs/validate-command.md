@@ -227,8 +227,8 @@ For plan.json validation, relative paths in `refs[].path` and `items[].refs` are
 
 ### Plan path resolution for refs
 - **Verifies:** Relative paths in refs resolved from plan.json directory.
-- **Given:** plan.json in `launcher/.forge_workspace/implementation_plan/` with `refs[0].path: "notes/auth.md"`. File exists at `launcher/.forge_workspace/implementation_plan/notes/auth.md`.
-- **When:** `forgectl validate launcher/.forge_workspace/implementation_plan/plan.json`
+- **Given:** plan.json in `launcher/.forgectl_workspace/implementation_plan/` with `refs[0].path: "notes/auth.md"`. File exists at `launcher/.forgectl_workspace/implementation_plan/notes/auth.md`.
+- **When:** `forgectl validate launcher/.forgectl_workspace/implementation_plan/plan.json`
 - **Then:** Validation passes. Path resolved from plan.json directory.
 
 ---

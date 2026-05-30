@@ -117,7 +117,7 @@ State:   PHASE_SHIFT
 From:    planning → implementing
 Plan:    Service Configuration
 Domain:  launcher
-File:    launcher/.forge_workspace/implementation_plan/plan.json
+File:    launcher/.forgectl_workspace/implementation_plan/plan.json
 
 Stop and refresh your context, please.
 When ready, run: forgectl advance
@@ -208,7 +208,7 @@ On entry, the scaffold:
 2. For each domain, produce a plan entry:
    - `name`: `"<Domain> Implementation Plan"` (domain name capitalized).
    - `domain`: the domain name.
-   - `file`: `<domain>/.forge_workspace/implementation_plan/plan.json`.
+   - `file`: `<domain>/.forgectl_workspace/implementation_plan/plan.json`.
    - `specs`: all completed spec file paths for this domain.
    - `spec_commits`: deduplicated list of all `commit_hashes` from the domain's completed specs.
    - `code_search_roots`: from `specifying.domains[<domain>].code_search_roots` if set via `set-roots`, otherwise `["<domain>/"]`.
