@@ -30,6 +30,8 @@ func Advance(s *ForgeState, in AdvanceInput, dir string) error {
 		return advancePlanning(s, in, dir)
 	case PhaseImplementing:
 		return advanceImplementing(s, in, dir)
+	case PhaseReverseEngineering:
+		return advanceReverseEngineering(s, in, dir)
 	default:
 		return fmt.Errorf("unknown phase %q", s.Phase)
 	}
@@ -1221,6 +1223,101 @@ func checkEvalReportExists(path string) error {
 	if _, err := os.Stat(path); err != nil {
 		return fmt.Errorf("eval report %q does not exist", path)
 	}
+	return nil
+}
+
+// --- Reverse Engineering Phase ---
+
+// reverseEngineeringQueuePath returns the fixed convention path for the reverse
+// engineering queue file. forgectl owns this path; it is never user-supplied.
+func reverseEngineeringQueuePath(dir string) string {
+	return filepath.Join(dir, ".forgectl", "state", "reverse-engineering-queue.json")
+}
+
+func advanceReverseEngineering(s *ForgeState, in AdvanceInput, dir string) error {
+	re := s.ReverseEngineering
+	if re == nil {
+		return fmt.Errorf("reverse_engineering state is not initialized")
+	}
+
+	switch s.State {
+	case StateOrient:
+		// Begin the per-domain analysis loop on the first domain.
+		re.DomainIndex = 1
+		s.State = StateSurvey
+		return nil
+
+	case StateSurvey:
+		s.State = StateGapAnalysis
+		return nil
+
+	case StateGapAnalysis:
+		s.State = StateDecompose
+		return nil
+
+	case StateDecompose:
+		s.State = StateQueue
+		return nil
+
+	case StateQueue:
+		return advanceREQueue(s, in, dir)
+
+	default:
+		return fmt.Errorf("unexpected state %q in reverse_engineering phase", s.State)
+	}
+}
+
+// advanceREQueue handles the QUEUE state: it reads the fixed-path queue file,
+// detects changes by content hash, validates schema/domains/paths, parses the
+// queue, then transitions to the next domain's SURVEY or into the execution loop.
+func advanceREQueue(s *ForgeState, in AdvanceInput, dir string) error {
+	re := s.ReverseEngineering
+
+	if in.File != "" {
+		return fmt.Errorf("forgectl advance takes no --file flag in QUEUE. The queue file is fixed at .forgectl/state/reverse-engineering-queue.json.")
+	}
+
+	path := reverseEngineeringQueuePath(dir)
+	data, err := os.ReadFile(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return fmt.Errorf("reverse engineering queue file not found at expected path: %s", path)
+		}
+		return fmt.Errorf("reading queue file: %w", err)
+	}
+
+	hash := HashBytes(data)
+	if re.QueueContentHash != "" && hash == re.QueueContentHash {
+		return fmt.Errorf("Queue file has not changed. Update the file and retry.")
+	}
+
+	if violations := ValidateReverseEngineeringQueue(data, dir, re.Domains); len(violations) > 0 {
+		return &ValidationError{Errors: violations}
+	}
+
+	var input ReverseEngineeringQueueInput
+	if err := json.Unmarshal(data, &input); err != nil {
+		return fmt.Errorf("parsing queue file: %w", err)
+	}
+
+	// Record path + hash and the parsed (full, cross-domain) queue.
+	re.QueueFilePath = path
+	re.QueueContentHash = hash
+	re.Queue = input.Specs
+
+	// Advance to the next domain's SURVEY, or into the execution loop once every
+	// domain has been processed.
+	if re.DomainIndex < re.DomainCount {
+		re.DomainIndex++
+		s.State = StateSurvey
+		return nil
+	}
+
+	if len(re.Queue) == 0 {
+		return fmt.Errorf("Queue contains zero entries. Nothing to execute.")
+	}
+	re.ExecuteItemIndex = 1
+	s.State = StateExecuteReverseEngineer
 	return nil
 }
 

@@ -2416,3 +2416,161 @@ func advanceImplToCommit(t *testing.T, s *ForgeState, dir string) {
 		t.Fatalf("expected COMMIT, got %s", s.State)
 	}
 }
+
+// writeREQueue writes content to the fixed reverse engineering queue path.
+func writeREQueue(t *testing.T, dir, content string) {
+	t.Helper()
+	p := filepath.Join(dir, ".forgectl", "state")
+	if err := os.MkdirAll(p, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(p, "reverse-engineering-queue.json"), []byte(content), 0644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func newREState(t *testing.T, dir string, domains []string, state StateName) *ForgeState {
+	t.Helper()
+	return &ForgeState{
+		Phase:              PhaseReverseEngineering,
+		State:              state,
+		StartedAtPhase:     PhaseReverseEngineering,
+		ReverseEngineering: NewReverseEngineeringState("auth refactor", domains),
+	}
+}
+
+// Functional: the full per-domain analysis loop across two domains —
+// ORIENT→SURVEY→GAP_ANALYSIS→DECOMPOSE→QUEUE, QUEUE advancing to the next
+// domain, then into the execution loop after the last domain.
+func TestREAdvanceDomainLoop(t *testing.T) {
+	dir := buildREProject(t, map[string][]string{
+		"optimizer": {"src"},
+		"api":       {"handlers"},
+	})
+	s := newREState(t, dir, []string{"optimizer", "api"}, StateOrient)
+
+	for _, want := range []StateName{StateSurvey, StateGapAnalysis, StateDecompose, StateQueue} {
+		if err := Advance(s, AdvanceInput{}, dir); err != nil {
+			t.Fatalf("advance toward %s: %v", want, err)
+		}
+		if s.State != want {
+			t.Fatalf("state = %s, want %s", s.State, want)
+		}
+	}
+	if s.ReverseEngineering.DomainIndex != 1 {
+		t.Fatalf("domain index = %d, want 1 at first QUEUE", s.ReverseEngineering.DomainIndex)
+	}
+
+	// QUEUE for domain 1 (first advance): write a valid queue, expect transition
+	// to SURVEY for domain 2 with the hash + parsed queue recorded.
+	optEntry := `{"name":"Opt","domain":"optimizer","topic":"t","file":"specs/opt.md","action":"create","code_search_roots":["src/"],"depends_on":[]}`
+	writeREQueue(t, dir, `{"specs":[`+optEntry+`]}`)
+	if err := Advance(s, AdvanceInput{}, dir); err != nil {
+		t.Fatalf("QUEUE domain 1: %v", err)
+	}
+	if s.State != StateSurvey {
+		t.Fatalf("after QUEUE domain 1, state = %s, want SURVEY", s.State)
+	}
+	if s.ReverseEngineering.DomainIndex != 2 {
+		t.Errorf("domain index = %d, want 2", s.ReverseEngineering.DomainIndex)
+	}
+	if s.ReverseEngineering.QueueContentHash == "" {
+		t.Error("queue content hash should be recorded after first QUEUE advance")
+	}
+	if s.ReverseEngineering.QueueFilePath == "" {
+		t.Error("queue file path should be recorded")
+	}
+	if len(s.ReverseEngineering.Queue) != 1 {
+		t.Errorf("parsed queue len = %d, want 1", len(s.ReverseEngineering.Queue))
+	}
+
+	// Walk domain 2 to QUEUE.
+	for _, want := range []StateName{StateGapAnalysis, StateDecompose, StateQueue} {
+		if err := Advance(s, AdvanceInput{}, dir); err != nil {
+			t.Fatalf("domain 2 advance toward %s: %v", want, err)
+		}
+		if s.State != want {
+			t.Fatalf("domain 2 state = %s, want %s", s.State, want)
+		}
+	}
+
+	// Unchanged file → rejected (hash already stored).
+	if err := Advance(s, AdvanceInput{}, dir); err == nil {
+		t.Fatal("expected unchanged-queue error on domain 2 QUEUE")
+	}
+
+	// Update the file with both domains' entries → transition into execution loop.
+	apiEntry := `{"name":"Api","domain":"api","topic":"t","file":"specs/api.md","action":"create","code_search_roots":["handlers/"],"depends_on":["Opt"]}`
+	writeREQueue(t, dir, `{"specs":[`+optEntry+`,`+apiEntry+`]}`)
+	if err := Advance(s, AdvanceInput{}, dir); err != nil {
+		t.Fatalf("QUEUE domain 2 (updated): %v", err)
+	}
+	if s.State != StateExecuteReverseEngineer {
+		t.Fatalf("after last QUEUE, state = %s, want EXECUTE_REVERSE_ENGINEER", s.State)
+	}
+	if s.ReverseEngineering.ExecuteItemIndex != 1 {
+		t.Errorf("execute item index = %d, want 1", s.ReverseEngineering.ExecuteItemIndex)
+	}
+	if len(s.ReverseEngineering.Queue) != 2 {
+		t.Errorf("final queue len = %d, want 2", len(s.ReverseEngineering.Queue))
+	}
+}
+
+// Rejection: QUEUE rejects a --file flag, a missing queue file, and an invalid
+// queue (nonexistent code_search_roots).
+func TestREQueueRejections(t *testing.T) {
+	dir := buildREProject(t, map[string][]string{"optimizer": {"src"}})
+
+	// --file flag rejected.
+	s := newREState(t, dir, []string{"optimizer"}, StateQueue)
+	if err := Advance(s, AdvanceInput{File: "somewhere.json"}, dir); err == nil {
+		t.Error("expected error when --file is supplied in QUEUE")
+	} else if !strings.Contains(err.Error(), "takes no --file flag in QUEUE") {
+		t.Errorf("unexpected --file error: %v", err)
+	}
+
+	// Missing queue file.
+	s = newREState(t, dir, []string{"optimizer"}, StateQueue)
+	if err := Advance(s, AdvanceInput{}, dir); err == nil {
+		t.Error("expected error when queue file is missing")
+	} else if !strings.Contains(err.Error(), "not found at expected path") {
+		t.Errorf("unexpected missing-file error: %v", err)
+	}
+
+	// Invalid queue: code_search_roots directory does not exist.
+	s = newREState(t, dir, []string{"optimizer"}, StateQueue)
+	writeREQueue(t, dir, `{"specs":[{"name":"X","domain":"optimizer","topic":"t","file":"specs/x.md","action":"create","code_search_roots":["ghost/"],"depends_on":[]}]}`)
+	err := Advance(s, AdvanceInput{}, dir)
+	if err == nil {
+		t.Fatal("expected validation error for nonexistent code_search_roots")
+	}
+	if _, ok := err.(*ValidationError); !ok {
+		t.Errorf("expected *ValidationError, got %T: %v", err, err)
+	}
+	if s.State != StateQueue {
+		t.Errorf("state should stay QUEUE on validation failure, got %s", s.State)
+	}
+}
+
+// Edge case: on a subsequent QUEUE advance an unchanged file is rejected and the
+// state stays at QUEUE so the user can update and retry.
+func TestREQueueUnchangedHash(t *testing.T) {
+	dir := buildREProject(t, map[string][]string{"optimizer": {"src"}})
+	content := `{"specs":[{"name":"X","domain":"optimizer","topic":"t","file":"specs/x.md","action":"create","code_search_roots":["src/"],"depends_on":[]}]}`
+	writeREQueue(t, dir, content)
+
+	s := newREState(t, dir, []string{"optimizer"}, StateQueue)
+	// Pre-set the stored hash to simulate a prior domain's advance.
+	s.ReverseEngineering.QueueContentHash = HashBytes([]byte(content))
+
+	err := Advance(s, AdvanceInput{}, dir)
+	if err == nil {
+		t.Fatal("expected unchanged-queue error")
+	}
+	if !strings.Contains(err.Error(), "Queue file has not changed") {
+		t.Errorf("unexpected error: %v", err)
+	}
+	if s.State != StateQueue {
+		t.Errorf("state should stay QUEUE, got %s", s.State)
+	}
+}
