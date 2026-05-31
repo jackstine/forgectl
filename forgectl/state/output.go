@@ -10,6 +10,21 @@ import (
 	"forgectl/evaluators"
 )
 
+// CurrentEvalMode returns the effective eval mode for the phase the session is
+// currently in, selecting that phase's eval block and resolving it through
+// EvalModeFor (which honors the legacy enable_eval_output back-compat). Phases
+// without a standard eval block fall back to the implementing block.
+func (s *ForgeState) CurrentEvalMode() string {
+	switch s.Phase {
+	case PhaseSpecifying:
+		return EvalModeFor(s.Config.Specifying.Eval, s.Config.General)
+	case PhasePlanning:
+		return EvalModeFor(s.Config.Planning.Eval, s.Config.General)
+	default:
+		return EvalModeFor(s.Config.Implementing.Eval, s.Config.General)
+	}
+}
+
 // PrintAdvanceOutput prints the action description for the new state after advance.
 func PrintAdvanceOutput(w io.Writer, s *ForgeState, dir string) {
 	switch s.Phase {

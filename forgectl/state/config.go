@@ -402,6 +402,22 @@ func GenerateSessionID() string {
 		b[0:4], b[4:6], b[6:8], b[8:10], b[10:16])
 }
 
+// EvalModeFor returns the effective eval mode for the given eval block, honoring
+// back-compat with the legacy enable_eval_output boolean. An explicit eval_mode
+// always wins. For new sessions the default is "report" (seeded by
+// DefaultForgeConfig). For legacy sessions locked before eval_mode existed, an
+// empty eval_mode resolves to "report" when enable_eval_output was on, else
+// "conversational" — preserving the prior no-report behavior.
+func EvalModeFor(ec EvalConfig, gen GeneralConfig) string {
+	if ec.EvalMode != "" {
+		return ec.EvalMode
+	}
+	if ec.EnableEvalOutput || gen.EnableEvalOutput {
+		return "report"
+	}
+	return "conversational"
+}
+
 // ValidateConfig returns a list of constraint violations in cfg.
 func ValidateConfig(cfg ForgeConfig) []string {
 	var errs []string
@@ -422,6 +438,23 @@ func ValidateConfig(cfg ForgeConfig) []string {
 	}
 	if cfg.Implementing.CommitStrategy != "" && !validStrategies[cfg.Implementing.CommitStrategy] {
 		errs = append(errs, fmt.Sprintf("implementing.commit_strategy: invalid value %q", cfg.Implementing.CommitStrategy))
+	}
+
+	validEvalModes := map[string]bool{
+		"report":         true,
+		"direct":         true,
+		"conversational": true,
+	}
+
+	// An empty eval_mode is valid: the resolution helper supplies the back-compat default.
+	if cfg.Specifying.Eval.EvalMode != "" && !validEvalModes[cfg.Specifying.Eval.EvalMode] {
+		errs = append(errs, fmt.Sprintf("specifying.eval.eval_mode: invalid value %q", cfg.Specifying.Eval.EvalMode))
+	}
+	if cfg.Planning.Eval.EvalMode != "" && !validEvalModes[cfg.Planning.Eval.EvalMode] {
+		errs = append(errs, fmt.Sprintf("planning.eval.eval_mode: invalid value %q", cfg.Planning.Eval.EvalMode))
+	}
+	if cfg.Implementing.Eval.EvalMode != "" && !validEvalModes[cfg.Implementing.Eval.EvalMode] {
+		errs = append(errs, fmt.Sprintf("implementing.eval.eval_mode: invalid value %q", cfg.Implementing.Eval.EvalMode))
 	}
 
 	if cfg.Specifying.Batch < 1 {
