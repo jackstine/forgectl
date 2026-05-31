@@ -2003,6 +2003,91 @@ func TestFirstRoundImplementNoMessageRequiredWithoutEnableCommits(t *testing.T) 
 	}
 }
 
+// captureStderr runs fn with os.Stderr redirected to a pipe and returns what was written.
+func captureStderr(t *testing.T, fn func()) string {
+	t.Helper()
+	old := os.Stderr
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	os.Stderr = w
+	fn()
+	w.Close()
+	os.Stderr = old
+	var buf bytes.Buffer
+	if _, err := buf.ReadFrom(r); err != nil {
+		t.Fatal(err)
+	}
+	return buf.String()
+}
+
+// TestEvaluateReportModeRequiresEvalReport verifies that in report mode, advancing
+// from implementing EVALUATE with --verdict but no --eval-report is rejected.
+func TestEvaluateReportModeRequiresEvalReport(t *testing.T) {
+	dir := t.TempDir()
+	s := newImplementingState(dir, 1, 1)
+	s.Config.Implementing.Eval.EvalMode = "report"
+
+	advanceImplToEvaluate(t, s, dir)
+
+	err := Advance(s, AdvanceInput{Verdict: "PASS"}, dir)
+	if err == nil {
+		t.Fatal("expected error for missing --eval-report in report mode")
+	}
+	if !strings.Contains(err.Error(), "--eval-report is required in EVALUATE state") {
+		t.Errorf("unexpected error: %v", err)
+	}
+}
+
+// TestEvaluateReportModeRejectsMissingFile verifies that in report mode, an --eval-report
+// pointing at a non-existent file errors naming the path.
+func TestEvaluateReportModeRejectsMissingFile(t *testing.T) {
+	dir := t.TempDir()
+	s := newImplementingState(dir, 1, 1)
+	s.Config.Implementing.Eval.EvalMode = "report"
+
+	advanceImplToEvaluate(t, s, dir)
+
+	missing := filepath.Join(dir, "does-not-exist.md")
+	err := Advance(s, AdvanceInput{Verdict: "PASS", EvalReport: missing}, dir)
+	if err == nil {
+		t.Fatal("expected error for non-existent --eval-report file")
+	}
+	if !strings.Contains(err.Error(), missing) {
+		t.Errorf("error should name the path %q, got: %v", missing, err)
+	}
+}
+
+// TestEvaluateConversationalModeIgnoresEvalReport verifies that in a non-report mode,
+// a supplied --eval-report is accepted-but-ignored and the advance proceeds. The
+// ignore warning is emitted by the cmd layer, not the state transition, so the state
+// layer stays silent here (this is what keeps the warning from being printed twice).
+func TestEvaluateConversationalModeIgnoresEvalReport(t *testing.T) {
+	dir := t.TempDir()
+	s := newImplementingState(dir, 1, 1)
+	// EvalMode unset + EnableEvalOutput false → resolves to conversational.
+
+	advanceImplToEvaluate(t, s, dir)
+
+	evalFile := filepath.Join(dir, "eval.md")
+	os.WriteFile(evalFile, []byte("eval"), 0644)
+
+	var err error
+	stderr := captureStderr(t, func() {
+		err = Advance(s, AdvanceInput{Verdict: "PASS", EvalReport: evalFile}, dir)
+	})
+	if err != nil {
+		t.Fatalf("advance should proceed in conversational mode: %v", err)
+	}
+	if s.State != StateCommit {
+		t.Errorf("expected COMMIT, got %s", s.State)
+	}
+	if strings.Contains(stderr, "--eval-report is ignored") {
+		t.Errorf("state layer must not print the ignore warning (cmd layer owns it), got stderr: %q", stderr)
+	}
+}
+
 func TestEvaluatePassWithSufficientRoundsToCommit(t *testing.T) {
 	dir := t.TempDir()
 	s := newImplementingState(dir, 1, 1)

@@ -34,6 +34,8 @@ func runEval(cmd *cobra.Command, args []string) error {
 		return state.PrintReconcileEvalOutput(cmd.OutOrStdout(), s)
 	case s.Phase == state.PhaseSpecifying && s.State == state.StateCrossReferenceEval:
 		return state.PrintCrossRefEvalOutput(cmd.OutOrStdout(), s)
+	case s.Phase == state.PhaseSpecifying && s.State == state.StateEvaluate:
+		return state.PrintSpecEvalOutput(cmd.OutOrStdout(), s, projectRoot)
 	case s.Phase == state.PhasePlanning || s.Phase == state.PhaseImplementing:
 		return state.PrintEvalOutput(cmd.OutOrStdout(), s, projectRoot)
 	case s.Phase == state.PhaseReverseEngineering && s.State == state.StateReconcileEval:
