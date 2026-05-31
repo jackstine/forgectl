@@ -228,6 +228,109 @@ func TestValidateConfigBadStrategy(t *testing.T) {
 	}
 }
 
+// TestEvalModeForExplicit verifies an explicit eval_mode always wins over back-compat.
+func TestEvalModeForExplicit(t *testing.T) {
+	gen := GeneralConfig{}
+	for _, mode := range []string{"report", "direct", "conversational"} {
+		ec := EvalConfig{EvalMode: mode}
+		if got := EvalModeFor(ec, gen); got != mode {
+			t.Errorf("EvalModeFor explicit %q: got %q", mode, got)
+		}
+	}
+	// An explicit mode wins even when the legacy boolean would suggest otherwise.
+	ec := EvalConfig{EvalMode: "conversational", EnableEvalOutput: true}
+	if got := EvalModeFor(ec, GeneralConfig{EnableEvalOutput: true}); got != "conversational" {
+		t.Errorf("EvalModeFor explicit over legacy: got %q, want conversational", got)
+	}
+}
+
+// TestEvalModeForLegacyReport verifies empty eval_mode + enable_eval_output=true resolves to report.
+func TestEvalModeForLegacyReport(t *testing.T) {
+	if got := EvalModeFor(EvalConfig{EnableEvalOutput: true}, GeneralConfig{}); got != "report" {
+		t.Errorf("EvalModeFor legacy (eval block bool): got %q, want report", got)
+	}
+	if got := EvalModeFor(EvalConfig{}, GeneralConfig{EnableEvalOutput: true}); got != "report" {
+		t.Errorf("EvalModeFor legacy (general bool): got %q, want report", got)
+	}
+}
+
+// TestEvalModeForLegacyConversational verifies empty eval_mode + enable_eval_output=false
+// (a session locked before eval_mode existed) resolves to conversational.
+func TestEvalModeForLegacyConversational(t *testing.T) {
+	if got := EvalModeFor(EvalConfig{}, GeneralConfig{}); got != "conversational" {
+		t.Errorf("EvalModeFor legacy locked session: got %q, want conversational", got)
+	}
+}
+
+// TestCurrentEvalModeSelectsPhase verifies the ForgeState convenience method resolves
+// the eval mode of whichever phase the session is in.
+func TestCurrentEvalModeSelectsPhase(t *testing.T) {
+	s := &ForgeState{Config: DefaultForgeConfig()}
+	s.Config.Specifying.Eval.EvalMode = "direct"
+	s.Config.Planning.Eval.EvalMode = "conversational"
+	s.Config.Implementing.Eval.EvalMode = "report"
+
+	cases := map[PhaseName]string{
+		PhaseSpecifying:   "direct",
+		PhasePlanning:     "conversational",
+		PhaseImplementing: "report",
+	}
+	for phase, want := range cases {
+		s.Phase = phase
+		if got := s.CurrentEvalMode(); got != want {
+			t.Errorf("CurrentEvalMode in %s: got %q, want %q", phase, got, want)
+		}
+	}
+}
+
+// TestValidateConfigEvalModeValid verifies report/direct/conversational pass validation.
+func TestValidateConfigEvalModeValid(t *testing.T) {
+	for _, mode := range []string{"report", "direct", "conversational"} {
+		cfg := DefaultForgeConfig()
+		cfg.Specifying.Eval.EvalMode = mode
+		cfg.Planning.Eval.EvalMode = mode
+		cfg.Implementing.Eval.EvalMode = mode
+		errs := ValidateConfig(cfg)
+		for _, e := range errs {
+			if strings.Contains(e, "eval_mode") {
+				t.Errorf("mode %q: unexpected eval_mode violation: %s", mode, e)
+			}
+		}
+	}
+}
+
+// TestValidateConfigEvalModeInvalid verifies a value outside the set is rejected,
+// and the violation names the offending phase.
+func TestValidateConfigEvalModeInvalid(t *testing.T) {
+	cfg := DefaultForgeConfig()
+	cfg.Implementing.Eval.EvalMode = "verbose"
+	errs := ValidateConfig(cfg)
+	found := false
+	for _, e := range errs {
+		if strings.Contains(e, "implementing.eval.eval_mode: invalid value") && strings.Contains(e, "verbose") {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("expected implementing.eval.eval_mode invalid-value violation, got: %v", errs)
+	}
+}
+
+// TestValidateConfigEvalModeEmpty verifies an empty eval_mode is accepted (the
+// resolution helper supplies the back-compat default).
+func TestValidateConfigEvalModeEmpty(t *testing.T) {
+	cfg := DefaultForgeConfig()
+	cfg.Specifying.Eval.EvalMode = ""
+	cfg.Planning.Eval.EvalMode = ""
+	cfg.Implementing.Eval.EvalMode = ""
+	errs := ValidateConfig(cfg)
+	for _, e := range errs {
+		if strings.Contains(e, "eval_mode") {
+			t.Errorf("empty eval_mode should not produce a violation, got: %s", e)
+		}
+	}
+}
+
 // TestValidateConfigMinExceedsMax verifies min_rounds <= max_rounds constraint.
 func TestValidateConfigMinExceedsMax(t *testing.T) {
 	cfg := DefaultForgeConfig()
