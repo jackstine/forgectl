@@ -1,0 +1,486 @@
+{
+  "context": {
+    "domain": "forgectl",
+    "module": "forgectl"
+  },
+  "refs": [
+    {
+      "id": "spec-plan-production",
+      "path": "../../../specs/plan-production.md"
+    },
+    {
+      "id": "spec-batch-implementation",
+      "path": "../../../specs/batch-implementation.md"
+    },
+    {
+      "id": "spec-spec-lifecycle",
+      "path": "../../../specs/spec-lifecycle.md"
+    },
+    {
+      "id": "spec-spec-reconciliation",
+      "path": "../../../specs/spec-reconciliation.md"
+    },
+    {
+      "id": "spec-phase-transitions",
+      "path": "../../../specs/phase-transitions.md"
+    },
+    {
+      "id": "notes-overview",
+      "path": "notes/eval-mode-overview.md"
+    },
+    {
+      "id": "notes-state",
+      "path": "notes/state-package.md"
+    },
+    {
+      "id": "notes-cmd",
+      "path": "notes/cmd-package.md"
+    },
+    {
+      "id": "notes-testing",
+      "path": "notes/testing.md"
+    }
+  ],
+  "layers": [
+    {
+      "id": "L0",
+      "name": "Config foundation",
+      "items": [
+        "evalmode.config"
+      ]
+    },
+    {
+      "id": "L1",
+      "name": "Config derivation (validate + resolve)",
+      "items": [
+        "evalmode.validate",
+        "evalmode.resolve"
+      ]
+    },
+    {
+      "id": "L2",
+      "name": "Behavior keyed on eval_mode",
+      "items": [
+        "evalmode.advance-gate",
+        "evalmode.cmd-warnings",
+        "evalmode.spec-eval-output",
+        "evalmode.action-evaluate",
+        "evalmode.action-refine"
+      ]
+    },
+    {
+      "id": "L3",
+      "name": "Eval-context output composition",
+      "items": [
+        "evalmode.eval-output-modes"
+      ]
+    }
+  ],
+  "items": [
+    {
+      "id": "evalmode.config",
+      "name": "Add eval_mode to EvalConfig (type, TOML, merge, default)",
+      "description": "Introduce the three-valued eval_mode config on each phase's eval block so behavior can be driven by mode instead of the enable_eval_output boolean. This is the foundation every other item reads.",
+      "depends_on": [],
+      "steps": [
+        "Add field `EvalMode string `json:\"eval_mode\"`` to EvalConfig in state/types.go (values: report|direct|conversational).",
+        "Add `EvalMode *string `toml:\"eval_mode\"`` to tomlEvalConfig in state/config.go (pointer so 'unset' is distinguishable).",
+        "In mergeEvalConfig, apply `if src.EvalMode != nil { dst.EvalMode = *src.EvalMode }`.",
+        "In DefaultForgeConfig, seed `EvalMode: \"report\"` on Specifying.Eval, Planning.Eval, and Implementing.Eval (mirror existing default-seeding pattern).",
+        "Leave EnableEvalOutput in place for back-compat; do not remove it (state-persistence schema is out of scope for this plan)."
+      ],
+      "files": [
+        "forgectl/state/types.go",
+        "forgectl/state/config.go"
+      ],
+      "specs": [
+        "plan-production.md#behavior-evaluate-phase",
+        "spec-lifecycle.md#behavior-eval-mode",
+        "batch-implementation.md#evaluate-behavior"
+      ],
+      "refs": [
+        "notes/state-package.md",
+        "notes/eval-mode-overview.md"
+      ],
+      "tests": [
+        {
+          "category": "functional",
+          "description": "DefaultForgeConfig seeds eval_mode=\"report\" on specifying.eval, planning.eval, and implementing.eval.",
+          "passes": false
+        },
+        {
+          "category": "functional",
+          "description": "A [\u003cphase\u003e.eval] TOML block with eval_mode=\"direct\" overrides the default and is locked into the state file at init.",
+          "passes": false
+        },
+        {
+          "category": "edge_case",
+          "description": "Omitting eval_mode in TOML leaves the default value (pointer-nil source does not zero the destination).",
+          "passes": false
+        }
+      ],
+      "passes": "passed",
+      "rounds": 1
+    },
+    {
+      "id": "evalmode.validate",
+      "name": "Validate eval_mode values in ValidateConfig",
+      "description": "Reject configs whose eval_mode is not one of report|direct|conversational, mirroring the commit_strategy validation pattern, so bad config is caught at init.",
+      "depends_on": [
+        "evalmode.config"
+      ],
+      "steps": [
+        "In ValidateConfig (state/config.go), define the valid set {report, direct, conversational}.",
+        "For each of specifying.eval, planning.eval, implementing.eval: if eval_mode != \"\" and not in the set, append `\"\u003cphase\u003e.eval.eval_mode: invalid value %q\"`.",
+        "Treat empty eval_mode as valid (the resolution helper supplies the back-compat default)."
+      ],
+      "files": [
+        "forgectl/state/config.go"
+      ],
+      "specs": [
+        "spec-lifecycle.md#behavior-eval-mode"
+      ],
+      "refs": [
+        "notes/state-package.md"
+      ],
+      "tests": [
+        {
+          "category": "functional",
+          "description": "ValidateConfig returns no violation for eval_mode values report, direct, and conversational.",
+          "passes": false
+        },
+        {
+          "category": "rejection",
+          "description": "ValidateConfig reports a violation for eval_mode=\"verbose\" (or any value outside the set) naming the phase.",
+          "passes": false
+        },
+        {
+          "category": "edge_case",
+          "description": "ValidateConfig accepts an empty eval_mode without violation.",
+          "passes": false
+        }
+      ],
+      "passes": "pending"
+    },
+    {
+      "id": "evalmode.resolve",
+      "name": "EvalModeFor resolution helper with back-compat",
+      "description": "Single source of truth for the effective eval mode, honoring legacy enable_eval_output so already-locked sessions keep their current behavior. Used by advance gating and all output rendering.",
+      "depends_on": [
+        "evalmode.config"
+      ],
+      "steps": [
+        "Add `func EvalModeFor(ec EvalConfig, gen GeneralConfig) string` to the state package: return ec.EvalMode if non-empty; else \"report\" when ec.EnableEvalOutput || gen.EnableEvalOutput; else \"conversational\".",
+        "Add a ForgeState convenience method that selects the current phase's eval block (specifying/planning/implementing) and returns EvalModeFor for it.",
+        "Document that report is the default for new sessions and conversational preserves legacy enable_eval_output:false behavior."
+      ],
+      "files": [
+        "forgectl/state/config.go",
+        "forgectl/state/output.go"
+      ],
+      "specs": [
+        "spec-lifecycle.md#behavior-eval-mode"
+      ],
+      "refs": [
+        "notes/state-package.md",
+        "notes/eval-mode-overview.md"
+      ],
+      "tests": [
+        {
+          "category": "functional",
+          "description": "EvalModeFor returns the explicit eval_mode when set (report/direct/conversational).",
+          "passes": false
+        },
+        {
+          "category": "functional",
+          "description": "With empty eval_mode and enable_eval_output=true, EvalModeFor returns \"report\".",
+          "passes": false
+        },
+        {
+          "category": "edge_case",
+          "description": "With empty eval_mode and enable_eval_output=false (legacy locked session), EvalModeFor returns \"conversational\".",
+          "passes": false
+        }
+      ],
+      "passes": "pending"
+    },
+    {
+      "id": "evalmode.advance-gate",
+      "name": "Gate --eval-report on eval_mode in advance transitions",
+      "description": "Replace the enable_eval_output gating of --eval-report with eval_mode==\"report\" in EVALUATE, CROSS_REFERENCE_EVAL, and RECONCILE_EVAL, and emit the spec-worded ignore warning for non-report modes.",
+      "depends_on": [
+        "evalmode.resolve"
+      ],
+      "steps": [
+        "In state/advance.go EVALUATE handling (~91-115), resolve mode via EvalModeFor. When report and EvalReport==\"\", error `--eval-report is required in EVALUATE state`. When mode != report and EvalReport != \"\", warn `--eval-report is ignored, --eval-report is only used in report mode`.",
+        "Apply the same change to CROSS_REFERENCE_EVAL (~187-211) and RECONCILE_EVAL (~245) handlers, with state-named required errors.",
+        "Keep `checkEvalReportExists` for report paths supplied in report mode; keep the always-required --verdict check unchanged."
+      ],
+      "files": [
+        "forgectl/state/advance.go"
+      ],
+      "specs": [
+        "plan-production.md#rejection",
+        "spec-lifecycle.md#rejection",
+        "batch-implementation.md#rejection",
+        "spec-reconciliation.md#rejection"
+      ],
+      "refs": [
+        "notes/state-package.md"
+      ],
+      "tests": [
+        {
+          "category": "functional",
+          "description": "In report mode, advancing from EVALUATE with --verdict but no --eval-report errors with exit code 1.",
+          "passes": false
+        },
+        {
+          "category": "rejection",
+          "description": "In report mode, --eval-report pointing to a non-existent file errors naming the path.",
+          "passes": false
+        },
+        {
+          "category": "edge_case",
+          "description": "In direct/conversational mode, --eval-report is accepted-but-ignored with warning `--eval-report is ignored, --eval-report is only used in report mode` and the advance proceeds.",
+          "passes": false
+        }
+      ],
+      "passes": "pending"
+    },
+    {
+      "id": "evalmode.cmd-warnings",
+      "name": "Align cmd-layer advance warnings to spec wording",
+      "description": "Make the cmd/advance.go pre-advance warnings consistent with the eval_mode gating and the exact spec wording, without double-printing the state-layer warning.",
+      "depends_on": [
+        "evalmode.resolve"
+      ],
+      "steps": [
+        "In printAdvanceWarnings (cmd/advance.go), resolve the current phase eval_mode via EvalModeFor instead of branching on EnableEvalOutput; ensure the --eval-report warning is emitted in exactly one layer (state vs cmd) to avoid duplicate output.",
+        "Add CROSS_REFERENCE_EVAL to the warning's `evalStates` map (advance.go:234-237 currently lists only EVALUATE and RECONCILE_EVAL), so the `--eval-report is ignored ...` warning fires for cross-reference eval too.",
+        "Change the --message warning string to `--message is ignored, commits are not enabled` (keep the COMPLETE/ACCEPT/IMPLEMENT/COMMIT gate and !EnableCommits condition).",
+        "Confirm the warning text does not instruct how to enable commits (per spec invariants)."
+      ],
+      "files": [
+        "forgectl/cmd/advance.go"
+      ],
+      "specs": [
+        "plan-production.md#edge-cases",
+        "spec-lifecycle.md#rejection",
+        "batch-implementation.md#invariants",
+        "spec-reconciliation.md#edge-cases"
+      ],
+      "refs": [
+        "notes/cmd-package.md"
+      ],
+      "tests": [
+        {
+          "category": "functional",
+          "description": "advance --message with enable_commits=false at COMMIT prints `--message is ignored, commits are not enabled` and proceeds.",
+          "passes": false
+        },
+        {
+          "category": "functional",
+          "description": "advance --eval-report in CROSS_REFERENCE_EVAL in a non-report mode prints the spec-worded ignore warning.",
+          "passes": false
+        },
+        {
+          "category": "edge_case",
+          "description": "The --eval-report ignore warning is printed exactly once (not duplicated by both cmd and state layers).",
+          "passes": false
+        }
+      ],
+      "passes": "pending"
+    },
+    {
+      "id": "evalmode.spec-eval-output",
+      "name": "Add specifying EVALUATE eval output (PrintSpecEvalOutput)",
+      "description": "Fix the gap where `forgectl eval` in specifying EVALUATE falls through to the default error: add the routing case and a PrintSpecEvalOutput that embeds evaluators.SpecEval (currently embedded-but-unused).",
+      "depends_on": [
+        "evalmode.resolve"
+      ],
+      "steps": [
+        "Add `func PrintSpecEvalOutput(w io.Writer, s *ForgeState, projectRoot string) error` to state/output.go: print `=== SPEC EVALUATION ROUND n/m ===`, Domain/Batch header, `--- EVALUATOR INSTRUCTIONS ---` with evaluators.SpecEval, and `--- SPECS TO EVALUATE ---` listing the batch spec filenames, topics, and full file paths.",
+        "Add the routing case to cmd/eval.go before the planning/implementing case: `case s.Phase == state.PhaseSpecifying \u0026\u0026 s.State == state.StateEvaluate: return state.PrintSpecEvalOutput(...)`.",
+        "Defer the per-mode REPORT OUTPUT / PREVIOUS EVALUATIONS sections to evalmode.eval-output-modes (this item establishes the function and routing)."
+      ],
+      "files": [
+        "forgectl/state/output.go",
+        "forgectl/cmd/eval.go"
+      ],
+      "specs": [
+        "spec-lifecycle.md#eval-output-specifying-evaluate",
+        "spec-lifecycle.md#testing-criteria"
+      ],
+      "refs": [
+        "notes/cmd-package.md",
+        "notes/state-package.md"
+      ],
+      "tests": [
+        {
+          "category": "functional",
+          "description": "`forgectl eval` in specifying EVALUATE prints `=== SPEC EVALUATION ROUND` with evaluators.SpecEval contents and the batch spec list.",
+          "passes": false
+        },
+        {
+          "category": "rejection",
+          "description": "`forgectl eval` outside an eval state still errors naming the current state (no regression to the default branch).",
+          "passes": false
+        }
+      ],
+      "passes": "pending"
+    },
+    {
+      "id": "evalmode.action-evaluate",
+      "name": "Per-mode action and status text for all eval-entry states",
+      "description": "Render the advance/status Action line according to eval_mode for every state that enters an evaluation: EVALUATE (specifying/planning/implementing), CROSS_REFERENCE_EVAL, and RECONCILE_EVAL — matching the report/direct/conversational variants in the specs.",
+      "depends_on": [
+        "evalmode.resolve"
+      ],
+      "steps": [
+        "In state/output.go EVALUATE rendering (specifying ~98-117, planning ~490-503, implementing ~840-870), branch on the resolved eval_mode.",
+        "report: action ends with `advance with --verdict PASS|FAIL --eval-report \u003cpath\u003e`.",
+        "direct: action says spawn a sub-agent to `evaluate and correct`, note `\u003cspec|batch|plan\u003e files have been staged. Sub-agent makes corrections directly.`, and ends with `advance with --verdict PASS|FAIL`.",
+        "conversational: action ends with `advance with --verdict PASS|FAIL` (no report path, no staged-files note).",
+        "Apply the SAME three-mode branch to the action text for ENTERING CROSS_REFERENCE_EVAL (spec-lifecycle.md 299-340) and ENTERING RECONCILE_EVAL (spec-reconciliation.md 65-97): report keeps `--eval-report \u003cpath\u003e`; direct uses the `evaluate and correct ... files have been staged` wording and drops `--eval-report`; conversational drops the report path. These two states render single-form today (output.go ~193-209 and the reconcile-eval renderer) and must be migrated too.",
+        "Apply the per-mode branch to the compact `status` output for all of these states."
+      ],
+      "files": [
+        "forgectl/state/output.go"
+      ],
+      "specs": [
+        "plan-production.md#interface-outputs",
+        "spec-lifecycle.md#interface-outputs",
+        "spec-reconciliation.md#interface-outputs",
+        "batch-implementation.md#interface-outputs"
+      ],
+      "refs": [
+        "notes/state-package.md",
+        "notes/eval-mode-overview.md"
+      ],
+      "tests": [
+        {
+          "category": "functional",
+          "description": "Planning EVALUATE in report mode renders an action ending with `--eval-report \u003cpath\u003e`; in conversational mode it ends with `--verdict PASS|FAIL` and no report path.",
+          "passes": false
+        },
+        {
+          "category": "functional",
+          "description": "Implementing EVALUATE in direct mode renders `evaluate and correct` plus the staged-files note.",
+          "passes": false
+        },
+        {
+          "category": "functional",
+          "description": "Entering CROSS_REFERENCE_EVAL and RECONCILE_EVAL renders the matching per-mode action text (report includes `--eval-report \u003cpath\u003e`; direct includes the staged-files/`evaluate and correct` note; conversational has neither).",
+          "passes": false
+        },
+        {
+          "category": "edge_case",
+          "description": "status output for an eval-entry state matches the same per-mode variant as advance.",
+          "passes": false
+        }
+      ],
+      "passes": "pending"
+    },
+    {
+      "id": "evalmode.action-refine",
+      "name": "Per-mode REFINE and IMPLEMENT re-entry action text",
+      "description": "Extend the existing 2-way (report/conversational) REFINE branching to 3-way on eval_mode, add the direct arm, and cover specifying REFINE and the implementing IMPLEMENT after-eval re-entry text.",
+      "depends_on": [
+        "evalmode.resolve"
+      ],
+      "steps": [
+        "In state/output.go REFINE rendering (planning ~516, implementing ~822), switch from EnableEvalOutput to the resolved eval_mode with three arms: report -\u003e `Study the eval file %q and implement any corrections as needed.`; direct -\u003e `Review unstaged changes from the evaluator (git diff). Accept, revise, or revert corrections as needed.`; conversational -\u003e `Make corrections based off communication with the evaluator.`",
+        "Add the same 3-way branch to specifying REFINE rendering.",
+        "Apply the same three arms to the implementing IMPLEMENT after-eval re-entry action text (batch-implementation.md rounds 2+).",
+        "Preserve the shared `Apply \"fresh\" eyes and a tightened lens ...` line on all arms where the specs include it."
+      ],
+      "files": [
+        "forgectl/state/output.go"
+      ],
+      "specs": [
+        "plan-production.md#interface-outputs",
+        "spec-lifecycle.md#interface-outputs",
+        "batch-implementation.md#interface-outputs"
+      ],
+      "refs": [
+        "notes/state-package.md",
+        "notes/eval-mode-overview.md"
+      ],
+      "tests": [
+        {
+          "category": "functional",
+          "description": "Planning REFINE in direct mode renders `Review unstaged changes from the evaluator (git diff).`",
+          "passes": false
+        },
+        {
+          "category": "functional",
+          "description": "Specifying REFINE in conversational mode renders `Make corrections based off communication with the evaluator.`",
+          "passes": false
+        },
+        {
+          "category": "functional",
+          "description": "Implementing IMPLEMENT after-eval re-entry in report mode renders `Study the eval file`.",
+          "passes": false
+        }
+      ],
+      "passes": "pending"
+    },
+    {
+      "id": "evalmode.eval-output-modes",
+      "name": "Per-mode REPORT OUTPUT and PREVIOUS EVALUATIONS in all eval-context output",
+      "description": "Make every eval-context output function render the REPORT OUTPUT and PREVIOUS EVALUATIONS sections according to eval_mode, and backfill the previous-evaluations section where it is currently missing.",
+      "depends_on": [
+        "evalmode.resolve",
+        "evalmode.spec-eval-output"
+      ],
+      "steps": [
+        "Across PrintEvalOutput (planning + implementing), PrintReconcileEvalOutput, PrintCrossRefEvalOutput, and PrintSpecEvalOutput, branch the trailing sections on the resolved eval_mode.",
+        "report: `--- REPORT OUTPUT ---` with `Write your evaluation report to:\\n  \u003cpath\u003e`; `--- PREVIOUS EVALUATIONS ---` listing prior rounds with verdict and report path.",
+        "direct: `--- REPORT OUTPUT ---` with `Make corrections directly to the \u003cspec|batch|plan\u003e files.`; `--- PREVIOUS EVALUATIONS ---` listing prior rounds with verdict and `(direct corrections)`.",
+        "conversational: omit both `--- REPORT OUTPUT ---` and `--- PREVIOUS EVALUATIONS ---`.",
+        "Add the PREVIOUS EVALUATIONS section to PrintReconcileEvalOutput and PrintCrossRefEvalOutput where it is currently absent."
+      ],
+      "files": [
+        "forgectl/state/output.go"
+      ],
+      "specs": [
+        "plan-production.md#eval-output",
+        "spec-lifecycle.md#eval-output-specifying-evaluate",
+        "spec-reconciliation.md#eval-output-reconcile-eval",
+        "batch-implementation.md#eval-output"
+      ],
+      "refs": [
+        "notes/state-package.md",
+        "notes/eval-mode-overview.md"
+      ],
+      "tests": [
+        {
+          "category": "functional",
+          "description": "Planning eval output in report mode includes `--- REPORT OUTPUT ---` with `Write your evaluation report to:` and a PREVIOUS EVALUATIONS section on round 2+.",
+          "passes": false
+        },
+        {
+          "category": "functional",
+          "description": "Eval output in direct mode includes `Make corrections directly to the plan files.` (and the batch/spec variants for implementing/specifying).",
+          "passes": false
+        },
+        {
+          "category": "edge_case",
+          "description": "Eval output in conversational mode omits both REPORT OUTPUT and PREVIOUS EVALUATIONS sections.",
+          "passes": false
+        },
+        {
+          "category": "functional",
+          "description": "Reconcile and cross-reference eval output in report mode include a PREVIOUS EVALUATIONS section on round 2+.",
+          "passes": false
+        },
+        {
+          "category": "functional",
+          "description": "Reconcile and cross-reference eval output in direct mode render prior rounds as `(direct corrections)` in PREVIOUS EVALUATIONS on round 2+.",
+          "passes": false
+        }
+      ],
+      "passes": "pending"
+    }
+  ]
+}
