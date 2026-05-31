@@ -18,14 +18,21 @@ Each spawn point is configured with three fields:
 - `type` — the role of the sub-agent at this spawn point: `"eval"` (evaluate output and render a verdict), `"explore"` (read and search code or specs), or `"refine"` (apply corrections based on eval findings).
 - `count` — how many sub-agents to spawn in parallel at this point.
 
-## Effect of `enable_eval_output`
+## Effect of `eval_mode`
 
-`enable_eval_output` affects what the spawn instructions include for eval spawn points in the planning and implementing phases:
+Each eval block's `eval_mode` (`specifying.eval`, `planning.eval`, `implementing.eval`) shapes what the spawn instructions tell the sub-agent to produce and which flags `advance` takes:
 
-- When `enable_eval_output: true`: spawn instructions tell the sub-agent to write a report to a specific path, and `advance` requires `--eval-report <path>`.
-- When `enable_eval_output: false`: spawn instructions omit the report path. The sub-agent communicates its verdict verbally to the architect; no file is written.
+- `eval_mode: "report"` (default for new sessions): spawn instructions tell the sub-agent to write a report to a specific path, and `advance` requires `--eval-report <path>`.
+- `eval_mode: "direct"`: the sub-agent edits the implementation/spec/plan files in place (corrections land as unstaged changes); `advance` takes only `--verdict`.
+- `eval_mode: "conversational"`: spawn instructions omit the report path; the sub-agent relays its verdict verbally and `advance` takes only `--verdict`.
 
-The specifying phase always requires `--eval-report` and is not affected by `enable_eval_output`.
+`--eval-report` is accepted only in `report` mode; in the other modes it is ignored with a warning.
+
+The reconciliation (`RECONCILE_EVAL`) and cross-reference (`CROSS_REFERENCE_EVAL`) eval spawn points inherit the mode from `specifying.eval`. In `direct` mode, reconciliation works on staged changes, so it omits the report-output instruction.
+
+### Back-compat
+
+`eval_mode` supersedes the legacy `enable_eval_output` boolean. When `eval_mode` is empty, it resolves via `enable_eval_output` (per-eval or `[general]`): `true` → `"report"`, `false` → `"conversational"`. An explicit `eval_mode` always wins.
 
 ## Spawn Points
 

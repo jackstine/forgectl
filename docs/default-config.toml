@@ -39,7 +39,13 @@ type = "eval"
 model = "opus"
 # Number of sub-agents to spawn for evaluation.
 count = 1
-# When true, eval sub-agents write report files to disk.
+# How eval findings are recorded and applied:
+#   "report"         — sub-agent writes a report file; advance takes --eval-report.
+#   "direct"         — sub-agent edits the files in place (unstaged changes).
+#   "conversational" — sub-agent relays its verdict verbally; no file written.
+eval_mode = "report"
+# Legacy/back-compat, superseded by eval_mode. Only consulted when eval_mode is
+# empty: true resolves to "report", false resolves to "conversational".
 enable_eval_output = false
 
 [specifying.cross_reference]
@@ -120,7 +126,13 @@ type = "eval"
 model = "opus"
 # Number of sub-agents to spawn for plan evaluation.
 count = 1
-# When true, eval sub-agents write report files to disk.
+# How eval findings are recorded and applied:
+#   "report"         — sub-agent writes a report file; advance takes --eval-report.
+#   "direct"         — sub-agent edits the files in place (unstaged changes).
+#   "conversational" — sub-agent relays its verdict verbally; no file written.
+eval_mode = "report"
+# Legacy/back-compat, superseded by eval_mode. Only consulted when eval_mode is
+# empty: true resolves to "report", false resolves to "conversational".
 enable_eval_output = false
 
 [planning.refine]
@@ -153,7 +165,13 @@ type = "eval"
 model = "opus"
 # Number of sub-agents to spawn for implementation evaluation.
 count = 1
-# When true, eval sub-agents write report files to disk.
+# How eval findings are recorded and applied:
+#   "report"         — sub-agent writes a report file; advance takes --eval-report.
+#   "direct"         — sub-agent edits the files in place (unstaged changes).
+#   "conversational" — sub-agent relays its verdict verbally; no file written.
+eval_mode = "report"
+# Legacy/back-compat, superseded by eval_mode. Only consulted when eval_mode is
+# empty: true resolves to "report", false resolves to "conversational".
 enable_eval_output = false
 
 # --- Paths ---
