@@ -833,6 +833,241 @@ func TestRefineActionConversationalMode(t *testing.T) {
 	}
 }
 
+// crossRefEvalState builds a CROSS_REFERENCE_EVAL state at the given round with
+// prior evals, eval_mode resolved from specifying.eval.
+func crossRefEvalState(mode string, round int, evals []EvalRecord) *ForgeState {
+	return &ForgeState{
+		Phase: PhaseSpecifying,
+		State: StateCrossReferenceEval,
+		Config: ForgeConfig{
+			Specifying: SpecifyingConfig{
+				Eval:           EvalConfig{MinRounds: 1, MaxRounds: 3, EvalMode: mode},
+				CrossReference: CrossRefConfig{MinRounds: 1, MaxRounds: 2},
+			},
+		},
+		Specifying: &SpecifyingState{
+			CurrentDomain:  "optimizer",
+			CrossReference: map[string]*CrossReferenceState{"optimizer": {Domain: "optimizer", Round: round, Evals: evals}},
+			Completed:      []CompletedSpec{{ID: 1, Name: "a", Domain: "optimizer", File: "optimizer/specs/a.md"}},
+		},
+	}
+}
+
+// reconcileEvalState builds a RECONCILE_EVAL state at the given round with prior
+// evals, eval_mode resolved from specifying.eval.
+func reconcileEvalState(mode string, round int, evals []EvalRecord) *ForgeState {
+	return &ForgeState{
+		Phase: PhaseSpecifying,
+		State: StateReconcileEval,
+		Config: ForgeConfig{
+			Specifying: SpecifyingConfig{
+				Eval:           EvalConfig{MinRounds: 1, MaxRounds: 3, EvalMode: mode},
+				Reconciliation: ReconciliationConfig{MinRounds: 0, MaxRounds: 3},
+			},
+		},
+		Specifying: &SpecifyingState{
+			Reconcile: &ReconcileState{Round: round, Evals: evals},
+			Completed: []CompletedSpec{{ID: 1, Name: "a", Domain: "optimizer", File: "optimizer/specs/a.md"}},
+		},
+	}
+}
+
+// TestEvalContextReportModeSections verifies report-mode REPORT OUTPUT (with the
+// report path) and PREVIOUS EVALUATIONS (with prior report paths) across the
+// planning, specifying, cross-reference, and reconciliation eval-context output.
+func TestEvalContextReportModeSections(t *testing.T) {
+	// Planning round 2 with a prior FAIL report.
+	ps := planEvaluateState("report", "opus")
+	ps.Planning.Round = 2
+	ps.Planning.Evals = []EvalRecord{{Round: 1, Verdict: "FAIL", EvalReport: "launcher/evals/round-1.md"}}
+	var pb bytes.Buffer
+	if err := PrintEvalOutput(&pb, ps, "."); err != nil {
+		t.Fatalf("planning eval: %v", err)
+	}
+	p := pb.String()
+	if !strings.Contains(p, "--- PREVIOUS EVALUATIONS ---") || !strings.Contains(p, "Round 1: FAIL — launcher/evals/round-1.md") {
+		t.Errorf("planning report previous-evals missing, got:\n%s", p)
+	}
+	if !strings.Contains(p, "--- REPORT OUTPUT ---") || !strings.Contains(p, "Write your evaluation report to:") || !strings.Contains(p, "launcher/evals/round-2.md") {
+		t.Errorf("planning report output missing, got:\n%s", p)
+	}
+
+	// Specifying EVALUATE round 2 with a prior FAIL report.
+	ss := specEvaluateState("report", "opus")
+	ss.Specifying.CurrentSpecs[0].Round = 2
+	ss.Specifying.CurrentSpecs[0].Evals = []EvalRecord{{Round: 1, Verdict: "FAIL", EvalReport: "optimizer/specs/.eval/batch-1-r1.md"}}
+	var sb bytes.Buffer
+	if err := PrintSpecEvalOutput(&sb, ss, "."); err != nil {
+		t.Fatalf("spec eval: %v", err)
+	}
+	sp := sb.String()
+	if !strings.Contains(sp, "Round 1: FAIL — optimizer/specs/.eval/batch-1-r1.md") {
+		t.Errorf("specifying report previous-evals missing, got:\n%s", sp)
+	}
+	if !strings.Contains(sp, "Write your evaluation report to:") || !strings.Contains(sp, "optimizer/specs/.eval/batch-1-r2.md") {
+		t.Errorf("specifying report output missing, got:\n%s", sp)
+	}
+
+	// Cross-reference round 1 — report output present.
+	var cb bytes.Buffer
+	if err := PrintCrossRefEvalOutput(&cb, crossRefEvalState("report", 1, nil)); err != nil {
+		t.Fatalf("crossref eval: %v", err)
+	}
+	if !strings.Contains(cb.String(), "Write your evaluation report to:") || !strings.Contains(cb.String(), "optimizer/specs/.eval/cross-reference-r1.md") {
+		t.Errorf("crossref report output missing, got:\n%s", cb.String())
+	}
+
+	// Reconciliation round 1 — report output present.
+	var rb bytes.Buffer
+	if err := PrintReconcileEvalOutput(&rb, reconcileEvalState("report", 1, nil)); err != nil {
+		t.Fatalf("reconcile eval: %v", err)
+	}
+	if !strings.Contains(rb.String(), "Write your evaluation report to:") || !strings.Contains(rb.String(), "optimizer/specs/.eval/reconciliation-r1.md") {
+		t.Errorf("reconcile report output missing, got:\n%s", rb.String())
+	}
+}
+
+// TestEvalContextDirectModeSections verifies direct-mode REPORT OUTPUT instructs
+// in-place corrections (planning/implementing/specifying/cross-ref) and PREVIOUS
+// EVALUATIONS lists "(direct corrections)".
+func TestEvalContextDirectModeSections(t *testing.T) {
+	dir := t.TempDir()
+
+	// Planning direct with a prior round.
+	ps := planEvaluateState("direct", "opus")
+	ps.Planning.Round = 2
+	ps.Planning.Evals = []EvalRecord{{Round: 1, Verdict: "FAIL", EvalReport: "launcher/evals/round-1.md"}}
+	var pb bytes.Buffer
+	if err := PrintEvalOutput(&pb, ps, "."); err != nil {
+		t.Fatalf("planning eval: %v", err)
+	}
+	p := pb.String()
+	if !strings.Contains(p, "Round 1: FAIL — (direct corrections)") {
+		t.Errorf("planning direct previous-evals should show (direct corrections), got:\n%s", p)
+	}
+	if !strings.Contains(p, "Make corrections directly to the plan files.") {
+		t.Errorf("planning direct report output missing, got:\n%s", p)
+	}
+	if strings.Contains(p, "Write your evaluation report to:") {
+		t.Errorf("planning direct must not print a report path, got:\n%s", p)
+	}
+
+	// Implementing direct (round 1, no priors).
+	var ib bytes.Buffer
+	if err := PrintEvalOutput(&ib, implEvaluateState(t, dir, "direct", "opus"), dir); err != nil {
+		t.Fatalf("implementing eval: %v", err)
+	}
+	if !strings.Contains(ib.String(), "Make corrections directly to the batch files.") {
+		t.Errorf("implementing direct report output missing, got:\n%s", ib.String())
+	}
+
+	// Specifying direct.
+	ss := specEvaluateState("direct", "opus")
+	var sb bytes.Buffer
+	if err := PrintSpecEvalOutput(&sb, ss, "."); err != nil {
+		t.Fatalf("spec eval: %v", err)
+	}
+	if !strings.Contains(sb.String(), "Make corrections directly to the spec files.") {
+		t.Errorf("specifying direct report output missing, got:\n%s", sb.String())
+	}
+
+	// Cross-reference direct.
+	var cb bytes.Buffer
+	if err := PrintCrossRefEvalOutput(&cb, crossRefEvalState("direct", 1, nil)); err != nil {
+		t.Fatalf("crossref eval: %v", err)
+	}
+	if !strings.Contains(cb.String(), "Make corrections directly to the spec files.") {
+		t.Errorf("crossref direct report output missing, got:\n%s", cb.String())
+	}
+}
+
+// TestEvalContextConversationalModeSections verifies conversational mode omits
+// both --- REPORT OUTPUT --- and --- PREVIOUS EVALUATIONS --- everywhere.
+func TestEvalContextConversationalModeSections(t *testing.T) {
+	dir := t.TempDir()
+
+	ps := planEvaluateState("conversational", "opus")
+	ps.Planning.Round = 2
+	ps.Planning.Evals = []EvalRecord{{Round: 1, Verdict: "FAIL", EvalReport: "launcher/evals/round-1.md"}}
+	var pb bytes.Buffer
+	PrintEvalOutput(&pb, ps, ".")
+	if strings.Contains(pb.String(), "--- REPORT OUTPUT ---") || strings.Contains(pb.String(), "--- PREVIOUS EVALUATIONS ---") {
+		t.Errorf("planning conversational should omit both sections, got:\n%s", pb.String())
+	}
+
+	var ib bytes.Buffer
+	PrintEvalOutput(&ib, implEvaluateState(t, dir, "conversational", "opus"), dir)
+	if strings.Contains(ib.String(), "--- REPORT OUTPUT ---") {
+		t.Errorf("implementing conversational should omit report output, got:\n%s", ib.String())
+	}
+
+	var cb bytes.Buffer
+	PrintCrossRefEvalOutput(&cb, crossRefEvalState("conversational", 2, []EvalRecord{{Round: 1, Verdict: "FAIL"}}))
+	if strings.Contains(cb.String(), "--- REPORT OUTPUT ---") || strings.Contains(cb.String(), "--- PREVIOUS EVALUATIONS ---") {
+		t.Errorf("crossref conversational should omit both sections, got:\n%s", cb.String())
+	}
+
+	var rb bytes.Buffer
+	PrintReconcileEvalOutput(&rb, reconcileEvalState("conversational", 2, []EvalRecord{{Round: 1, Verdict: "FAIL"}}))
+	if strings.Contains(rb.String(), "--- REPORT OUTPUT ---") || strings.Contains(rb.String(), "--- PREVIOUS EVALUATIONS ---") {
+		t.Errorf("reconcile conversational should omit both sections, got:\n%s", rb.String())
+	}
+}
+
+// TestEvalContextReconcileDirectOmitsReportOutput verifies the reconciliation
+// special case: direct mode omits --- REPORT OUTPUT --- (it works on staged
+// changes) but still backfills --- PREVIOUS EVALUATIONS --- on later rounds.
+func TestEvalContextReconcileDirectOmitsReportOutput(t *testing.T) {
+	s := reconcileEvalState("direct", 2, []EvalRecord{{Round: 1, Verdict: "FAIL"}})
+	var rb bytes.Buffer
+	if err := PrintReconcileEvalOutput(&rb, s); err != nil {
+		t.Fatalf("reconcile eval: %v", err)
+	}
+	out := rb.String()
+	if strings.Contains(out, "--- REPORT OUTPUT ---") {
+		t.Errorf("reconcile direct must omit REPORT OUTPUT, got:\n%s", out)
+	}
+	if !strings.Contains(out, "--- PREVIOUS EVALUATIONS ---") || !strings.Contains(out, "Round 1: FAIL — (direct corrections)") {
+		t.Errorf("reconcile direct should backfill PREVIOUS EVALUATIONS with (direct corrections), got:\n%s", out)
+	}
+}
+
+// TestEvalContextPreviousEvalsMultipleRounds is an edge case: multiple prior
+// rounds render in order, with report paths in report mode and "(direct
+// corrections)" in direct mode (mixed verdicts).
+func TestEvalContextPreviousEvalsMultipleRounds(t *testing.T) {
+	evals := []EvalRecord{
+		{Round: 1, Verdict: "FAIL", EvalReport: "optimizer/specs/.eval/cross-reference-r1.md"},
+		{Round: 2, Verdict: "FAIL", EvalReport: "optimizer/specs/.eval/cross-reference-r2.md"},
+	}
+
+	var rep bytes.Buffer
+	if err := PrintCrossRefEvalOutput(&rep, crossRefEvalState("report", 3, evals)); err != nil {
+		t.Fatalf("crossref report: %v", err)
+	}
+	r := rep.String()
+	if !strings.Contains(r, "Round 1: FAIL — optimizer/specs/.eval/cross-reference-r1.md") ||
+		!strings.Contains(r, "Round 2: FAIL — optimizer/specs/.eval/cross-reference-r2.md") {
+		t.Errorf("report mode should list each prior round with its report path, got:\n%s", r)
+	}
+	// Ordering: round 1 must appear before round 2.
+	if strings.Index(r, "Round 1:") > strings.Index(r, "Round 2:") {
+		t.Errorf("previous evaluations should be in round order, got:\n%s", r)
+	}
+
+	var dir bytes.Buffer
+	if err := PrintCrossRefEvalOutput(&dir, crossRefEvalState("direct", 3, evals)); err != nil {
+		t.Fatalf("crossref direct: %v", err)
+	}
+	d := dir.String()
+	if !strings.Contains(d, "Round 1: FAIL — (direct corrections)") || !strings.Contains(d, "Round 2: FAIL — (direct corrections)") {
+		t.Errorf("direct mode should list each prior round as (direct corrections), got:\n%s", d)
+	}
+	if strings.Contains(d, "cross-reference-r1.md") {
+		t.Errorf("direct mode must not leak report paths into previous evals, got:\n%s", d)
+	}
+}
+
 // TestEvalOutputOutsideValidStatesReturnsError verifies that eval command outside
 // valid states returns an error naming the current state.
 func TestEvalOutputOutsideValidStatesReturnsError(t *testing.T) {
