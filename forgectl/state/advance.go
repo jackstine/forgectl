@@ -91,14 +91,10 @@ func advanceSpecifying(s *ForgeState, in AdvanceInput, dir string) error {
 			return fmt.Errorf("--verdict is required in EVALUATE state")
 		}
 		// Per spec-lifecycle.md, EVALUATE only accepts --verdict and --eval-report.
-		// Gating on enable_eval_output for --eval-report.
-		enableEvalOutput := s.Config.Specifying.Eval.EnableEvalOutput
-		if enableEvalOutput && in.EvalReport == "" {
-			return fmt.Errorf("--eval-report is required in EVALUATE state when enable_eval_output is true")
-		}
-		if !enableEvalOutput && in.EvalReport != "" {
-			// Warn but proceed — consistent with spec warning pattern.
-			fmt.Fprintf(os.Stderr, "warning: --eval-report is ignored, eval output is not enabled\n")
+		// --eval-report is required only in report mode. The ignore warning for
+		// non-report modes is emitted once at the cmd layer (printAdvanceWarnings).
+		if EvalModeFor(s.Config.Specifying.Eval, s.Config.General) == "report" && in.EvalReport == "" {
+			return fmt.Errorf("--eval-report is required in EVALUATE state")
 		}
 		if in.Verdict != "PASS" && in.Verdict != "FAIL" {
 			return fmt.Errorf("--verdict must be PASS or FAIL")
@@ -189,13 +185,10 @@ func advanceSpecifying(s *ForgeState, in AdvanceInput, dir string) error {
 		if in.Verdict != "PASS" && in.Verdict != "FAIL" {
 			return fmt.Errorf("--verdict must be PASS or FAIL")
 		}
-		// Gating on enable_eval_output for --eval-report.
-		enableEvalOutput := s.Config.Specifying.Eval.EnableEvalOutput
-		if enableEvalOutput && in.EvalReport == "" {
-			return fmt.Errorf("--eval-report is required in CROSS_REFERENCE_EVAL state when enable_eval_output is true")
-		}
-		if !enableEvalOutput && in.EvalReport != "" {
-			fmt.Fprintf(os.Stderr, "warning: --eval-report is ignored, eval output is not enabled\n")
+		// --eval-report is required only in report mode; the ignore warning for
+		// non-report modes is emitted once at the cmd layer.
+		if EvalModeFor(s.Config.Specifying.Eval, s.Config.General) == "report" && in.EvalReport == "" {
+			return fmt.Errorf("--eval-report is required in CROSS_REFERENCE_EVAL state")
 		}
 		if in.EvalReport != "" {
 			if err := checkEvalReportExists(in.EvalReport); err != nil {
@@ -247,13 +240,10 @@ func advanceSpecifying(s *ForgeState, in AdvanceInput, dir string) error {
 		if in.Verdict != "PASS" && in.Verdict != "FAIL" {
 			return fmt.Errorf("--verdict must be PASS or FAIL")
 		}
-		// Gating on enable_eval_output for --eval-report.
-		enableEvalOutput := s.Config.Specifying.Eval.EnableEvalOutput
-		if enableEvalOutput && in.EvalReport == "" {
-			return fmt.Errorf("--eval-report is required in RECONCILE_EVAL state when enable_eval_output is true")
-		}
-		if !enableEvalOutput && in.EvalReport != "" {
-			fmt.Fprintf(os.Stderr, "warning: --eval-report is ignored, eval output is not enabled\n")
+		// --eval-report is required only in report mode; the ignore warning for
+		// non-report modes is emitted once at the cmd layer.
+		if EvalModeFor(s.Config.Specifying.Eval, s.Config.General) == "report" && in.EvalReport == "" {
+			return fmt.Errorf("--eval-report is required in RECONCILE_EVAL state")
 		}
 		if in.EvalReport != "" {
 			if err := checkEvalReportExists(in.EvalReport); err != nil {
@@ -413,14 +403,18 @@ func advancePlanning(s *ForgeState, in AdvanceInput, dir string) error {
 		if in.Verdict == "" {
 			return fmt.Errorf("--verdict is required in EVALUATE state")
 		}
-		if in.EvalReport == "" {
+		// --eval-report is required only in report mode; the ignore warning for
+		// non-report modes is emitted once at the cmd layer.
+		if EvalModeFor(s.Config.Planning.Eval, s.Config.General) == "report" && in.EvalReport == "" {
 			return fmt.Errorf("--eval-report is required in EVALUATE state")
 		}
 		if in.Verdict != "PASS" && in.Verdict != "FAIL" {
 			return fmt.Errorf("--verdict must be PASS or FAIL")
 		}
-		if err := checkEvalReportExists(in.EvalReport); err != nil {
-			return err
+		if in.EvalReport != "" {
+			if err := checkEvalReportExists(in.EvalReport); err != nil {
+				return err
+			}
 		}
 
 		eval := EvalRecord{
@@ -735,6 +729,11 @@ func advanceImplFromImplement(s *ForgeState, in AdvanceInput, dir string) error 
 func advanceImplFromEvaluate(s *ForgeState, in AdvanceInput, dir string) error {
 	if in.Verdict == "" {
 		return fmt.Errorf("--verdict is required in EVALUATE state")
+	}
+	// --eval-report is required only in report mode; the ignore warning for
+	// non-report modes is emitted once at the cmd layer.
+	if EvalModeFor(s.Config.Implementing.Eval, s.Config.General) == "report" && in.EvalReport == "" {
+		return fmt.Errorf("--eval-report is required in EVALUATE state")
 	}
 	if in.Verdict != "PASS" && in.Verdict != "FAIL" {
 		return fmt.Errorf("--verdict must be PASS or FAIL")

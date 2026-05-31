@@ -48,6 +48,69 @@ func PrintAdvanceOutput(w io.Writer, s *ForgeState, dir string) {
 
 // --- Specifying ---
 
+// evalEntryAction carries the per-state wording used to render the Action body
+// of a state that enters evaluation (EVALUATE, CROSS_REFERENCE_EVAL,
+// RECONCILE_EVAL). The body is rendered differently per eval_mode:
+//   - report:         spawn to evaluate, run forgectl eval, advance with --eval-report.
+//   - direct:         spawn to evaluate and correct, files staged, advance without report.
+//   - conversational: spawn to evaluate, run forgectl eval, advance without report.
+type evalEntryAction struct {
+	label        string // line prefix incl. trailing spaces, e.g. "Action:  "
+	indent       string // continuation indent aligned under label
+	spawnEval    string // report/conversational spawn line (verb "evaluate ...")
+	spawnCorrect string // direct spawn line (verb "evaluate and correct ...")
+	runEval      string // report/conversational middle line, e.g. "The sub-agent should run: forgectl eval"
+	stagedNote   string // direct staged-files note
+	reportTail   string // report-mode advance tail, e.g. "advance with --verdict PASS|FAIL --eval-report <path>"
+}
+
+// writeEvalEntryAction renders the Action body for an eval-entry state according
+// to the resolved eval_mode. The header lines (State/Phase/Round/...) are written
+// by the caller; this writes only the "Action:" block.
+func writeEvalEntryAction(w io.Writer, mode string, a evalEntryAction) {
+	const noReport = "advance with --verdict PASS|FAIL"
+	switch mode {
+	case "direct":
+		fmt.Fprintf(w, "%s%s\n", a.label, a.spawnCorrect)
+		fmt.Fprintf(w, "%sSub-agent runs: forgectl eval\n", a.indent)
+		fmt.Fprintf(w, "%s%s\n", a.indent, a.stagedNote)
+		fmt.Fprintf(w, "%sAfter completion of the above, %s\n", a.indent, noReport)
+	case "report":
+		fmt.Fprintf(w, "%s%s\n", a.label, a.spawnEval)
+		fmt.Fprintf(w, "%s%s\n", a.indent, a.runEval)
+		fmt.Fprintf(w, "%sAfter completion of the above, %s\n", a.indent, a.reportTail)
+	default: // conversational
+		fmt.Fprintf(w, "%s%s\n", a.label, a.spawnEval)
+		fmt.Fprintf(w, "%s%s\n", a.indent, a.runEval)
+		fmt.Fprintf(w, "%sAfter completion of the above, %s\n", a.indent, noReport)
+	}
+}
+
+// writeRefineBody writes the per-mode correction-guidance lines shared by REFINE
+// and the implementing IMPLEMENT after-eval re-entry: a mode-specific two-line
+// lead-in followed by the shared "fresh eyes" lines. firstLabel prefixes the
+// first emitted line (e.g. "Action:  ", or the continuation indent when a
+// preamble such as "Minimum evaluation rounds not met." was already printed on
+// the Action label). indent prefixes every subsequent line. Per eval_mode:
+//   - report:         "Study the eval file <file>" / "and implement any corrections as needed."
+//   - direct:         "Review unstaged changes from the evaluator (git diff)." / "Accept, revise, or revert corrections as needed."
+//   - conversational: "Make corrections based off communication with the evaluator." / "Implement any corrections as needed."
+func writeRefineBody(w io.Writer, mode, evalFile, firstLabel, indent string) {
+	switch mode {
+	case "direct":
+		fmt.Fprintf(w, "%sReview unstaged changes from the evaluator (git diff).\n", firstLabel)
+		fmt.Fprintf(w, "%sAccept, revise, or revert corrections as needed.\n", indent)
+	case "report":
+		fmt.Fprintf(w, "%sStudy the eval file %q\n", firstLabel, evalFile)
+		fmt.Fprintf(w, "%sand implement any corrections as needed.\n", indent)
+	default: // conversational
+		fmt.Fprintf(w, "%sMake corrections based off communication with the evaluator.\n", firstLabel)
+		fmt.Fprintf(w, "%sImplement any corrections as needed.\n", indent)
+	}
+	fmt.Fprintf(w, "%sApply \"fresh\" eyes and a tightened lens when reviewing the work,\n", indent)
+	fmt.Fprintf(w, "%sthen apply corrections as needed.\n", indent)
+}
+
 func printSpecifyingOutput(w io.Writer, s *ForgeState, dir string) {
 	spec := s.Specifying
 	var cs *ActiveSpec
@@ -111,7 +174,6 @@ func printSpecifyingOutput(w io.Writer, s *ForgeState, dir string) {
 		fmt.Fprintf(w, "         After completion of the above, advance to begin evaluation.\n")
 
 	case StateEvaluate:
-		evalFile := batchEvalFile(cs.Domain, spec.BatchNumber, cs.Round)
 		fmt.Fprintf(w, "State:   EVALUATE\n")
 		fmt.Fprintf(w, "Phase:   specifying\n")
 		fmt.Fprintf(w, "Domain:  %s\n", cs.Domain)
@@ -122,14 +184,16 @@ func printSpecifyingOutput(w io.Writer, s *ForgeState, dir string) {
 		for i, bcs := range spec.CurrentSpecs {
 			fmt.Fprintf(w, "  [%d] %s\n", i+1, bcs.File)
 		}
-		fmt.Fprintf(w, "Action:  Please spawn 1 %s sub-agent to evaluate the spec batch.\n", s.Config.Specifying.Eval.Type)
-		fmt.Fprintf(w, "         Eval output: %s\n", evalFile)
-		if s.Config.General.EnableCommits {
-			fmt.Fprintf(w, "         After completion of the above, advance with --verdict PASS|FAIL --eval-report <path>\n")
-			fmt.Fprintf(w, "           (--message <commit msg> required with PASS)\n")
-		} else {
-			fmt.Fprintf(w, "         After completion of the above, advance with --verdict PASS|FAIL --eval-report <path>\n")
-		}
+		specEvalType := s.Config.Specifying.Eval.Type
+		writeEvalEntryAction(w, EvalModeFor(s.Config.Specifying.Eval, s.Config.General), evalEntryAction{
+			label:        "Action:  ",
+			indent:       "         ",
+			spawnEval:    fmt.Sprintf("Please spawn 1 %s sub-agent to evaluate the spec batch.", specEvalType),
+			spawnCorrect: fmt.Sprintf("Please spawn 1 %s sub-agent to evaluate and correct the spec.", specEvalType),
+			runEval:      "The sub-agent should run: forgectl eval",
+			stagedNote:   "Spec files have been staged. Sub-agent makes corrections directly.",
+			reportTail:   "advance with --verdict PASS|FAIL --eval-report <path>",
+		})
 
 	case StateRefine:
 		evalFile := batchEvalFile(cs.Domain, spec.BatchNumber, cs.Round)
@@ -143,13 +207,16 @@ func printSpecifyingOutput(w io.Writer, s *ForgeState, dir string) {
 		for i, bcs := range spec.CurrentSpecs {
 			fmt.Fprintf(w, "  [%d] %s\n", i+1, bcs.File)
 		}
-		fmt.Fprintf(w, "Action:  Read the eval report and address any findings in the spec files\n")
-		fmt.Fprintf(w, "         using the spec skill.\n")
-		fmt.Fprintf(w, "         Eval report: %s\n", evalFile)
-		fmt.Fprintf(w, "         Format:      references/spec-format.md\n")
-		fmt.Fprintf(w, "         Process:     references/spec-generation-skill.md\n")
-		fmt.Fprintf(w, "         Scoping:     references/topic-of-concern.md\n")
-		fmt.Fprintf(w, "         After completion of the above, advance to continue evaluation.\n")
+		specRefineMode := EvalModeFor(s.Config.Specifying.Eval, s.Config.General)
+		writeRefineBody(w, specRefineMode, evalFile, "Action:  ", "         ")
+		if specRefineMode == "direct" {
+			fmt.Fprintf(w, "         After completion of the above, advance to continue.\n")
+		} else {
+			fmt.Fprintf(w, "         Format:      references/spec-format.md\n")
+			fmt.Fprintf(w, "         Process:     references/spec-generation-skill.md\n")
+			fmt.Fprintf(w, "         Scoping:     references/topic-of-concern.md\n")
+			fmt.Fprintf(w, "         After completion of the above, advance to continue evaluation.\n")
+		}
 
 	case StateAccept:
 		fmt.Fprintf(w, "State:   ACCEPT\n")
@@ -220,8 +287,15 @@ func printSpecifyingOutput(w io.Writer, s *ForgeState, dir string) {
 		fmt.Fprintf(w, "Round:   %d/%d\n", cr.Round, s.Config.Specifying.CrossReference.MaxRounds)
 		fmt.Fprintf(w, "Eval:    %s\n", evalFile)
 		fmt.Fprintln(w)
-		fmt.Fprintf(w, "Action:  Please spawn 1 %s sub-agent to evaluate cross-reference consistency.\n", evalAgentType)
-		fmt.Fprintf(w, "         After completion of the above, advance with --verdict PASS|FAIL --eval-report <path>\n")
+		writeEvalEntryAction(w, EvalModeFor(s.Config.Specifying.Eval, s.Config.General), evalEntryAction{
+			label:        "Action:  ",
+			indent:       "         ",
+			spawnEval:    fmt.Sprintf("Please spawn 1 %s sub-agent to evaluate cross-reference consistency.", evalAgentType),
+			spawnCorrect: fmt.Sprintf("Please spawn 1 %s sub-agent to evaluate and correct cross-references.", evalAgentType),
+			runEval:      "The sub-agent should run: forgectl eval",
+			stagedNote:   "Spec files have been staged. Sub-agent makes corrections directly.",
+			reportTail:   "advance with --verdict PASS|FAIL --eval-report <path>",
+		})
 
 	case StateCrossReferenceReview:
 		currentDomain := spec.CurrentDomain
@@ -280,14 +354,15 @@ func printSpecifyingOutput(w io.Writer, s *ForgeState, dir string) {
 		fmt.Fprintf(w, "Phase:   specifying\n")
 		fmt.Fprintf(w, "Round:   %d/%d\n", spec.Reconcile.Round, maxRounds)
 		fmt.Fprintf(w, "Specs:   %d completed across %d domains\n", len(spec.Completed), len(domains))
-		fmt.Fprintf(w, "Action:  Please spawn 1 opus sub-agent to evaluate cross-domain reconciliation.\n")
-		fmt.Fprintf(w, "         The sub-agent should run: forgectl eval\n")
-		if s.Config.General.EnableCommits {
-			fmt.Fprintf(w, "         After completion of the above, advance with --verdict PASS|FAIL --eval-report <path>\n")
-			fmt.Fprintf(w, "           (--message <commit msg> required with PASS)\n")
-		} else {
-			fmt.Fprintf(w, "         After completion of the above, advance with --verdict PASS|FAIL --eval-report <path>\n")
-		}
+		writeEvalEntryAction(w, EvalModeFor(s.Config.Specifying.Eval, s.Config.General), evalEntryAction{
+			label:        "Action:  ",
+			indent:       "         ",
+			spawnEval:    "Please spawn 1 opus sub-agent to evaluate cross-domain reconciliation.",
+			spawnCorrect: "Please spawn 1 opus sub-agent to evaluate and correct the reconciliation.",
+			runEval:      "The sub-agent should run: forgectl eval",
+			stagedNote:   "Spec files have been staged. Sub-agent makes corrections directly.",
+			reportTail:   "advance with --verdict PASS|FAIL --eval-report <path>",
+		})
 
 	case StateReconcileReview:
 		domains := uniqueDomains(spec.Completed)
@@ -509,13 +584,16 @@ func printPlanningOutput(w io.Writer, s *ForgeState, dir string) {
 		fmt.Fprintf(w, "Domain:  %s\n", cp.Domain)
 		fmt.Fprintf(w, "File:    %s\n", cp.File)
 		fmt.Fprintf(w, "Round:   %d/%d\n", plan.Round, s.Config.Planning.Eval.MaxRounds)
-		fmt.Fprintf(w, "Action:  Run evaluation sub-agent against the plan (round %d/%d).\n", plan.Round, s.Config.Planning.Eval.MaxRounds)
-		fmt.Fprintf(w, "         Sub-agent: forgectl eval\n")
-		if s.Config.General.EnableEvalOutput {
-			fmt.Fprintf(w, "         Advance with --verdict PASS|FAIL --eval-report <path>.\n")
-		} else {
-			fmt.Fprintf(w, "         Advance with --verdict PASS|FAIL.\n")
-		}
+		planEvalType := s.Config.Planning.Eval.Type
+		writeEvalEntryAction(w, EvalModeFor(s.Config.Planning.Eval, s.Config.General), evalEntryAction{
+			label:        "Action:  ",
+			indent:       "         ",
+			spawnEval:    fmt.Sprintf("Please spawn 1 %s sub-agent to evaluate the plan.", planEvalType),
+			spawnCorrect: fmt.Sprintf("Please spawn 1 %s sub-agent to evaluate and correct the plan.", planEvalType),
+			runEval:      "Sub-agent runs: forgectl eval",
+			stagedNote:   "Plan files have been staged. Sub-agent makes corrections directly.",
+			reportTail:   "advance with --verdict PASS|FAIL --eval-report <path>",
+		})
 
 	case StateRefine:
 		evalDir := filepath.Join(filepath.Dir(cp.File), "evals")
@@ -528,24 +606,15 @@ func printPlanningOutput(w io.Writer, s *ForgeState, dir string) {
 		fmt.Fprintf(w, "Domain:  %s\n", cp.Domain)
 		fmt.Fprintf(w, "File:    %s\n", cp.File)
 		fmt.Fprintf(w, "Round:   %d/%d\n", plan.Round, s.Config.Planning.Eval.MaxRounds)
-		if s.Config.Planning.Eval.EnableEvalOutput {
-			if lastEval.Verdict == "FAIL" {
-				fmt.Fprintf(w, "Action:  Study the eval file %q\n", evalFile)
-				fmt.Fprintf(w, "         and implement any corrections as needed.\n")
-			} else {
-				fmt.Fprintf(w, "Action:  Minimum evaluation rounds not met. Spawn a sub-agent to re-evaluate the plan.\n")
-				fmt.Fprintf(w, "         Eval report: %s\n", evalFile)
-			}
-			fmt.Fprintf(w, "         Apply \"fresh\" eyes and a tightened lens when reviewing the work,\n")
-			fmt.Fprintf(w, "         then apply corrections as needed.\n")
-			fmt.Fprintf(w, "         After completion of the above, advance to continue.\n")
-		} else {
-			fmt.Fprintf(w, "Action:  Make corrections based off communication with the evaluator.\n")
-			fmt.Fprintf(w, "         Implement any corrections as needed.\n")
-			fmt.Fprintf(w, "         Apply \"fresh\" eyes and a tightened lens when reviewing the work,\n")
-			fmt.Fprintf(w, "         then apply corrections as needed.\n")
-			fmt.Fprintf(w, "         After completion of the above, advance to continue.\n")
+		planRefineMode := EvalModeFor(s.Config.Planning.Eval, s.Config.General)
+		// PASS below min_rounds prints a preamble line; FAIL does not.
+		firstLabel := "Action:  "
+		if lastEval.Verdict != "FAIL" {
+			fmt.Fprintf(w, "Action:  Minimum evaluation rounds not met.\n")
+			firstLabel = "         "
 		}
+		writeRefineBody(w, planRefineMode, evalFile, firstLabel, "         ")
+		fmt.Fprintf(w, "         After completion of the above, advance to continue.\n")
 
 	case StateAccept:
 		fmt.Fprintf(w, "State:   ACCEPT\n")
@@ -834,19 +903,9 @@ func printImplementingOutput(w io.Writer, s *ForgeState, dir string) {
 			evalDir := filepath.Join(planDir, "evals")
 			lastEval := batch.Evals[len(batch.Evals)-1]
 			evalFile := filepath.Join(evalDir, fmt.Sprintf("batch-%d-round-%d.md", impl.BatchNumber, lastEval.Round))
-			if s.Config.Implementing.Eval.EnableEvalOutput {
-				fmt.Fprintf(w, "Action:  Study the eval file %q\n", evalFile)
-				fmt.Fprintf(w, "         and implement any corrections as needed.\n")
-				fmt.Fprintf(w, "         Apply \"fresh\" eyes and a tightened lens when reviewing the work,\n")
-				fmt.Fprintf(w, "         then apply corrections as needed.\n")
-				fmt.Fprintf(w, "         After completion of the above, advance to continue.\n")
-			} else {
-				fmt.Fprintf(w, "Action:  Make corrections based off communication with the evaluator.\n")
-				fmt.Fprintf(w, "         Implement any corrections as needed.\n")
-				fmt.Fprintf(w, "         Apply \"fresh\" eyes and a tightened lens when reviewing the work,\n")
-				fmt.Fprintf(w, "         then apply corrections as needed.\n")
-				fmt.Fprintf(w, "         After completion of the above, advance to continue.\n")
-			}
+			implRefineMode := EvalModeFor(s.Config.Implementing.Eval, s.Config.General)
+			writeRefineBody(w, implRefineMode, evalFile, "Action:  ", "         ")
+			fmt.Fprintf(w, "         After completion of the above, advance to continue.\n")
 		} else {
 			fmt.Fprintf(w, "Action:  Implement this item.\n")
 			fmt.Fprintf(w, "         After completion of the above, advance to continue.\n")
@@ -875,14 +934,16 @@ func printImplementingOutput(w io.Writer, s *ForgeState, dir string) {
 			}
 		}
 
-		fmt.Fprintf(w, "Action:   Ask the evaluation sub-agent to verify batch items against their tests.\n")
-		fmt.Fprintf(w, "          The sub-agent should run: forgectl eval\n")
-		fmt.Fprintf(w, "          After reviewing the eval report, run:\n")
-		if s.Config.General.EnableEvalOutput {
-			fmt.Fprintf(w, "            forgectl advance --eval-report <path> --verdict PASS|FAIL\n")
-		} else {
-			fmt.Fprintf(w, "            forgectl advance --verdict PASS|FAIL\n")
-		}
+		implEvalType := s.Config.Implementing.Eval.Type
+		writeEvalEntryAction(w, EvalModeFor(s.Config.Implementing.Eval, s.Config.General), evalEntryAction{
+			label:        "Action:   ",
+			indent:       "          ",
+			spawnEval:    fmt.Sprintf("Please spawn 1 %s sub-agent to evaluate the implementation batch.", implEvalType),
+			spawnCorrect: fmt.Sprintf("Please spawn 1 %s sub-agent to evaluate and correct the batch.", implEvalType),
+			runEval:      "The sub-agent should run: forgectl eval",
+			stagedNote:   "Batch files have been staged. Sub-agent makes corrections directly.",
+			reportTail:   "advance with --eval-report <path> --verdict PASS|FAIL",
+		})
 
 	case StateCommit:
 		batch := impl.CurrentBatch
@@ -1750,6 +1811,44 @@ func printImplementingEval(w io.Writer, s *ForgeState, dir string) error {
 		fmt.Fprintf(w, "\n--- REPORT OUTPUT ---\n\n")
 		fmt.Fprintf(w, "Write your evaluation report to:\n")
 		fmt.Fprintf(w, "  %s\n", reportFile)
+	}
+
+	return nil
+}
+
+// PrintSpecEvalOutput prints the per-batch spec evaluation context for the
+// sub-agent. Valid in specifying EVALUATE state. It embeds the spec evaluator
+// prompt and lists the batch specs (filename, topic, full path).
+//
+// The per-mode --- REPORT OUTPUT --- and --- PREVIOUS EVALUATIONS --- sections
+// are added by the evalmode.eval-output-modes item; this function establishes
+// the header, evaluator instructions, and spec listing.
+func PrintSpecEvalOutput(w io.Writer, s *ForgeState, projectRoot string) error {
+	if s.Phase != PhaseSpecifying || s.State != StateEvaluate {
+		return fmt.Errorf("eval is only valid in EVALUATE, RECONCILE_EVAL, or CROSS_REFERENCE_EVAL state (current: %s)", s.State)
+	}
+
+	spec := s.Specifying
+	if spec == nil || len(spec.CurrentSpecs) == 0 {
+		return fmt.Errorf("no spec batch is currently being evaluated")
+	}
+	cs := spec.CurrentSpecs[0]
+	maxRounds := s.Config.Specifying.Eval.MaxRounds
+
+	fmt.Fprintf(w, "=== SPEC EVALUATION ROUND %d/%d ===\n", cs.Round, maxRounds)
+	fmt.Fprintf(w, "Domain: %s\n", cs.Domain)
+	fmt.Fprintf(w, "Batch:  %d\n", spec.BatchNumber)
+	fmt.Fprintf(w, "\n--- EVALUATOR INSTRUCTIONS ---\n\n")
+	fmt.Fprintf(w, "%s\n", evaluators.SpecEval)
+
+	fmt.Fprintf(w, "\n--- SPECS TO EVALUATE ---\n\n")
+	for i, bcs := range spec.CurrentSpecs {
+		fmt.Fprintf(w, "[%d] %s\n", i+1, filepath.Base(bcs.File))
+		fmt.Fprintf(w, "    Topic: %s\n", bcs.Topic)
+		fmt.Fprintf(w, "    File:  %s\n", bcs.File)
+		if i < len(spec.CurrentSpecs)-1 {
+			fmt.Fprintln(w)
+		}
 	}
 
 	return nil

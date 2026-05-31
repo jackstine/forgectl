@@ -247,7 +247,8 @@
           "passes": false
         }
       ],
-      "passes": "pending"
+      "passes": "passed",
+      "rounds": 1
     },
     {
       "id": "evalmode.cmd-warnings",
@@ -291,7 +292,8 @@
           "passes": false
         }
       ],
-      "passes": "pending"
+      "passes": "passed",
+      "rounds": 1
     },
     {
       "id": "evalmode.spec-eval-output",
@@ -329,7 +331,8 @@
           "passes": false
         }
       ],
-      "passes": "pending"
+      "passes": "passed",
+      "rounds": 1
     },
     {
       "id": "evalmode.action-evaluate",
@@ -381,7 +384,8 @@
           "passes": false
         }
       ],
-      "passes": "pending"
+      "passes": "passed",
+      "rounds": 1
     },
     {
       "id": "evalmode.action-refine",
@@ -425,7 +429,8 @@
           "passes": false
         }
       ],
-      "passes": "pending"
+      "passes": "passed",
+      "rounds": 1
     },
     {
       "id": "evalmode.eval-output-modes",

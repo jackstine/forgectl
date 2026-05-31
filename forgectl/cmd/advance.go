@@ -232,23 +232,26 @@ func validateAdvanceFlags(s *state.ForgeState) error {
 // printAdvanceWarnings prints warnings about flags that will be ignored due to config settings.
 func printAdvanceWarnings(w interface{ Write([]byte) (int, error) }, s *state.ForgeState) {
 	evalStates := map[state.StateName]bool{
-		state.StateEvaluate:      true,
-		state.StateReconcileEval: true,
+		state.StateEvaluate:           true,
+		state.StateReconcileEval:      true,
+		state.StateCrossReferenceEval: true,
 	}
 
-	// Warn if --eval-report provided but eval output is disabled.
+	// Warn if --eval-report provided but the current phase's eval_mode is not "report".
+	// This is the single user-facing emission of the warning; the state transition
+	// layer does not re-print it, so the warning appears exactly once.
 	if advanceEvalReport != "" && evalStates[s.State] {
-		var enabled bool
+		var ec state.EvalConfig
 		switch s.Phase {
 		case state.PhaseSpecifying:
-			enabled = s.Config.Specifying.Eval.EnableEvalOutput
+			ec = s.Config.Specifying.Eval
 		case state.PhasePlanning:
-			enabled = s.Config.Planning.Eval.EnableEvalOutput
+			ec = s.Config.Planning.Eval
 		case state.PhaseImplementing:
-			enabled = s.Config.Implementing.Eval.EnableEvalOutput
+			ec = s.Config.Implementing.Eval
 		}
-		if !enabled {
-			fmt.Fprintf(w, "warning: ignoring --eval-report: eval output is not enabled\n")
+		if state.EvalModeFor(ec, s.Config.General) != "report" {
+			fmt.Fprintf(w, "warning: --eval-report is ignored, --eval-report is only used in report mode\n")
 		}
 	}
 
@@ -261,7 +264,7 @@ func printAdvanceWarnings(w interface{ Write([]byte) (int, error) }, s *state.Fo
 			state.StateCommit:    true,
 		}
 		if commitStates[s.State] {
-			fmt.Fprintf(w, "warning: ignoring --message: commits are not enabled\n")
+			fmt.Fprintf(w, "warning: --message is ignored, commits are not enabled\n")
 		}
 	}
 }

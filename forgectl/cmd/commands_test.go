@@ -1529,3 +1529,121 @@ func TestValidateEmptyObjectFailsAutoDetect(t *testing.T) {
 		t.Errorf("expected 'cannot detect file type' in output, got: %s", out)
 	}
 }
+
+// captureStderr redirects os.Stderr around fn and returns what was written there.
+func captureStderr(t *testing.T, fn func()) string {
+	t.Helper()
+	old := os.Stderr
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	os.Stderr = w
+	fn()
+	w.Close()
+	os.Stderr = old
+	var buf bytes.Buffer
+	if _, err := buf.ReadFrom(r); err != nil {
+		t.Fatal(err)
+	}
+	return buf.String()
+}
+
+// TestAdvanceWarnMessageIgnoredWhenCommitsDisabled verifies the cmd-layer warning
+// for --message when commits are disabled uses the exact spec wording and does not
+// instruct how to enable commits.
+func TestAdvanceWarnMessageIgnoredWhenCommitsDisabled(t *testing.T) {
+	s := &state.ForgeState{
+		Phase:  state.PhaseImplementing,
+		State:  state.StateCommit,
+		Config: state.DefaultForgeConfig(), // enable_commits defaults to false
+	}
+	advanceMessage = "some commit"
+	advanceEvalReport = ""
+	defer func() { advanceMessage = "" }()
+
+	var buf bytes.Buffer
+	printAdvanceWarnings(&buf, s)
+
+	got := buf.String()
+	if !strings.Contains(got, "--message is ignored, commits are not enabled") {
+		t.Errorf("expected spec-worded --message warning, got: %q", got)
+	}
+	if strings.Contains(got, "enable") && strings.Contains(strings.ToLower(got), "set ") {
+		t.Errorf("warning must not instruct how to enable commits, got: %q", got)
+	}
+}
+
+// TestAdvanceWarnEvalReportIgnoredInCrossRefNonReport verifies that supplying
+// --eval-report in CROSS_REFERENCE_EVAL while eval_mode is not "report" emits the
+// spec-worded ignore warning (CROSS_REFERENCE_EVAL is now in the warning's state set).
+func TestAdvanceWarnEvalReportIgnoredInCrossRefNonReport(t *testing.T) {
+	cfg := state.DefaultForgeConfig()
+	cfg.Specifying.Eval.EvalMode = "conversational"
+	s := &state.ForgeState{
+		Phase:  state.PhaseSpecifying,
+		State:  state.StateCrossReferenceEval,
+		Config: cfg,
+	}
+	advanceEvalReport = "some/report.md"
+	advanceMessage = ""
+	defer func() { advanceEvalReport = "" }()
+
+	var buf bytes.Buffer
+	printAdvanceWarnings(&buf, s)
+
+	if !strings.Contains(buf.String(), "--eval-report is ignored, --eval-report is only used in report mode") {
+		t.Errorf("expected spec-worded --eval-report warning in CROSS_REFERENCE_EVAL, got: %q", buf.String())
+	}
+}
+
+// TestAdvanceEvalReportWarningPrintedExactlyOnce verifies the ignore warning is not
+// duplicated across the cmd layer (printAdvanceWarnings) and the state transition
+// layer (state.Advance): summed over both output streams it appears exactly once.
+func TestAdvanceEvalReportWarningPrintedExactlyOnce(t *testing.T) {
+	dir := t.TempDir()
+
+	cfg := state.DefaultForgeConfig()
+	cfg.Specifying.Eval.EvalMode = "conversational"
+	cfg.Specifying.CrossReference.MinRounds = 1
+	cfg.Specifying.CrossReference.MaxRounds = 3
+
+	spec := state.NewSpecifyingState([]state.SpecQueueEntry{})
+	spec.CurrentDomain = "test"
+	spec.CrossReference = map[string]*state.CrossReferenceState{
+		"test": {Domain: "test", Round: 1},
+	}
+	s := &state.ForgeState{
+		Phase:          state.PhaseSpecifying,
+		State:          state.StateCrossReferenceEval,
+		Config:         cfg,
+		StartedAtPhase: state.PhaseSpecifying,
+		Specifying:     spec,
+	}
+
+	reportFile := filepath.Join(dir, "report.md")
+	os.WriteFile(reportFile, []byte("report"), 0644)
+	advanceEvalReport = reportFile
+	advanceMessage = ""
+	defer func() { advanceEvalReport = "" }()
+
+	const warn = "--eval-report is ignored"
+
+	// cmd layer.
+	var buf bytes.Buffer
+	printAdvanceWarnings(&buf, s)
+
+	// state transition layer.
+	in := state.AdvanceInput{Verdict: "PASS", EvalReport: advanceEvalReport}
+	stderr := captureStderr(t, func() {
+		if err := state.Advance(s, in, dir); err != nil {
+			t.Fatalf("advance should proceed in conversational mode: %v", err)
+		}
+	})
+
+	total := strings.Count(buf.String(), warn) + strings.Count(stderr, warn)
+	if total != 1 {
+		t.Errorf("ignore warning should appear exactly once across cmd+state layers, got %d (cmd=%q, state=%q)",
+			total, buf.String(), stderr)
+	}
+}

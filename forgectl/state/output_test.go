@@ -365,6 +365,474 @@ func TestEvalOutputCrossRefEvalContainsEvaluatorPrompt(t *testing.T) {
 	}
 }
 
+// TestEvalOutputSpecEvaluateContainsEvaluatorPrompt is the regression for the
+// routing gap: `forgectl eval` in specifying EVALUATE must emit the SPEC
+// EVALUATION block (header, evaluator instructions, and the spec listing with
+// filename, topic, and full path) instead of falling through to the default
+// "eval is only valid in ..." error.
+func TestEvalOutputSpecEvaluateContainsEvaluatorPrompt(t *testing.T) {
+	s := &ForgeState{
+		Phase: PhaseSpecifying,
+		State: StateEvaluate,
+		Config: ForgeConfig{
+			Specifying: SpecifyingConfig{
+				Eval: EvalConfig{MinRounds: 1, MaxRounds: 3},
+			},
+		},
+		Specifying: &SpecifyingState{
+			CurrentDomain: "optimizer",
+			BatchNumber:   1,
+			CurrentSpecs: []*ActiveSpec{
+				{ID: 1, Name: "Repository Loading", Domain: "optimizer", Topic: "The scaffold loads repository snapshots for diffing.", File: "optimizer/specs/repository-loading.md", Round: 1},
+				{ID: 2, Name: "Snapshot Diffing", Domain: "optimizer", Topic: "The scaffold diffs repository snapshots to detect changes.", File: "optimizer/specs/snapshot-diffing.md", Round: 1},
+			},
+		},
+	}
+
+	var buf bytes.Buffer
+	if err := PrintSpecEvalOutput(&buf, s, "."); err != nil {
+		t.Fatalf("PrintSpecEvalOutput: %v", err)
+	}
+	out := buf.String()
+
+	if !strings.Contains(out, "=== SPEC EVALUATION ROUND 1/3 ===") {
+		t.Errorf("expected 'SPEC EVALUATION ROUND 1/3' header, got:\n%s", out)
+	}
+	if !strings.Contains(out, "Domain: optimizer") {
+		t.Errorf("expected domain line, got:\n%s", out)
+	}
+	if !strings.Contains(out, "Batch:  1") {
+		t.Errorf("expected batch line, got:\n%s", out)
+	}
+	if !strings.Contains(out, "--- EVALUATOR INSTRUCTIONS ---") {
+		t.Errorf("expected evaluator instructions section, got:\n%s", out)
+	}
+	if !strings.Contains(out, "Spec Evaluation Prompt") {
+		t.Errorf("expected spec-eval.md contents, got:\n%s", out)
+	}
+	if !strings.Contains(out, "--- SPECS TO EVALUATE ---") {
+		t.Errorf("expected specs section, got:\n%s", out)
+	}
+	if !strings.Contains(out, "[1] repository-loading.md") {
+		t.Errorf("expected spec filename listing, got:\n%s", out)
+	}
+	if !strings.Contains(out, "Topic: The scaffold loads repository snapshots for diffing.") {
+		t.Errorf("expected spec topic listing, got:\n%s", out)
+	}
+	if !strings.Contains(out, "File:  optimizer/specs/repository-loading.md") {
+		t.Errorf("expected spec full path listing, got:\n%s", out)
+	}
+}
+
+// TestEvalOutputSpecEvaluateRejectsWrongState verifies PrintSpecEvalOutput
+// rejects being called outside specifying EVALUATE, naming the current state.
+func TestEvalOutputSpecEvaluateRejectsWrongState(t *testing.T) {
+	s := &ForgeState{
+		Phase: PhaseSpecifying,
+		State: StateDraft,
+		Config: ForgeConfig{
+			Specifying: SpecifyingConfig{
+				Eval: EvalConfig{MinRounds: 1, MaxRounds: 3},
+			},
+		},
+		Specifying: &SpecifyingState{},
+	}
+
+	var buf bytes.Buffer
+	err := PrintSpecEvalOutput(&buf, s, ".")
+	if err == nil {
+		t.Fatal("expected error when calling PrintSpecEvalOutput outside specifying EVALUATE")
+	}
+	if !strings.Contains(err.Error(), string(StateDraft)) {
+		t.Errorf("expected error to mention current state %q, got: %v", StateDraft, err)
+	}
+}
+
+// specEvaluateState builds a specifying EVALUATE ForgeState with the given
+// eval_mode and eval agent type.
+func specEvaluateState(mode, atype string) *ForgeState {
+	return &ForgeState{
+		Phase: PhaseSpecifying,
+		State: StateEvaluate,
+		Config: ForgeConfig{
+			Specifying: SpecifyingConfig{
+				Eval: EvalConfig{MinRounds: 1, MaxRounds: 3, AgentConfig: AgentConfig{Type: atype}, EvalMode: mode},
+			},
+		},
+		Specifying: &SpecifyingState{
+			CurrentDomain: "optimizer",
+			BatchNumber:   1,
+			CurrentSpecs: []*ActiveSpec{
+				{ID: 1, Name: "Repo", Domain: "optimizer", Topic: "t", File: "optimizer/specs/repo.md", Round: 1},
+			},
+		},
+	}
+}
+
+// planEvaluateState builds a planning EVALUATE ForgeState with the given eval_mode.
+func planEvaluateState(mode, atype string) *ForgeState {
+	return &ForgeState{
+		Phase: PhasePlanning,
+		State: StateEvaluate,
+		Config: ForgeConfig{
+			Planning: PlanningConfig{
+				Eval: EvalConfig{MinRounds: 1, MaxRounds: 3, AgentConfig: AgentConfig{Type: atype}, EvalMode: mode},
+			},
+		},
+		Planning: &PlanningState{
+			CurrentPlan: &ActivePlan{ID: 1, Name: "Service Configuration", Domain: "launcher", File: "launcher/plan.json"},
+			Round:       1,
+		},
+	}
+}
+
+// implEvaluateState builds an implementing EVALUATE ForgeState with the given
+// eval_mode, driving the in-memory plan from ORIENT through to EVALUATE.
+func implEvaluateState(t *testing.T, dir, mode, atype string) *ForgeState {
+	t.Helper()
+	s := newImplementingState(dir, 1, 1)
+	s.Config.Implementing.Eval.EvalMode = mode
+	s.Config.Implementing.Eval.Type = atype
+	advanceImplToEvaluate(t, s, dir)
+	return s
+}
+
+// TestEvalEntryActionReportMode verifies that every eval-entry state renders the
+// report-mode Action: spawn-to-evaluate, run forgectl eval, and an advance line
+// carrying --eval-report.
+func TestEvalEntryActionReportMode(t *testing.T) {
+	dir := t.TempDir()
+
+	spec := outputOf(specEvaluateState("report", "opus"), ".")
+	if !strings.Contains(spec, "Please spawn 1 opus sub-agent to evaluate the spec batch.") {
+		t.Errorf("specifying report spawn line missing, got:\n%s", spec)
+	}
+	if !strings.Contains(spec, "The sub-agent should run: forgectl eval") {
+		t.Errorf("specifying report run line missing, got:\n%s", spec)
+	}
+	if !strings.Contains(spec, "advance with --verdict PASS|FAIL --eval-report <path>") {
+		t.Errorf("specifying report advance line missing, got:\n%s", spec)
+	}
+
+	plan := outputOf(planEvaluateState("report", "opus"), ".")
+	if !strings.Contains(plan, "Please spawn 1 opus sub-agent to evaluate the plan.") {
+		t.Errorf("planning report spawn line missing, got:\n%s", plan)
+	}
+	if !strings.Contains(plan, "Sub-agent runs: forgectl eval") {
+		t.Errorf("planning report run line missing, got:\n%s", plan)
+	}
+	if !strings.Contains(plan, "advance with --verdict PASS|FAIL --eval-report <path>") {
+		t.Errorf("planning report advance line missing, got:\n%s", plan)
+	}
+
+	impl := outputOf(implEvaluateState(t, dir, "report", "opus"), dir)
+	if !strings.Contains(impl, "Please spawn 1 opus sub-agent to evaluate the implementation batch.") {
+		t.Errorf("implementing report spawn line missing, got:\n%s", impl)
+	}
+	if !strings.Contains(impl, "advance with --eval-report <path> --verdict PASS|FAIL") {
+		t.Errorf("implementing report advance line missing, got:\n%s", impl)
+	}
+}
+
+// TestEvalEntryActionDirectMode verifies the direct-mode Action across eval-entry
+// states: spawn to evaluate AND correct, a staged-files note, and an advance line
+// with no --eval-report.
+func TestEvalEntryActionDirectMode(t *testing.T) {
+	dir := t.TempDir()
+
+	spec := outputOf(specEvaluateState("direct", "opus"), ".")
+	if !strings.Contains(spec, "Please spawn 1 opus sub-agent to evaluate and correct the spec.") {
+		t.Errorf("specifying direct spawn line missing, got:\n%s", spec)
+	}
+	if !strings.Contains(spec, "Spec files have been staged. Sub-agent makes corrections directly.") {
+		t.Errorf("specifying direct staged note missing, got:\n%s", spec)
+	}
+	if !strings.Contains(spec, "Sub-agent runs: forgectl eval") {
+		t.Errorf("specifying direct run line missing, got:\n%s", spec)
+	}
+	if strings.Contains(spec, "--eval-report") {
+		t.Errorf("specifying direct must not mention --eval-report, got:\n%s", spec)
+	}
+
+	plan := outputOf(planEvaluateState("direct", "opus"), ".")
+	if !strings.Contains(plan, "evaluate and correct the plan.") {
+		t.Errorf("planning direct spawn line missing, got:\n%s", plan)
+	}
+	if !strings.Contains(plan, "Plan files have been staged. Sub-agent makes corrections directly.") {
+		t.Errorf("planning direct staged note missing, got:\n%s", plan)
+	}
+
+	impl := outputOf(implEvaluateState(t, dir, "direct", "opus"), dir)
+	if !strings.Contains(impl, "evaluate and correct the batch.") {
+		t.Errorf("implementing direct spawn line missing, got:\n%s", impl)
+	}
+	if !strings.Contains(impl, "Batch files have been staged. Sub-agent makes corrections directly.") {
+		t.Errorf("implementing direct staged note missing, got:\n%s", impl)
+	}
+	if strings.Contains(impl, "--eval-report") {
+		t.Errorf("implementing direct must not mention --eval-report, got:\n%s", impl)
+	}
+}
+
+// TestEvalEntryActionConversationalMode verifies the conversational-mode Action:
+// spawn to evaluate (no "and correct"), no staged-files note, and an advance line
+// with no --eval-report.
+func TestEvalEntryActionConversationalMode(t *testing.T) {
+	dir := t.TempDir()
+
+	spec := outputOf(specEvaluateState("conversational", "opus"), ".")
+	if !strings.Contains(spec, "Please spawn 1 opus sub-agent to evaluate the spec batch.") {
+		t.Errorf("specifying conversational spawn line missing, got:\n%s", spec)
+	}
+	if strings.Contains(spec, "--eval-report") {
+		t.Errorf("specifying conversational must not mention --eval-report, got:\n%s", spec)
+	}
+	if strings.Contains(spec, "have been staged") {
+		t.Errorf("specifying conversational must not include a staged-files note, got:\n%s", spec)
+	}
+	if !strings.Contains(spec, "advance with --verdict PASS|FAIL") {
+		t.Errorf("specifying conversational advance line missing, got:\n%s", spec)
+	}
+
+	plan := outputOf(planEvaluateState("conversational", "opus"), ".")
+	if !strings.Contains(plan, "Please spawn 1 opus sub-agent to evaluate the plan.") {
+		t.Errorf("planning conversational spawn line missing, got:\n%s", plan)
+	}
+	if strings.Contains(plan, "--eval-report") {
+		t.Errorf("planning conversational must not mention --eval-report, got:\n%s", plan)
+	}
+
+	impl := outputOf(implEvaluateState(t, dir, "conversational", "opus"), dir)
+	if !strings.Contains(impl, "Please spawn 1 opus sub-agent to evaluate the implementation batch.") {
+		t.Errorf("implementing conversational spawn line missing, got:\n%s", impl)
+	}
+	if strings.Contains(impl, "--eval-report") {
+		t.Errorf("implementing conversational must not mention --eval-report, got:\n%s", impl)
+	}
+}
+
+// TestEvalEntryActionEdgeCases covers the cross-reference / reconciliation eval
+// states (whose mode resolves from specifying.eval) and back-compat resolution
+// (enable_eval_output:true + no eval_mode → report wording, exercising EvalModeFor).
+func TestEvalEntryActionEdgeCases(t *testing.T) {
+	// CROSS_REFERENCE_EVAL — direct mode resolved from specifying.eval.
+	crEval := &ForgeState{
+		Phase: PhaseSpecifying,
+		State: StateCrossReferenceEval,
+		Config: ForgeConfig{
+			Specifying: SpecifyingConfig{
+				Eval:           EvalConfig{MinRounds: 1, MaxRounds: 3, EvalMode: "direct"},
+				CrossReference: CrossRefConfig{MinRounds: 1, MaxRounds: 2, Eval: AgentConfig{Type: "opus"}},
+			},
+		},
+		Specifying: &SpecifyingState{
+			CurrentDomain:  "optimizer",
+			CrossReference: map[string]*CrossReferenceState{"optimizer": {Domain: "optimizer", Round: 1}},
+			Completed:      []CompletedSpec{{ID: 1, Name: "a", Domain: "optimizer", File: "optimizer/specs/a.md"}},
+		},
+	}
+	cr := outputOf(crEval, ".")
+	if !strings.Contains(cr, "Please spawn 1 opus sub-agent to evaluate and correct cross-references.") {
+		t.Errorf("cross-ref direct spawn line missing, got:\n%s", cr)
+	}
+	if !strings.Contains(cr, "Spec files have been staged. Sub-agent makes corrections directly.") {
+		t.Errorf("cross-ref direct staged note missing, got:\n%s", cr)
+	}
+
+	// RECONCILE_EVAL — conversational mode resolved from specifying.eval.
+	rcEval := &ForgeState{
+		Phase: PhaseSpecifying,
+		State: StateReconcileEval,
+		Config: ForgeConfig{
+			Specifying: SpecifyingConfig{
+				Eval:           EvalConfig{MinRounds: 1, MaxRounds: 3, EvalMode: "conversational"},
+				Reconciliation: ReconciliationConfig{MinRounds: 0, MaxRounds: 3},
+			},
+		},
+		Specifying: &SpecifyingState{
+			Reconcile: &ReconcileState{Round: 1},
+			Completed: []CompletedSpec{{ID: 1, Name: "a", Domain: "optimizer", File: "optimizer/specs/a.md"}},
+		},
+	}
+	rc := outputOf(rcEval, ".")
+	if !strings.Contains(rc, "Please spawn 1 opus sub-agent to evaluate cross-domain reconciliation.") {
+		t.Errorf("reconcile conversational spawn line missing, got:\n%s", rc)
+	}
+	if strings.Contains(rc, "--eval-report") {
+		t.Errorf("reconcile conversational must not mention --eval-report, got:\n%s", rc)
+	}
+
+	// Back-compat: a locked session with enable_eval_output:true and no eval_mode
+	// must resolve to report wording (carrying --eval-report) via EvalModeFor.
+	legacy := specEvaluateState("", "opus")
+	legacy.Config.Specifying.Eval.EnableEvalOutput = true
+	out := outputOf(legacy, ".")
+	if !strings.Contains(out, "advance with --verdict PASS|FAIL --eval-report <path>") {
+		t.Errorf("legacy enable_eval_output session should resolve to report wording, got:\n%s", out)
+	}
+}
+
+// specRefineState builds a specifying REFINE ForgeState with the given eval_mode.
+func specRefineState(mode string) *ForgeState {
+	return &ForgeState{
+		Phase: PhaseSpecifying,
+		State: StateRefine,
+		Config: ForgeConfig{
+			Specifying: SpecifyingConfig{
+				Eval: EvalConfig{MinRounds: 1, MaxRounds: 3, EvalMode: mode},
+			},
+		},
+		Specifying: &SpecifyingState{
+			CurrentDomain: "optimizer",
+			BatchNumber:   1,
+			CurrentSpecs: []*ActiveSpec{
+				{ID: 1, Name: "Repo", Domain: "optimizer", File: "optimizer/specs/repo.md", Round: 1},
+			},
+		},
+	}
+}
+
+// planRefineState builds a planning REFINE ForgeState with the given eval_mode
+// and last-eval verdict ("FAIL" or "PASS"; PASS below min_rounds adds a preamble).
+func planRefineState(mode, verdict string) *ForgeState {
+	return &ForgeState{
+		Phase: PhasePlanning,
+		State: StateRefine,
+		Config: ForgeConfig{
+			Planning: PlanningConfig{
+				Eval: EvalConfig{MinRounds: 2, MaxRounds: 3, EvalMode: mode},
+			},
+		},
+		Planning: &PlanningState{
+			CurrentPlan: &ActivePlan{ID: 1, Name: "Service Configuration", Domain: "launcher", File: "launcher/plan.json"},
+			Round:       1,
+			Evals:       []EvalRecord{{Round: 1, Verdict: verdict}},
+		},
+	}
+}
+
+// implReentryState drives an in-memory implementing plan to the IMPLEMENT
+// after-eval re-entry (round 2+) under the given eval_mode and returns it.
+func implReentryState(t *testing.T, dir, mode string) *ForgeState {
+	t.Helper()
+	s := newImplementingState(dir, 1, 1)
+	s.Config.Implementing.Eval.EvalMode = mode
+	advanceImplToEvaluate(t, s, dir)
+	in := AdvanceInput{Verdict: "FAIL"}
+	if mode == "report" {
+		ef := filepath.Join(dir, "ef.md")
+		os.WriteFile(ef, []byte("x"), 0644)
+		in.EvalReport = ef
+	}
+	if err := Advance(s, in, dir); err != nil {
+		t.Fatalf("FAIL back to IMPLEMENT: %v", err)
+	}
+	if s.State != StateImplement {
+		t.Fatalf("expected IMPLEMENT round 2, got %s", s.State)
+	}
+	return s
+}
+
+// TestRefineActionReportMode verifies REFINE (specifying/planning) and the
+// implementing IMPLEMENT after-eval re-entry render the report-mode guidance:
+// "Study the eval file <path>".
+func TestRefineActionReportMode(t *testing.T) {
+	dir := t.TempDir()
+
+	spec := outputOf(specRefineState("report"), ".")
+	if !strings.Contains(spec, `Study the eval file "optimizer/specs/.eval/batch-1-r1.md"`) {
+		t.Errorf("specifying report refine missing eval file line, got:\n%s", spec)
+	}
+	if !strings.Contains(spec, "and implement any corrections as needed.") {
+		t.Errorf("specifying report refine missing follow-up line, got:\n%s", spec)
+	}
+	if !strings.Contains(spec, `Apply "fresh" eyes and a tightened lens when reviewing the work,`) {
+		t.Errorf("specifying refine missing shared fresh-eyes line, got:\n%s", spec)
+	}
+	if !strings.Contains(spec, "Format:      references/spec-format.md") {
+		t.Errorf("specifying report refine should keep Format/Process/Scoping, got:\n%s", spec)
+	}
+	if !strings.Contains(spec, "advance to continue evaluation.") {
+		t.Errorf("specifying report refine should end 'advance to continue evaluation.', got:\n%s", spec)
+	}
+
+	plan := outputOf(planRefineState("report", "FAIL"), ".")
+	if !strings.Contains(plan, `Study the eval file "launcher/evals/round-1.md"`) {
+		t.Errorf("planning report refine missing eval file line, got:\n%s", plan)
+	}
+
+	// PASS below min_rounds prints the preamble line.
+	planPass := outputOf(planRefineState("report", "PASS"), ".")
+	if !strings.Contains(planPass, "Minimum evaluation rounds not met.") {
+		t.Errorf("planning PASS-below-min refine missing preamble, got:\n%s", planPass)
+	}
+	if !strings.Contains(planPass, `Study the eval file "launcher/evals/round-1.md"`) {
+		t.Errorf("planning PASS-below-min refine missing eval file line, got:\n%s", planPass)
+	}
+
+	impl := outputOf(implReentryState(t, dir, "report"), dir)
+	if !strings.Contains(impl, "Study the eval file") {
+		t.Errorf("implementing report re-entry missing eval file line, got:\n%s", impl)
+	}
+}
+
+// TestRefineActionDirectMode verifies the direct-mode guidance across REFINE and
+// the implementing re-entry: "Review unstaged changes from the evaluator (git diff)."
+func TestRefineActionDirectMode(t *testing.T) {
+	dir := t.TempDir()
+
+	spec := outputOf(specRefineState("direct"), ".")
+	if !strings.Contains(spec, "Review unstaged changes from the evaluator (git diff).") {
+		t.Errorf("specifying direct refine missing review line, got:\n%s", spec)
+	}
+	if !strings.Contains(spec, "Accept, revise, or revert corrections as needed.") {
+		t.Errorf("specifying direct refine missing accept/revert line, got:\n%s", spec)
+	}
+	if strings.Contains(spec, "Format:") {
+		t.Errorf("specifying direct refine must not include Format/Process/Scoping, got:\n%s", spec)
+	}
+	if !strings.Contains(spec, "advance to continue.") || strings.Contains(spec, "advance to continue evaluation.") {
+		t.Errorf("specifying direct refine should end 'advance to continue.', got:\n%s", spec)
+	}
+
+	plan := outputOf(planRefineState("direct", "FAIL"), ".")
+	if !strings.Contains(plan, "Review unstaged changes from the evaluator (git diff).") {
+		t.Errorf("planning direct refine missing review line, got:\n%s", plan)
+	}
+
+	impl := outputOf(implReentryState(t, dir, "direct"), dir)
+	if !strings.Contains(impl, "Review unstaged changes from the evaluator (git diff).") {
+		t.Errorf("implementing direct re-entry missing review line, got:\n%s", impl)
+	}
+}
+
+// TestRefineActionConversationalMode verifies the conversational-mode guidance
+// across REFINE and the implementing re-entry.
+func TestRefineActionConversationalMode(t *testing.T) {
+	dir := t.TempDir()
+
+	spec := outputOf(specRefineState("conversational"), ".")
+	if !strings.Contains(spec, "Make corrections based off communication with the evaluator.") {
+		t.Errorf("specifying conversational refine missing line, got:\n%s", spec)
+	}
+	if !strings.Contains(spec, "Implement any corrections as needed.") {
+		t.Errorf("specifying conversational refine missing follow-up, got:\n%s", spec)
+	}
+	if !strings.Contains(spec, "advance to continue evaluation.") {
+		t.Errorf("specifying conversational refine should end 'advance to continue evaluation.', got:\n%s", spec)
+	}
+
+	plan := outputOf(planRefineState("conversational", "FAIL"), ".")
+	if !strings.Contains(plan, "Make corrections based off communication with the evaluator.") {
+		t.Errorf("planning conversational refine missing line, got:\n%s", plan)
+	}
+
+	impl := outputOf(implReentryState(t, dir, "conversational"), dir)
+	if !strings.Contains(impl, "Make corrections based off communication with the evaluator.") {
+		t.Errorf("implementing conversational re-entry missing line, got:\n%s", impl)
+	}
+}
+
 // TestEvalOutputOutsideValidStatesReturnsError verifies that eval command outside
 // valid states returns an error naming the current state.
 func TestEvalOutputOutsideValidStatesReturnsError(t *testing.T) {
