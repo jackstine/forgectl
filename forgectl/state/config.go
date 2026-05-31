@@ -24,6 +24,7 @@ type tomlEvalConfig struct {
 	Type             string          `toml:"type"`
 	Count            int             `toml:"count"`
 	EnableEvalOutput *bool           `toml:"enable_eval_output"`
+	EvalMode         *string         `toml:"eval_mode"` // pointer so 'unset' is distinguishable
 	Eval             tomlAgentConfig `toml:"eval"`
 }
 
@@ -299,6 +300,9 @@ func mergeEvalConfig(dst *EvalConfig, src *tomlEvalConfig) {
 	}
 	if src.EnableEvalOutput != nil {
 		dst.EnableEvalOutput = *src.EnableEvalOutput
+	}
+	if src.EvalMode != nil {
+		dst.EvalMode = *src.EvalMode
 	}
 }
 

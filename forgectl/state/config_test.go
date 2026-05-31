@@ -392,3 +392,79 @@ func TestValidateConfigReverseEngineeringMinExceedsMax(t *testing.T) {
 		t.Errorf("expected reverse_engineering.reconcile min>max violation, got: %v", errs)
 	}
 }
+
+// TestDefaultConfigEvalModeSeeded verifies DefaultForgeConfig seeds eval_mode="report"
+// on the specifying, planning, and implementing eval blocks.
+func TestDefaultConfigEvalModeSeeded(t *testing.T) {
+	cfg := DefaultForgeConfig()
+	for _, tc := range []struct {
+		phase string
+		mode  string
+	}{
+		{"specifying", cfg.Specifying.Eval.EvalMode},
+		{"planning", cfg.Planning.Eval.EvalMode},
+		{"implementing", cfg.Implementing.Eval.EvalMode},
+	} {
+		if tc.mode != "report" {
+			t.Errorf("%s.eval.eval_mode: got %q, want %q", tc.phase, tc.mode, "report")
+		}
+	}
+}
+
+// TestLoadConfigEvalModeOverride verifies a [<phase>.eval] TOML block with
+// eval_mode="direct" overrides the seeded default (this is the value locked into
+// the state file at init via cmd/init.go Config: cfg).
+func TestLoadConfigEvalModeOverride(t *testing.T) {
+	dir := t.TempDir()
+	forgectlDir := filepath.Join(dir, ".forgectl")
+	if err := os.MkdirAll(forgectlDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	tomlContent := `
+[implementing.eval]
+eval_mode = "direct"
+`
+	if err := os.WriteFile(filepath.Join(forgectlDir, "config"), []byte(tomlContent), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := LoadConfig(dir)
+	if err != nil {
+		t.Fatalf("LoadConfig: %v", err)
+	}
+
+	if cfg.Implementing.Eval.EvalMode != "direct" {
+		t.Errorf("implementing.eval.eval_mode: got %q, want %q", cfg.Implementing.Eval.EvalMode, "direct")
+	}
+}
+
+// TestLoadConfigEvalModeOmittedKeepsDefault verifies that omitting eval_mode in a
+// TOML eval block leaves the seeded default in place: a nil pointer source must not
+// zero the destination during merge.
+func TestLoadConfigEvalModeOmittedKeepsDefault(t *testing.T) {
+	dir := t.TempDir()
+	forgectlDir := filepath.Join(dir, ".forgectl")
+	if err := os.MkdirAll(forgectlDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	// An eval block that sets other fields but omits eval_mode entirely.
+	tomlContent := `
+[implementing.eval]
+min_rounds = 2
+max_rounds = 4
+`
+	if err := os.WriteFile(filepath.Join(forgectlDir, "config"), []byte(tomlContent), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := LoadConfig(dir)
+	if err != nil {
+		t.Fatalf("LoadConfig: %v", err)
+	}
+
+	if cfg.Implementing.Eval.EvalMode != "report" {
+		t.Errorf("implementing.eval.eval_mode: got %q, want default %q", cfg.Implementing.Eval.EvalMode, "report")
+	}
+}

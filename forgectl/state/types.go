@@ -64,10 +64,11 @@ type AgentConfig struct {
 // EvalConfig configures evaluation rounds. AgentConfig fields are embedded
 // (promoted to the same JSON level) to match the flat schema in state-persistence.md.
 type EvalConfig struct {
-	MinRounds        int  `json:"min_rounds"`
-	MaxRounds        int  `json:"max_rounds"`
-	AgentConfig           // embedded: model, type, count at same JSON level
-	EnableEvalOutput bool `json:"enable_eval_output"`
+	MinRounds        int    `json:"min_rounds"`
+	MaxRounds        int    `json:"max_rounds"`
+	AgentConfig             // embedded: model, type, count at same JSON level
+	EnableEvalOutput bool   `json:"enable_eval_output"`
+	EvalMode         string `json:"eval_mode"` // "report" | "direct" | "conversational"
 }
 
 // CrossRefConfig configures cross-reference evaluation.
@@ -199,6 +200,7 @@ func DefaultForgeConfig() ForgeConfig {
 					Type:  "eval",
 					Count: 1,
 				},
+				EvalMode: "report",
 			},
 		},
 		Planning: PlanningConfig{
@@ -212,6 +214,7 @@ func DefaultForgeConfig() ForgeConfig {
 					Type:  "eval",
 					Count: 1,
 				},
+				EvalMode: "report",
 			},
 		},
 		Implementing: ImplementingConfig{
@@ -225,6 +228,7 @@ func DefaultForgeConfig() ForgeConfig {
 					Type:  "eval",
 					Count: 1,
 				},
+				EvalMode: "report",
 			},
 		},
 		ReverseEngineering: ReverseEngineeringConfig{
