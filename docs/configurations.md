@@ -59,6 +59,7 @@ max_rounds = 3
 type = "eval"
 model = "opus"
 count = 1
+eval_mode = "report"
 enable_eval_output = false
 
 [specifying.cross_reference]
@@ -98,6 +99,7 @@ max_rounds = 3
 type = "eval"
 model = "opus"
 count = 1
+eval_mode = "report"
 enable_eval_output = false
 
 [planning.refine]
@@ -115,6 +117,7 @@ max_rounds = 3
 type = "eval"
 model = "opus"
 count = 1
+eval_mode = "report"
 enable_eval_output = false
 
 [paths]
@@ -218,12 +221,27 @@ Model name for spec batch evaluation at EVALUATE state.
 
 Number of sub-agents to spawn for spec batch evaluation.
 
+#### `specifying.eval.eval_mode`
+
+- **Type:** string
+- **Default:** `"report"`
+- **Values:** `"report"`, `"direct"`, `"conversational"` (empty allowed — resolved by back-compat)
+
+Controls how the eval sub-agent records its findings and how they are applied:
+
+- `"report"` — sub-agent writes a report file; `--eval-report <path>` is required on `advance` in EVALUATE.
+- `"direct"` — sub-agent edits the spec files in place (corrections land as unstaged changes); only `--verdict` is required.
+- `"conversational"` — sub-agent relays its verdict verbally; no file written; only `--verdict` is required.
+
+`--eval-report` is accepted only in `"report"` mode; otherwise it is ignored with a warning. The `RECONCILE_EVAL` and `CROSS_REFERENCE_EVAL` spawn points inherit this mode; in `"direct"` mode reconciliation works on staged changes and omits the report-output instruction.
+
 #### `specifying.eval.enable_eval_output`
 
 - **Type:** boolean
 - **Default:** `false`
+- **Status:** Legacy — superseded by `eval_mode`.
 
-When `true`, eval sub-agents write report files to disk and `--eval-report <path>` is required on `advance` in EVALUATE. When `false`, sub-agents communicate their verdict directly to the architect without writing a file; `--eval-report` is not required.
+Back-compat for sessions predating `eval_mode`. Consulted only when `eval_mode` is empty: `true` resolves to `"report"`, `false` resolves to `"conversational"`. An explicit `eval_mode` always wins, and `[general].enable_eval_output` participates in the same fallback.
 
 #### `specifying.cross_reference.min_rounds`
 
@@ -433,12 +451,27 @@ Model name for plan evaluation at EVALUATE state.
 
 Number of sub-agents to spawn for plan evaluation.
 
+#### `planning.eval.eval_mode`
+
+- **Type:** string
+- **Default:** `"report"`
+- **Values:** `"report"`, `"direct"`, `"conversational"` (empty allowed — resolved by back-compat)
+
+Controls how the eval sub-agent records its findings and how they are applied:
+
+- `"report"` — sub-agent writes a report file; `--eval-report <path>` is required on `advance` in EVALUATE.
+- `"direct"` — sub-agent edits the plan files (`plan.json`, `notes/`) in place (corrections land as unstaged changes); only `--verdict` is required.
+- `"conversational"` — sub-agent relays its verdict verbally; no file written; only `--verdict` is required.
+
+`--eval-report` is accepted only in `"report"` mode; otherwise it is ignored with a warning.
+
 #### `planning.eval.enable_eval_output`
 
 - **Type:** boolean
 - **Default:** `false`
+- **Status:** Legacy — superseded by `eval_mode`.
 
-When `true`, eval sub-agents write report files to disk and `--eval-report <path>` is required on `advance` in EVALUATE. When `false`, sub-agents communicate their verdict directly to the architect without writing a file; `--eval-report` is not required.
+Back-compat for sessions predating `eval_mode`. Consulted only when `eval_mode` is empty: `true` resolves to `"report"`, `false` resolves to `"conversational"`. An explicit `eval_mode` always wins, and `[general].enable_eval_output` participates in the same fallback.
 
 #### `planning.refine.type`
 
@@ -518,12 +551,27 @@ Model name for implementation evaluation at EVALUATE state.
 
 Number of sub-agents to spawn for implementation evaluation.
 
+#### `implementing.eval.eval_mode`
+
+- **Type:** string
+- **Default:** `"report"`
+- **Values:** `"report"`, `"direct"`, `"conversational"` (empty allowed — resolved by back-compat)
+
+Controls how the eval sub-agent records its findings and how they are applied:
+
+- `"report"` — sub-agent writes a report file; `--eval-report <path>` is required on `advance` in EVALUATE.
+- `"direct"` — sub-agent edits the batch implementation files in place (corrections land as unstaged changes); only `--verdict` is required.
+- `"conversational"` — sub-agent relays its verdict verbally; no file written; only `--verdict` is required.
+
+`--eval-report` is accepted only in `"report"` mode; otherwise it is ignored with a warning.
+
 #### `implementing.eval.enable_eval_output`
 
 - **Type:** boolean
 - **Default:** `false`
+- **Status:** Legacy — superseded by `eval_mode`.
 
-When `true`, eval sub-agents write report files to disk and `--eval-report <path>` is required on `advance` in EVALUATE. When `false`, sub-agents communicate their verdict directly to the architect without writing a file; `--eval-report` is not required.
+Back-compat for sessions predating `eval_mode`. Consulted only when `eval_mode` is empty: `true` resolves to `"report"`, `false` resolves to `"conversational"`. An explicit `eval_mode` always wins, and `[general].enable_eval_output` participates in the same fallback.
 
 #### `implementing.commit_strategy`
 
@@ -618,7 +666,7 @@ After `init`, the effective configuration is stored in the state file's `config`
     "specifying": {
       "batch": 3,
       "commit_strategy": "all-specs",
-      "eval": { "min_rounds": 1, "max_rounds": 3, "type": "eval", "model": "opus", "count": 1, "enable_eval_output": false },
+      "eval": { "min_rounds": 1, "max_rounds": 3, "type": "eval", "model": "opus", "count": 1, "eval_mode": "report", "enable_eval_output": false },
       "cross_reference": {
         "min_rounds": 1,
         "max_rounds": 2,
@@ -636,13 +684,13 @@ After `init`, the effective configuration is stored in the state file's `config`
       "self_review": false,
       "plan_all_before_implementing": false,
       "study_code": { "type": "explore", "model": "haiku", "count": 3 },
-      "eval": { "min_rounds": 1, "max_rounds": 3, "type": "eval", "model": "opus", "count": 1, "enable_eval_output": false },
+      "eval": { "min_rounds": 1, "max_rounds": 3, "type": "eval", "model": "opus", "count": 1, "eval_mode": "report", "enable_eval_output": false },
       "refine": { "type": "refine", "model": "opus", "count": 1 }
     },
     "implementing": {
       "batch": 2,
       "commit_strategy": "scoped",
-      "eval": { "min_rounds": 1, "max_rounds": 3, "type": "eval", "model": "opus", "count": 1, "enable_eval_output": false }
+      "eval": { "min_rounds": 1, "max_rounds": 3, "type": "eval", "model": "opus", "count": 1, "eval_mode": "report", "enable_eval_output": false }
     },
     "paths": {
       "state_dir": ".forgectl/state",
