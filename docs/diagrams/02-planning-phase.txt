@@ -172,12 +172,14 @@
   │   10. Testing Criteria — all tests mapped to plan items                │
   │   11. Dependencies     — DAG valid, schema compliant                   │
   │                                                                         │
-  │  Output: evals/round-N.md  (when enable_eval_output: true)              │
+  │  Output: evals/round-N.md  (eval_mode: "report")                        │
   │                                                                         │
-  │  Action (enable_eval_output: true):                                     │
+  │  Action (eval_mode: "report"):                                          │
   │    forgectl advance --verdict PASS|FAIL --eval-report <path>            │
-  │  Action (enable_eval_output: false):                                    │
+  │  Action (eval_mode: "direct" | "conversational"):                       │
   │    forgectl advance --verdict PASS|FAIL                                 │
+  │    (direct: sub-agent edits plan/notes in place; conversational:        │
+  │     verdict relayed verbally — see [planning.eval].eval_mode)           │
   └────────────────┬──────────────────────────────┬─────────────────────────┘
                    │                              │
       ┌────────────┤                              │

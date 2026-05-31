@@ -117,7 +117,10 @@ Extends AgentConfig with additional evaluation fields:
 | `count` | int | Number of agent instances to spawn |
 | `min_rounds` | int | Minimum evaluation rounds (>= 1) |
 | `max_rounds` | int | Maximum evaluation rounds (>= min_rounds) |
-| `enable_eval_output` | bool | Whether eval sub-agents write report files (default: `false`) |
+| `eval_mode` | string | How eval findings are recorded and applied: `"report"` (write a report file; default for new sessions), `"direct"` (sub-agent edits files in place), or `"conversational"` (verbal verdict, no file). An empty value resolves via back-compat (see below). |
+| `enable_eval_output` | bool | **Legacy / back-compat.** Superseded by `eval_mode`. When `eval_mode` is empty, `enable_eval_output: true` (here or in `[general]`) resolves to `"report"`, otherwise `"conversational"`. An explicit `eval_mode` always wins (default: `false`). |
+
+**eval_mode resolution (`EvalModeFor`):** an explicit `eval_mode` wins; if empty, `enable_eval_output` (per-eval or `[general]`) → `"report"` when true, else `"conversational"`. Valid values are `"report"`, `"direct"`, `"conversational"`; an empty string is accepted (resolved by back-compat). Reconciliation and cross-reference evaluation inherit the mode from `specifying.eval`.
 
 ### CrossReferenceConfig
 

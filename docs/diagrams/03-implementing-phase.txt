@@ -105,12 +105,12 @@
   ║  │  │     - Integration (works with deps?)                    │     │  ║
   ║  │  │                                                         │     │  ║
   ║  │  │  Output: evals/batch-N-round-M.md                       │     │  ║
-  ║  │  │         (only when enable_eval_output: true)            │     │  ║
+  ║  │  │         (eval_mode: "report" only)                      │     │  ║
   ║  │  │                                                         │     │  ║
-  ║  │  │  Action (enable_eval_output: true):                     │     │  ║
+  ║  │  │  Action (eval_mode: "report"):                          │     │  ║
   ║  │  │    forgectl advance \                                   │     │  ║
   ║  │  │      --eval-report <path> --verdict PASS|FAIL           │     │  ║
-  ║  │  │  Action (enable_eval_output: false):                    │     │  ║
+  ║  │  │  Action (eval_mode: direct | conversational):           │     │  ║
   ║  │  │    forgectl advance --verdict PASS|FAIL                 │     │  ║
   ║  │  └──────────┬──────────────────────┬──────────────────────┘     │  ║
   ║  │             │                      │                             │  ║
@@ -123,12 +123,12 @@
   ║  │                        │                                         │  ║
   ║  │   IMPLEMENT (round 2+) │      COMMIT                             │  ║
   ║  │                        │     items: passed                        │  ║
-  ║  │   enable_eval_output:  │                                         │  ║
-  ║  │    true → Study eval   │      COMMIT                             │  ║
-  ║  │           report       │     items: failed (force-accept)         │  ║
-  ║  │    false → Use         │                                         │  ║
-  ║  │           evaluator    │                                         │  ║
-  ║  │           feedback     │                                         │  ║
+  ║  │   Apply eval_mode:     │                                         │  ║
+  ║  │    report: study file  │      COMMIT                             │  ║
+  ║  │    direct: review diff │     items: failed (force-accept)         │  ║
+  ║  │    conversational:     │                                         │  ║
+  ║  │      relay verbally    │                                         │  ║
+  ║  │                        │                                         │  ║
   ║  │   - Fix deficiencies   │                                         │  ║
   ║  │   - Run tests          │                                         │  ║
   ║  │   - No --message       │                                         │  ║

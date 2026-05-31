@@ -134,36 +134,57 @@
 
 
   ═══════════════════════════════════════════════════════════════════════════
-  enable_eval_output CONFIGURATION
+  eval_mode CONFIGURATION
   ═══════════════════════════════════════════════════════════════════════════
 
-  The per-phase enable_eval_output config flag controls whether eval sub-agents
-  write reports to files or communicate verdicts verbally.
+  The per-phase eval_mode config flag controls how an eval sub-agent records its
+  findings and how the engineer applies them. It has three values.
   Configured at: [specifying.eval], [planning.eval], [implementing.eval]
+  (Reconciliation and cross-reference eval inherit specifying.eval's mode.)
 
-  When enable_eval_output: true (not default)
-  ────────────────────────────────────────
-  - EVALUATE output includes: "After completion, advance with
-    --verdict PASS|FAIL --eval-report <path>"
-  - REFINE output includes the eval report path to study
+  eval_mode: "report"  (default for new sessions)
+  ───────────────────────────────────────────────
+  - EVALUATE output includes: "advance with --verdict PASS|FAIL --eval-report <path>"
+  - forgectl eval emits a "--- REPORT OUTPUT ---" section naming the report path
+    and a "--- PREVIOUS EVALUATIONS ---" list of prior rounds with their paths
+  - REFINE output says: "Study the eval file <path> and implement any corrections"
   - forgectl advance requires --eval-report <path>
-  - Report written to disk and stored as reference
+  - Sub-agent writes a report to disk; stored as reference
 
-  When enable_eval_output: false
-  ──────────────────────────────
-  - EVALUATE output includes: "After completion, advance with --verdict PASS|FAIL"
-  - REFINE output says "Make corrections based off communication with the evaluator"
+  eval_mode: "direct"
+  ───────────────────
+  - EVALUATE output asks the sub-agent to "evaluate and correct" and notes the
+    corrections land as unstaged changes (git diff)
+  - forgectl eval emits "--- REPORT OUTPUT ---" → "Make corrections directly to
+    the <plan|batch|spec> files." and lists prior rounds as "(direct corrections)"
+    (reconciliation omits REPORT OUTPUT — it works on staged changes)
+  - REFINE output says: "Review unstaged changes from the evaluator (git diff)"
   - forgectl advance requires only --verdict (no --eval-report)
-  - No report file written; verdict communicated directly by sub-agent
+  - No report file; the sub-agent edits the files in place
 
-  Both modes:
+  eval_mode: "conversational"
+  ───────────────────────────
+  - EVALUATE output includes: "advance with --verdict PASS|FAIL"
+  - forgectl eval omits both the REPORT OUTPUT and PREVIOUS EVALUATIONS sections
+  - REFINE output says: "Make corrections based off communication with the evaluator"
+  - forgectl advance requires only --verdict (no --eval-report)
+  - No report file; verdict communicated verbally by the sub-agent
+
+  All modes:
   - forgectl eval outputs full evaluator context (embedded evaluator prompts)
-  - --eval-report flag accepted but ignored when enable_eval_output: false
-    (warning printed: "--eval-report is ignored, eval output is not enabled")
+  - --eval-report is accepted but ignored unless mode is "report" (warning printed:
+    "--eval-report is ignored, --eval-report is only used in report mode")
+
+  Back-compat (legacy enable_eval_output)
+  ───────────────────────────────────────
+  eval_mode resolution (EvalModeFor) honors the older enable_eval_output boolean
+  when eval_mode is unset. An explicit eval_mode always wins; otherwise:
+  - enable_eval_output: true  (per-eval or [general]) → resolves to "report"
+  - enable_eval_output: false                          → resolves to "conversational"
 
 
   ═══════════════════════════════════════════════════════════════════════════
-  EVAL REPORT LOCATIONS  (when enable_eval_output: true)
+  EVAL REPORT LOCATIONS  (eval_mode: "report")
   ═══════════════════════════════════════════════════════════════════════════
 
   Specifying:    <domain>/specs/.eval/batch-N-rN.md
