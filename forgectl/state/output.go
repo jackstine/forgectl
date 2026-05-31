@@ -111,6 +111,45 @@ func writeRefineBody(w io.Writer, mode, evalFile, firstLabel, indent string) {
 	fmt.Fprintf(w, "%sthen apply corrections as needed.\n", indent)
 }
 
+// writeEvalTrailingSections renders the per-mode --- PREVIOUS EVALUATIONS ---
+// and --- REPORT OUTPUT --- sections shared by every eval-context output
+// function. It emits a single leading blank line before the first section it
+// writes (and one between the two), so callers should NOT pre-emit a separator.
+//   - report:         lists prior rounds as "Round n: VERDICT — <report path>";
+//                     REPORT OUTPUT names the report file to write.
+//   - direct:         lists prior rounds as "Round n: VERDICT — (direct corrections)";
+//                     REPORT OUTPUT instructs direct corrections to the <directNoun>
+//                     files — UNLESS directShowsReport is false (reconciliation),
+//                     where the REPORT OUTPUT section is omitted entirely.
+//   - conversational: both sections omitted.
+func writeEvalTrailingSections(w io.Writer, mode string, evals []EvalRecord, reportFile, directNoun string, directShowsReport bool) {
+	if mode != "report" && mode != "direct" {
+		return // conversational (or unknown) — omit both sections.
+	}
+	if len(evals) > 0 {
+		fmt.Fprintf(w, "\n--- PREVIOUS EVALUATIONS ---\n\n")
+		for _, e := range evals {
+			fmt.Fprintf(w, "Round %d: %s", e.Round, e.Verdict)
+			if mode == "direct" {
+				fmt.Fprintf(w, " — (direct corrections)")
+			} else if e.EvalReport != "" {
+				fmt.Fprintf(w, " — %s", e.EvalReport)
+			}
+			fmt.Fprintln(w)
+		}
+	}
+	if mode == "direct" {
+		if directShowsReport {
+			fmt.Fprintf(w, "\n--- REPORT OUTPUT ---\n\n")
+			fmt.Fprintf(w, "Make corrections directly to the %s files.\n", directNoun)
+		}
+		return
+	}
+	fmt.Fprintf(w, "\n--- REPORT OUTPUT ---\n\n")
+	fmt.Fprintf(w, "Write your evaluation report to:\n")
+	fmt.Fprintf(w, "  %s\n", reportFile)
+}
+
 func printSpecifyingOutput(w io.Writer, s *ForgeState, dir string) {
 	spec := s.Specifying
 	var cs *ActiveSpec
@@ -1696,25 +1735,10 @@ func printPlanningEval(w io.Writer, s *ForgeState) error {
 		fmt.Fprintf(w, "  - %s\n", spec)
 	}
 
-	// Previous evaluations.
-	if len(plan.Evals) > 0 {
-		fmt.Fprintf(w, "\n--- PREVIOUS EVALUATIONS ---\n\n")
-		for _, e := range plan.Evals {
-			fmt.Fprintf(w, "Round %d: %s", e.Round, e.Verdict)
-			if e.EvalReport != "" {
-				fmt.Fprintf(w, " — %s", e.EvalReport)
-			}
-			fmt.Fprintln(w)
-		}
-	}
-
-	if s.Config.General.EnableEvalOutput {
-		evalDir := filepath.Join(filepath.Dir(plan.CurrentPlan.File), "evals")
-		reportFile := filepath.Join(evalDir, fmt.Sprintf("round-%d.md", plan.Round))
-		fmt.Fprintf(w, "\n--- REPORT OUTPUT ---\n\n")
-		fmt.Fprintf(w, "Write your evaluation report to:\n")
-		fmt.Fprintf(w, "  %s\n", reportFile)
-	}
+	// Previous evaluations + report output, per eval_mode.
+	evalDir := filepath.Join(filepath.Dir(plan.CurrentPlan.File), "evals")
+	reportFile := filepath.Join(evalDir, fmt.Sprintf("round-%d.md", plan.Round))
+	writeEvalTrailingSections(w, EvalModeFor(s.Config.Planning.Eval, s.Config.General), plan.Evals, reportFile, "plan", true)
 
 	return nil
 }
@@ -1749,11 +1773,16 @@ func printImplementingEval(w io.Writer, s *ForgeState, dir string) error {
 		return planErr
 	}
 
+	rendered := 0
 	for i, id := range batch.Items {
 		item := findItem(plan, id)
 		if item == nil {
 			continue
 		}
+		if rendered > 0 {
+			fmt.Fprintln(w)
+		}
+		rendered++
 
 		fmt.Fprintf(w, "[%d] %s — %s\n", i+1, item.ID, item.Name)
 		fmt.Fprintf(w, "    Description: %s\n", item.Description)
@@ -1790,39 +1819,20 @@ func printImplementingEval(w io.Writer, s *ForgeState, dir string) error {
 				fmt.Fprintf(w, "      [%s] %s\n", t.Category, t.Description)
 			}
 		}
-		fmt.Fprintln(w)
 	}
 
-	// Previous evaluations.
-	if len(batch.Evals) > 0 {
-		fmt.Fprintf(w, "--- PREVIOUS EVALUATIONS ---\n\n")
-		for _, e := range batch.Evals {
-			fmt.Fprintf(w, "Round %d: %s", e.Round, e.Verdict)
-			if e.EvalReport != "" {
-				fmt.Fprintf(w, " — %s", e.EvalReport)
-			}
-			fmt.Fprintln(w)
-		}
-	}
-
-	if s.Config.General.EnableEvalOutput {
-		evalDir := filepath.Join(currentPlanDir(s), "evals")
-		reportFile := filepath.Join(evalDir, fmt.Sprintf("batch-%d-round-%d.md", impl.BatchNumber, evalRound))
-		fmt.Fprintf(w, "\n--- REPORT OUTPUT ---\n\n")
-		fmt.Fprintf(w, "Write your evaluation report to:\n")
-		fmt.Fprintf(w, "  %s\n", reportFile)
-	}
+	// Previous evaluations + report output, per eval_mode.
+	evalDir := filepath.Join(currentPlanDir(s), "evals")
+	reportFile := filepath.Join(evalDir, fmt.Sprintf("batch-%d-round-%d.md", impl.BatchNumber, evalRound))
+	writeEvalTrailingSections(w, EvalModeFor(s.Config.Implementing.Eval, s.Config.General), batch.Evals, reportFile, "batch", true)
 
 	return nil
 }
 
 // PrintSpecEvalOutput prints the per-batch spec evaluation context for the
 // sub-agent. Valid in specifying EVALUATE state. It embeds the spec evaluator
-// prompt and lists the batch specs (filename, topic, full path).
-//
-// The per-mode --- REPORT OUTPUT --- and --- PREVIOUS EVALUATIONS --- sections
-// are added by the evalmode.eval-output-modes item; this function establishes
-// the header, evaluator instructions, and spec listing.
+// prompt, lists the batch specs (filename, topic, full path), and renders the
+// per-mode --- PREVIOUS EVALUATIONS --- and --- REPORT OUTPUT --- sections.
 func PrintSpecEvalOutput(w io.Writer, s *ForgeState, projectRoot string) error {
 	if s.Phase != PhaseSpecifying || s.State != StateEvaluate {
 		return fmt.Errorf("eval is only valid in EVALUATE, RECONCILE_EVAL, or CROSS_REFERENCE_EVAL state (current: %s)", s.State)
@@ -1850,6 +1860,9 @@ func PrintSpecEvalOutput(w io.Writer, s *ForgeState, projectRoot string) error {
 			fmt.Fprintln(w)
 		}
 	}
+
+	reportFile := filepath.Join(cs.Domain, "specs", ".eval", fmt.Sprintf("batch-%d-r%d.md", spec.BatchNumber, cs.Round))
+	writeEvalTrailingSections(w, EvalModeFor(s.Config.Specifying.Eval, s.Config.General), cs.Evals, reportFile, "spec", true)
 
 	return nil
 }
@@ -1889,13 +1902,17 @@ func PrintReconcileEvalOutput(w io.Writer, s *ForgeState) error {
 	fmt.Fprintf(w, "\n--- RECONCILIATION CONTEXT ---\n\n")
 	fmt.Fprintf(w, "Run: git diff --staged\n")
 
-	if s.Config.General.EnableEvalOutput && len(spec.Completed) > 0 {
-		specDir := filepath.Dir(spec.Completed[0].File)
-		reportFile := filepath.Join(specDir, ".eval", fmt.Sprintf("reconciliation-r%d.md", round))
-		fmt.Fprintf(w, "\n--- REPORT OUTPUT ---\n\n")
-		fmt.Fprintf(w, "Write your evaluation report to:\n")
-		fmt.Fprintf(w, "  %s\n", reportFile)
+	reportFile := ""
+	if len(spec.Completed) > 0 {
+		reportFile = filepath.Join(filepath.Dir(spec.Completed[0].File), ".eval", fmt.Sprintf("reconciliation-r%d.md", round))
 	}
+	var prevEvals []EvalRecord
+	if spec.Reconcile != nil {
+		prevEvals = spec.Reconcile.Evals
+	}
+	// Reconciliation operates on staged cross-domain changes (git diff --staged);
+	// direct/conversational modes omit the REPORT OUTPUT section.
+	writeEvalTrailingSections(w, EvalModeFor(s.Config.Specifying.Eval, s.Config.General), prevEvals, reportFile, "spec", false)
 
 	return nil
 }
@@ -1938,13 +1955,17 @@ func PrintCrossRefEvalOutput(w io.Writer, s *ForgeState) error {
 		}
 	}
 
-	if s.Config.General.EnableEvalOutput && len(domainSpecs) > 0 {
-		specDir := filepath.Dir(domainSpecs[0].File)
-		reportFile := filepath.Join(specDir, ".eval", fmt.Sprintf("cross-reference-r%d.md", round))
-		fmt.Fprintf(w, "\n--- REPORT OUTPUT ---\n\n")
-		fmt.Fprintf(w, "Write your evaluation report to:\n")
-		fmt.Fprintf(w, "  %s\n", reportFile)
+	reportFile := ""
+	if len(domainSpecs) > 0 {
+		reportFile = filepath.Join(filepath.Dir(domainSpecs[0].File), ".eval", fmt.Sprintf("cross-reference-r%d.md", round))
 	}
+	var prevEvals []EvalRecord
+	if spec.CrossReference != nil {
+		if cr, ok := spec.CrossReference[domain]; ok {
+			prevEvals = cr.Evals
+		}
+	}
+	writeEvalTrailingSections(w, EvalModeFor(s.Config.Specifying.Eval, s.Config.General), prevEvals, reportFile, "spec", true)
 
 	return nil
 }
