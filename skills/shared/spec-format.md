@@ -59,7 +59,7 @@ Every spec follows this structure. Sections are included when relevant to the to
 
 ## Topic of Concern
 > One sentence describing the single topic this spec addresses.
-> See: [references/topic-of-concern.md](references/topic-of-concern.md)
+> See: [topic-of-concern.md](topic-of-concern.md)
 
 ## Context
 Why this spec exists. What problem it addresses. References to the
@@ -74,12 +74,40 @@ this spec) is derivable and not maintained separately.
 ## Integration Points
 Other specs and components that interact with this topic. Each entry
 describes the relationship: what data flows between them, in which
-direction, and under what conditions. This gives readers a map of
-how this spec fits into the broader system.
+direction, under what conditions, and what this topic assumes about the
+response. This gives readers a map of how this spec fits into the broader
+system.
 
-| Spec | Relationship |
-|------|-------------|
-| [Spec name] | [What flows between them and how] |
+Each entry names an **adjacent concern**. Usually that is another spec.
+When a spec is reverse-engineered from existing code, an adjacent concern
+may instead be an external boundary observed in the code that has no spec
+yet. A reverse-engineered spec records the concern as the code presents it
+and does not try to match it to the existing spec library — reconciling
+observed boundaries against real specs (and against parts of the system not
+yet reverse-engineered) is a separate downstream step.
+
+| Adjacent concern | Relationship |
+|------------------|-------------|
+| [Spec name, or an observed external concern] | [What flows, in which direction, and what is assumed about the response] |
+
+---
+
+## Data Models
+Named data shapes this topic defines or operates on — the nouns the
+behavior refers to. Define each shape once here, then reference it by name
+from Interface, Behavior, and Edge Cases instead of re-describing it.
+
+For each model, list its fields with type, whether it is required, whether
+it is nullable, and any constraint. Define only the models this topic owns;
+a model owned by another topic is referenced by name, not redefined here
+(whoever creates the data owns its spec). Field shapes that are interface
+commitments — wire-level names and types a consumer depends on — belong
+here; internal in-memory layout does not.
+
+### [Model Name]
+| Field | Type | Required | Nullable | Notes / Constraints |
+|-------|------|----------|----------|---------------------|
+| [field] | [type] | yes/no | yes/no | [constraint or clarification] |
 
 ---
 
@@ -212,7 +240,7 @@ planning/.
 These are the rules that govern how specs are written. They are not suggestions — they are constraints on the spec itself.
 
 ### 1. Topic of Concern scoping
-A spec covers one topic. See [references/topic-of-concern.md](references/topic-of-concern.md) for the scoping rules and examples.
+A spec covers one topic. See [topic-of-concern.md](topic-of-concern.md) for the scoping rules and examples.
 
 ### 2. No codebase references
 Specs do not reference file paths, directory structure, or module locations. If you write "this lives in `api/src/state/manager.go`" and then the code is refactored, the spec is immediately stale. The spec describes *what the system does*, not *where the code lives*.
@@ -333,7 +361,7 @@ A protocol is the agreement between two domains. If it lived inside one domain, 
 If you have never written a spec before, here is a step-by-step guide:
 
 1. **Read the plan.** Understand the topic of concern, the proposed behavior, and any resolved questions.
-2. **Write the Topic of Concern.** See [references/topic-of-concern.md](references/topic-of-concern.md).
+2. **Write the Topic of Concern.** See [topic-of-concern.md](topic-of-concern.md).
 3. **Define the Interface.** What goes in, what comes out, what gets rejected. Be explicit about types and constraints.
 4. **Write the Behaviors.** For each capability: preconditions, steps, postconditions, error handling. Use declarative language ("the system does X") not aspirational language ("the system should X").
 5. **Identify Invariants.** What must always be true? These are the rules that never break.

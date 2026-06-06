@@ -19,7 +19,7 @@ The stakeholder provides scope as either a directory pattern (e.g., `specs/*`) o
 
 Read every specification file in the confirmed scope. Build a mental model of the full system before looking for issues. You cannot find cross-cutting problems if you only understand individual pieces.
 
-Familiarize yourself with [spec-format.md](spec-format.md) — it defines the structural contract all specs follow (sections, ordering, principles). Use it as the baseline for what a well-formed spec looks like during analysis.
+Familiarize yourself with [../../shared/spec-format.md](../../shared/spec-format.md) — it defines the structural contract all specs follow (sections, ordering, principles). Use it as the baseline for what a well-formed spec looks like during analysis.
 
 ---
 

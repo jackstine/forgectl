@@ -5,7 +5,7 @@
 _Topic Scope Test: "One Sentence Without 'And'"_
 
 - Can you describe the topic of concern in one sentence without conjoining unrelated capabilities?
-  - ✓ "The color extraction system analyzes images to identify dominant colors"
+  - ✓ "Extracting the dominant colors from an image"
   - ✗ "The user system handles authentication, profiles, and billing" → 3 topics
 - If you need "and" to describe what it does, it's probably multiple topics
 </examples_of_topics>

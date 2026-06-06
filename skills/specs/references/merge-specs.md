@@ -10,7 +10,7 @@ A systematic methodology for breaking a monolithic specification into single-con
 Identify every distinct topic of concern in the source document.
 
 ### Topic of Concern Test
-Apply the topic of concern test to each candidate. See [topic-of-concern.md](topic-of-concern.md) for the full scoping rules and examples.
+Apply the topic of concern test to each candidate. See [../../shared/topic-of-concern.md](../../shared/topic-of-concern.md) for the full scoping rules and examples.
 
 ### Process
 1. Read the source document in full.
@@ -30,7 +30,7 @@ A numbered list of topics, each with a one-sentence description.
 Produce one specification document per topic of concern.
 
 ### Per-Topic Spec Requirements
-Each spec must follow the structure defined in [spec-format.md](spec-format.md). The format defines all required and optional sections (Interface, Behavior, Configuration, Observability, Invariants, Edge Cases, Testing Criteria, etc.).
+Each spec must follow the structure defined in [../../shared/spec-format.md](../../shared/spec-format.md). The format defines all required and optional sections (Interface, Behavior, Configuration, Observability, Invariants, Edge Cases, Testing Criteria, etc.).
 
 ### Execution
 - Spawn one subagent per topic, all in parallel.
@@ -169,7 +169,7 @@ Review report. Fixes if needed. **Commit.**
 
 ## Principles
 
-1. **One concern per spec.** If you need "and" to describe it, split it. See [topic-of-concern.md](topic-of-concern.md).
+1. **One concern per spec.** If you need "and" to describe it, split it. See [../../shared/topic-of-concern.md](../../shared/topic-of-concern.md).
 2. **Ownership is singular.** Every behavior, schema, and config key has exactly one spec that owns it. All other specs reference, never redefine.
 3. **Produce before consuming.** Number specs so that producers come before consumers. Fix producers before consumers.
 4. **Commit between phases.** Every phase boundary is a commit. This gives you rollback points and clean diffs for review.

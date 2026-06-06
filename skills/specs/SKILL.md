@@ -55,14 +55,14 @@ For each spec in the queue, follow the forgectl state machine:
 
 2a. **ORIENT** — Read the planning sources and any existing specs. Understand what exists before writing.
 2b. **SELECT** — Pull the next spec from the queue. If guided, discuss scope with the user.
-2c. **DRAFT** — Write the spec file following the format in `references/spec-format.md`. Advance with `forgectl advance` (optionally `--file <path>` to override the output path).
+2c. **DRAFT** — Write the spec file following the format in `../shared/spec-format.md`. Advance with `forgectl advance` (optionally `--file <path>` to override the output path).
 2d. **EVALUATE** — Spawn an Opus sub-agent to adversarially review the draft. Record the verdict with `forgectl advance --verdict PASS|FAIL --eval-report <path>`.
 2e. **REFINE** — If evaluation failed, fix the deficiencies and advance back to EVALUATE.
 2f. **ACCEPT** — Spec finalized. Forgectl loops to ORIENT for the next spec, or moves to DONE when the queue is empty.
 
 Use `forgectl status` at any point to see current state and what action is needed.
 
-See: [references/spec-format.md](references/spec-format.md)
+See: [../shared/spec-format.md](../shared/spec-format.md)
 </step_2>
 
 <step_3>
@@ -117,7 +117,7 @@ After reconciliation passes, the session is complete. If the workflow continues 
 
 When a planning document bundles multiple responsibilities:
 
-1. Identify distinct topics — each one must pass the Topic of Concern test. See [references/topic-of-concern.md](references/topic-of-concern.md).
+1. Identify distinct topics — each one must pass the Topic of Concern test. See [../shared/topic-of-concern.md](../shared/topic-of-concern.md).
 2. Write explicit scope exclusion notes in each spec's Context section.
 3. Cross-reference via Integration Points so readers can trace the full picture.
 
@@ -149,7 +149,7 @@ Do not reference planning file paths in the spec. The `Implements` section may n
 If something is unresolved, it does not go in the spec. Exclude it or resolve it.
 
 ### Split rather than overload
-If a topic is too broad, produce multiple spec files. Each must pass the Topic of Concern test. See [references/topic-of-concern.md](references/topic-of-concern.md).
+If a topic is too broad, produce multiple spec files. Each must pass the Topic of Concern test. See [../shared/topic-of-concern.md](../shared/topic-of-concern.md).
 
 ### Track upstream spec impacts
 When generating a spec, identify any existing specs that need updates due to new integration points or dependencies. Note these in the ACCEPT phase.
@@ -193,7 +193,7 @@ These patterns are found repeatedly during evaluation. Avoid them during draftin
 
 <checklist_before_finalizing>
 
-- [ ] Topic of concern passes the test in [references/topic-of-concern.md](references/topic-of-concern.md)
+- [ ] Topic of concern passes the test in [../shared/topic-of-concern.md](../shared/topic-of-concern.md)
 - [ ] Declarative voice throughout (no "should", "could", "might")
 - [ ] Every behavior has testing criteria (Given/When/Then)
 - [ ] Error handling is exhaustive — every failure mode named
