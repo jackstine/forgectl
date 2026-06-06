@@ -10,7 +10,7 @@ Please spawn multiple subagents to help in this matter,  on a good order 1 sub a
 
 **Step 3 — Commit.** Stage all affected files and commit with a message that explains the intent of the change.
 
-**Step 4 — Self-review.** Re-read every modified specification end-to-end. Use [spec-format.md](spec-format.md) as the structural reference for what a well-formed spec looks like. Check specifically for:
+**Step 4 — Self-review.** Re-read every modified specification end-to-end. Use [../../shared/spec-format.md](../../shared/spec-format.md) as the structural reference for what a well-formed spec looks like. Check specifically for:
 - References to removed or relocated specifications
 - Inconsistent numbering or sequencing
 - Terminology mismatches with the new model

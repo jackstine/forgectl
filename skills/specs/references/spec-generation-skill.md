@@ -143,7 +143,7 @@ thoroughly before concluding that nothing needs work.
 
 Read these files completely before evaluating:
 
-- **Spec format and principles:** `references/spec-format.md`
+- **Spec format and principles:** `../../shared/spec-format.md`
 - **Generation skill (constraints and anti-patterns):** `references/spec-generation-skill.md`
 
 ## Spec Under Review

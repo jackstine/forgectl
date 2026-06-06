@@ -35,7 +35,7 @@ Given an implementation plan, produce a spec queue JSON file listing every speci
   <step_5>
   Identify areas for new specs. Each new spec must pass the Topic of Concern test.
 
-  See: [references/topic-of-concern.md](references/topic-of-concern.md)
+  See: [../../shared/topic-of-concern.md](../../shared/topic-of-concern.md)
 
   </step_5>
 
