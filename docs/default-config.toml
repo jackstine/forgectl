@@ -182,7 +182,7 @@ enable_eval_output = false
 
 [ui_implementing]
 # Maximum unblocked plan items per UI-implementation batch.
-batch = 2
+batch = 1
 # Commit staging strategy for ui_implementing commits (same options as implementing).
 commit_strategy = "scoped"
 
@@ -191,8 +191,8 @@ commit_strategy = "scoped"
 # launch_command and url are REQUIRED and validated non-empty at the phase boundary
 # (init --phase ui_implementing, or the phase shift into ui_implementing) — the QA
 # loop cannot drive an app it cannot launch and reach, so there is no default.
-launch_command = "npm run dev"
-url = "http://localhost:5173"
+launch_command = ""
+url = ""
 # Seconds to wait for the app to become reachable before QA begins.
 ready_timeout_seconds = 30
 
@@ -229,8 +229,8 @@ eval_mode = "report"
 # Command that runs the authored Playwright test suite, and the directory the
 # test files live in. Both are REQUIRED and validated non-empty at the phase
 # boundary — the e2e loop has nothing to run without them, so there is no default.
-test_command = "npm run e2e"
-test_dir = "e2e/"
+test_command = ""
+test_dir = ""
 
 # --- Paths ---
 # Directory locations for scaffold state and domain artifacts.

@@ -26,3 +26,10 @@ Log of implementation updates across sessions. Add a new entry after each unit o
 - **Batch:** 3/6
 - **Eval Rounds:** 1
 - **Notes:** TOML decode/merge for [ui_implementing] (app/eval/qa/e2e, unset-vs-zero preserved); ValidateConfig structural checks (batch>=1, per-loop min<=max, commit_strategy, eval_mode) with required app/e2e keys deferred to the phase boundary; UIBatchState/UIBatchHistory/UILayerHistory/UIImplementingState with three independent loop counters/histories/force-accept flags, wired into ForgeState, plus NewUIImplementingState. L0 (Type & Config Foundations) complete.
+
+### 2026-06-07 — L1 Output & Eval-Context Rendering: Batch 4 (output.advance, output.eval) — completes L1
+- **Errors:** None
+- **All Tests Pass:** Yes
+- **Batch:** 4/6
+- **Eval Rounds:** 1
+- **Notes:** printUIImplementingOutput covers all ten phase states (Loop/Round/App/Steps/Run lines, Review block, COMMIT force-accept naming, DONE per-loop totals, user_guided STOP); dispatch wired in PrintAdvanceOutput/CurrentEvalMode/phaseConfig/printProgressLine. PrintUIQAEvalOutput/PrintUIE2EEvalOutput/printUICodeEval render eval context per eval_mode; PrintEvalOutput routes ui_implementing by state. Generalized loadPlan/savePlan/currentPlanDir via currentPlanFile (single source of truth) and extracted writeItemBody/writeEvalItemList/writePreviousEvaluations. **Round convention:** all three loops increment their counter on entry to the evaluator state and display it directly (per the transition table). L1 complete.

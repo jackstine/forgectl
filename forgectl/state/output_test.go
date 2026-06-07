@@ -304,7 +304,7 @@ func TestOutputOrientNextBatchCount(t *testing.T) {
 	s.Config.General.EnableCommits = false
 
 	// Advance through first item (ORIENT→IMPLEMENT→EVALUATE→COMMIT→ORIENT).
-	Advance(s, AdvanceInput{}, dir) // ORIENT→IMPLEMENT
+	Advance(s, AdvanceInput{}, dir)               // ORIENT→IMPLEMENT
 	Advance(s, AdvanceInput{Message: "msg"}, dir) // IMPLEMENT→EVALUATE
 
 	evalFile := filepath.Join(dir, "eval.md")
@@ -1568,5 +1568,316 @@ func TestREOutputQueueAndReconcileAdvanceVariants(t *testing.T) {
 	lastOut := outputOf(last, dir)
 	if !strings.Contains(lastOut, "All domains reconciled. Advancing to DONE.") {
 		t.Errorf("RECONCILE_ADVANCE on last domain should advance to DONE, got:\n%s", lastOut)
+	}
+}
+
+// uiOutputState builds a ui_implementing ForgeState with a 2-item L0 plan on
+// disk at ui/plan.json and a current batch over both items, ready to have its
+// State and batch counters set by each test.
+func uiOutputState(t *testing.T, dir string) *ForgeState {
+	t.Helper()
+	planDir := filepath.Join(dir, "ui")
+	os.MkdirAll(planDir, 0755)
+	plan := PlanJSON{
+		Context: PlanContext{Domain: "portal", Module: "portal"},
+		Layers: []PlanLayerDef{
+			{ID: "L0", Name: "Shell", Items: []string{"shell.layout", "shell.theme"}},
+		},
+		Items: []PlanItem{
+			{ID: "shell.layout", Name: "App shell", Description: "shell", Passes: "done", Tests: []PlanTest{{Category: "functional", Description: "x"}}},
+			{ID: "shell.theme", Name: "Theme tokens", Description: "theme", Passes: "done", Tests: []PlanTest{{Category: "functional", Description: "x"}}},
+		},
+	}
+	data, _ := json.Marshal(plan)
+	os.WriteFile(filepath.Join(planDir, "plan.json"), data, 0644)
+
+	cfg := DefaultForgeConfig()
+	cfg.UIImplementing.App.LaunchCommand = "npm run dev"
+	cfg.UIImplementing.App.URL = "http://localhost:5173"
+	cfg.UIImplementing.E2E.TestCommand = "npm run e2e"
+	cfg.UIImplementing.E2E.TestDir = "e2e/"
+
+	return &ForgeState{
+		Phase:  PhaseUIImplementing,
+		State:  StateQATest,
+		Config: cfg,
+		Planning: &PlanningState{CurrentPlan: &ActivePlan{
+			ID: 1, Name: "Portal Dashboard", Domain: "portal", File: "ui/plan.json",
+		}},
+		UIImplementing: &UIImplementingState{
+			CurrentLayer:      &LayerRef{ID: "L0", Name: "Shell"},
+			BatchNumber:       1,
+			CurrentPlanFile:   "ui/plan.json",
+			CurrentPlanDomain: "portal",
+			CurrentBatch: &UIBatchState{
+				Items:            []string{"shell.layout", "shell.theme"},
+				CurrentItemIndex: 0,
+			},
+		},
+	}
+}
+
+// Functional: QA_TEST output shows Phase ui_implementing, Loop qa, the App
+// launch/url, and the step-list Steps path; UI_REFINE shows the QA report path
+// and the refine action.
+func TestOutputUIQATestAndRefine(t *testing.T) {
+	dir := t.TempDir()
+
+	s := uiOutputState(t, dir)
+	s.State = StateQATest
+	s.UIImplementing.CurrentBatch.QARound = 1
+	qa := outputOf(s, dir)
+	for _, want := range []string{
+		"Phase:    ui_implementing",
+		"Loop:     qa",
+		`launch="npm run dev"`,
+		"url=http://localhost:5173",
+		filepath.Join("ui", "qa", "batch-1-steps.json"),
+	} {
+		if !strings.Contains(qa, want) {
+			t.Errorf("QA_TEST output missing %q, got:\n%s", want, qa)
+		}
+	}
+
+	s2 := uiOutputState(t, dir)
+	s2.State = StateUIRefine
+	s2.UIImplementing.CurrentBatch.QARound = 1
+	s2.UIImplementing.CurrentBatch.QAEvals = []EvalRecord{
+		{Round: 1, Verdict: "FAIL", EvalReport: "ui/qa/batch-1-round-1.md"},
+	}
+	ref := outputOf(s2, dir)
+	if !strings.Contains(ref, "ui/qa/batch-1-round-1.md") {
+		t.Errorf("UI_REFINE output missing QA report path, got:\n%s", ref)
+	}
+	if !strings.Contains(ref, "iterate on UI placement") {
+		t.Errorf("UI_REFINE output missing refine action, got:\n%s", ref)
+	}
+	if !strings.Contains(ref, "FAIL recorded for QA round 1") {
+		t.Errorf("UI_REFINE output missing the FAIL note, got:\n%s", ref)
+	}
+}
+
+// Functional: when the current batch has handed-off artifacts, the output renders
+// a Review: line listing each artifact before the Action line.
+func TestOutputUIReviewLine(t *testing.T) {
+	dir := t.TempDir()
+	s := uiOutputState(t, dir)
+	s.State = StateQATest
+	s.UIImplementing.CurrentBatch.QARound = 1
+	s.UIImplementing.CurrentBatch.HandedOffArtifacts = []string{
+		"ui/qa/batch-1-round-1.md",
+		"ui/qa/batch-1-steps.json",
+	}
+	out := outputOf(s, dir)
+
+	reviewIdx := strings.Index(out, "Review:")
+	actionIdx := strings.Index(out, "Action:")
+	if reviewIdx < 0 {
+		t.Fatalf("expected a Review: line, got:\n%s", out)
+	}
+	if actionIdx < 0 || reviewIdx > actionIdx {
+		t.Errorf("Review: must appear before Action:, got:\n%s", out)
+	}
+	for _, want := range []string{"ui/qa/batch-1-round-1.md", "ui/qa/batch-1-steps.json"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("Review block missing artifact %q, got:\n%s", want, out)
+		}
+	}
+}
+
+// Functional: COMMIT marks items passed when no loop force-accepted, and failed
+// (naming the force-accepted loop and rounds) when one did; the DONE summary
+// reports per-loop round totals.
+func TestOutputUICommitAndDoneSummary(t *testing.T) {
+	dir := t.TempDir()
+
+	// COMMIT — clean pass.
+	s := uiOutputState(t, dir)
+	s.State = StateCommit
+	setItemPassesOnDisk(t, dir, "ui/plan.json", map[string]string{"shell.layout": "passed", "shell.theme": "passed"})
+	out := outputOf(s, dir)
+	if !strings.Contains(out, "[shell.layout] passed") {
+		t.Errorf("COMMIT clean-pass output should mark items passed, got:\n%s", out)
+	}
+
+	// COMMIT — e2e force-accept.
+	s2 := uiOutputState(t, dir)
+	s2.State = StateCommit
+	s2.UIImplementing.CurrentBatch.E2EForceAccepted = true
+	setItemPassesOnDisk(t, dir, "ui/plan.json", map[string]string{"shell.layout": "failed", "shell.theme": "failed"})
+	out2 := outputOf(s2, dir)
+	if !strings.Contains(out2, "failed (e2e force-accept, 3/3 rounds)") {
+		t.Errorf("COMMIT force-accept output should name the loop and rounds, got:\n%s", out2)
+	}
+
+	// DONE — per-loop round totals.
+	s3 := uiOutputState(t, dir)
+	s3.State = StateDone
+	setItemPassesOnDisk(t, dir, "ui/plan.json", map[string]string{"shell.layout": "passed", "shell.theme": "passed"})
+	s3.UIImplementing.LayerHistory = []UILayerHistory{
+		{LayerID: "L0", Batches: []UIBatchHistory{
+			{BatchNumber: 1, Items: []string{"shell.layout", "shell.theme"}, EvalRounds: 2, QARounds: 1, E2ERounds: 3},
+		}},
+	}
+	out3 := outputOf(s3, dir)
+	if !strings.Contains(out3, "Rounds:    code 2, qa 1, e2e 3 (across 1 batches)") {
+		t.Errorf("DONE summary should report per-loop round totals, got:\n%s", out3)
+	}
+}
+
+// setItemPassesOnDisk rewrites the plan.json at planFile, setting each named
+// item's passes field, so output that reloads the plan sees terminal statuses.
+func setItemPassesOnDisk(t *testing.T, dir, planFile string, passes map[string]string) {
+	t.Helper()
+	full := filepath.Join(dir, planFile)
+	data, err := os.ReadFile(full)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var plan PlanJSON
+	if err := json.Unmarshal(data, &plan); err != nil {
+		t.Fatal(err)
+	}
+	for i := range plan.Items {
+		if p, ok := passes[plan.Items[i].ID]; ok {
+			plan.Items[i].Passes = p
+		}
+	}
+	out, _ := json.Marshal(plan)
+	os.WriteFile(full, out, 0644)
+}
+
+// evalOf runs PrintEvalOutput and returns the result as a string.
+func evalOf(t *testing.T, s *ForgeState, dir string) string {
+	t.Helper()
+	var buf bytes.Buffer
+	if err := PrintEvalOutput(&buf, s, dir); err != nil {
+		t.Fatalf("PrintEvalOutput: %v", err)
+	}
+	return buf.String()
+}
+
+// Functional: PrintUIQAEvalOutput embeds the QA prompt and shows the APPLICATION
+// URL, the STEP LIST OUTPUT path, and a HANDOFF section in every eval_mode.
+func TestEvalOutputUIQAAllModes(t *testing.T) {
+	dir := t.TempDir()
+	stepList := filepath.Join("ui", "qa", "batch-1-steps.json")
+
+	for _, mode := range []string{"report", "direct", "conversational"} {
+		t.Run(mode, func(t *testing.T) {
+			s := uiOutputState(t, dir)
+			s.State = StateQATest
+			s.Config.UIImplementing.QA.EvalMode = mode
+			s.UIImplementing.CurrentBatch.QARound = 1
+			out := evalOf(t, s, dir)
+
+			for _, want := range []string{
+				"# UI QA Evaluation Prompt",
+				"URL:           http://localhost:5173",
+				"--- STEP LIST OUTPUT ---",
+				stepList,
+				"--- HANDOFF ---",
+			} {
+				if !strings.Contains(out, want) {
+					t.Errorf("mode %s: QA eval output missing %q, got:\n%s", mode, want, out)
+				}
+			}
+			// REPORT OUTPUT is present in report/direct, omitted in conversational.
+			hasReport := strings.Contains(out, "--- REPORT OUTPUT ---")
+			if mode == "conversational" && hasReport {
+				t.Errorf("conversational mode should omit REPORT OUTPUT, got:\n%s", out)
+			}
+			if mode != "conversational" && !hasReport {
+				t.Errorf("mode %s should include REPORT OUTPUT, got:\n%s", mode, out)
+			}
+		})
+	}
+}
+
+// Functional: PrintUIE2EEvalOutput embeds the e2e prompt and shows the E2E SUITE
+// step-list path, test command, and test dir; REPORT OUTPUT and HANDOFF appear
+// only in report mode.
+func TestEvalOutputUIE2EReportVsOther(t *testing.T) {
+	dir := t.TempDir()
+	stepList := filepath.Join("ui", "qa", "batch-1-steps.json")
+
+	for _, mode := range []string{"report", "direct", "conversational"} {
+		t.Run(mode, func(t *testing.T) {
+			s := uiOutputState(t, dir)
+			s.State = StateE2EVerify
+			s.Config.UIImplementing.E2E.EvalMode = mode
+			s.UIImplementing.CurrentBatch.E2ERound = 1
+			out := evalOf(t, s, dir)
+
+			for _, want := range []string{
+				"# UI E2E Verification Prompt",
+				"--- E2E SUITE ---",
+				stepList,
+				"Test command: npm run e2e",
+				"Test dir:     e2e/",
+			} {
+				if !strings.Contains(out, want) {
+					t.Errorf("mode %s: e2e eval output missing %q, got:\n%s", mode, want, out)
+				}
+			}
+			// Match concrete rendered section content: the embedded prompt itself
+			// mentions the --- HANDOFF --- header, so header markers are unreliable.
+			hasReport := strings.Contains(out, "Write your e2e verification report to:")
+			hasHandoff := strings.Contains(out, "When finished, register your report with:")
+			if mode == "report" {
+				if !hasReport || !hasHandoff {
+					t.Errorf("report mode must include the REPORT OUTPUT and HANDOFF sections, got:\n%s", out)
+				}
+			} else if hasReport || hasHandoff {
+				t.Errorf("mode %s must omit the REPORT OUTPUT and HANDOFF sections, got:\n%s", mode, out)
+			}
+		})
+	}
+}
+
+// Edge case: round 2+ QA and e2e eval output include a PREVIOUS EVALUATIONS
+// section listing prior verdicts and report paths.
+func TestEvalOutputUIPreviousEvaluations(t *testing.T) {
+	dir := t.TempDir()
+
+	qa := uiOutputState(t, dir)
+	qa.State = StateQATest
+	qa.UIImplementing.CurrentBatch.QARound = 2
+	qa.UIImplementing.CurrentBatch.QAEvals = []EvalRecord{
+		{Round: 1, Verdict: "FAIL", EvalReport: "ui/qa/batch-1-round-1.md"},
+	}
+	qaOut := evalOf(t, qa, dir)
+	if !strings.Contains(qaOut, "--- PREVIOUS EVALUATIONS ---") {
+		t.Errorf("round 2 QA eval should include PREVIOUS EVALUATIONS, got:\n%s", qaOut)
+	}
+	if !strings.Contains(qaOut, "Round 1: FAIL — ui/qa/batch-1-round-1.md") {
+		t.Errorf("PREVIOUS EVALUATIONS should list prior verdict + report, got:\n%s", qaOut)
+	}
+
+	e2e := uiOutputState(t, dir)
+	e2e.State = StateE2EVerify
+	e2e.UIImplementing.CurrentBatch.E2ERound = 2
+	e2e.UIImplementing.CurrentBatch.E2EEvals = []EvalRecord{
+		{Round: 1, Verdict: "FAIL", EvalReport: "ui/e2e/batch-1-round-1.md"},
+	}
+	e2eOut := evalOf(t, e2e, dir)
+	if !strings.Contains(e2eOut, "--- PREVIOUS EVALUATIONS ---") {
+		t.Errorf("round 2 e2e eval should include PREVIOUS EVALUATIONS, got:\n%s", e2eOut)
+	}
+}
+
+// Rejection: eval in a non-evaluator ui_implementing state (e.g. UI_REFINE) is
+// rejected naming the current state and phase.
+func TestEvalOutputUIRejectsNonEvaluatorState(t *testing.T) {
+	dir := t.TempDir()
+	s := uiOutputState(t, dir)
+	s.State = StateUIRefine
+	var buf bytes.Buffer
+	err := PrintEvalOutput(&buf, s, dir)
+	if err == nil {
+		t.Fatal("expected error for eval in UI_REFINE, got nil")
+	}
+	if !strings.Contains(err.Error(), "UI_REFINE") || !strings.Contains(err.Error(), "ui_implementing") {
+		t.Errorf("error should name the state and phase, got: %v", err)
 	}
 }

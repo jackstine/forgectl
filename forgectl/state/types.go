@@ -329,16 +329,12 @@ func DefaultForgeConfig() ForgeConfig {
 			Batch:          1,
 			CommitStrategy: "scoped",
 			App: UIAppConfig{
-				// LaunchCommand and URL are required and validated at the phase
-				// boundary; only the timeout has a sensible default here.
 				ReadyTimeoutSeconds: 30,
 			},
 			Eval: defaultUILoopEvalConfig(),
 			QA:   defaultUILoopEvalConfig(),
 			E2E: UIE2EConfig{
 				EvalConfig: defaultUILoopEvalConfig(),
-				// TestCommand and TestDir are required and validated at the
-				// phase boundary, so they default empty.
 			},
 		},
 		ReverseEngineering: ReverseEngineeringConfig{

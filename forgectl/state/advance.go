@@ -1104,12 +1104,7 @@ func autoGeneratePlanQueue(s *ForgeState, dir string) (string, error) {
 // --- Helpers ---
 
 func loadPlan(s *ForgeState, dir string) (*PlanJSON, error) {
-	var planPath string
-	if s.Implementing != nil && s.Implementing.CurrentPlanFile != "" {
-		planPath = s.Implementing.CurrentPlanFile
-	} else if s.Planning != nil && s.Planning.CurrentPlan != nil {
-		planPath = s.Planning.CurrentPlan.File
-	}
+	planPath := currentPlanFile(s)
 	if planPath == "" {
 		return nil, fmt.Errorf("no plan file configured")
 	}
@@ -1128,13 +1123,24 @@ func loadPlan(s *ForgeState, dir string) (*PlanJSON, error) {
 	return &plan, nil
 }
 
-func savePlan(s *ForgeState, dir string, plan *PlanJSON) error {
-	var planPath string
+// currentPlanFile resolves the active plan.json path from whichever phase state
+// is configured — implementing, ui_implementing, or (pre-init) the planning
+// queue's current plan.
+func currentPlanFile(s *ForgeState) string {
 	if s.Implementing != nil && s.Implementing.CurrentPlanFile != "" {
-		planPath = s.Implementing.CurrentPlanFile
-	} else if s.Planning != nil && s.Planning.CurrentPlan != nil {
-		planPath = s.Planning.CurrentPlan.File
+		return s.Implementing.CurrentPlanFile
 	}
+	if s.UIImplementing != nil && s.UIImplementing.CurrentPlanFile != "" {
+		return s.UIImplementing.CurrentPlanFile
+	}
+	if s.Planning != nil && s.Planning.CurrentPlan != nil {
+		return s.Planning.CurrentPlan.File
+	}
+	return ""
+}
+
+func savePlan(s *ForgeState, dir string, plan *PlanJSON) error {
+	planPath := currentPlanFile(s)
 	if planPath == "" {
 		return fmt.Errorf("no plan file configured")
 	}

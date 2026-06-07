@@ -174,6 +174,64 @@ eval_mode = "report"
 # empty: true resolves to "report", false resolves to "conversational".
 enable_eval_output = false
 
+# --- UI Implementing ---
+# The ui_implementing phase runs three sequential verification loops per batch —
+# code-eval, QA (Playwright MCP placement check), then e2e (authored Playwright
+# tests) — each with its own round budget and eval mode. A plan-queue entry with
+# kind = "ui" routes here at phase shift; "init --phase ui_implementing" starts here.
+
+[ui_implementing]
+# Maximum unblocked plan items per UI-implementation batch.
+batch = 1
+# Commit staging strategy for ui_implementing commits (same options as implementing).
+commit_strategy = "scoped"
+
+[ui_implementing.app]
+# How the QA loop reaches the running application.
+# launch_command and url are REQUIRED and validated non-empty at the phase boundary
+# (init --phase ui_implementing, or the phase shift into ui_implementing) — the QA
+# loop cannot drive an app it cannot launch and reach, so there is no default.
+launch_command = ""
+url = ""
+# Seconds to wait for the app to become reachable before QA begins.
+ready_timeout_seconds = 30
+
+[ui_implementing.eval]
+# Code-level evaluation loop (EVALUATE <-> IMPLEMENT), identical to the implementing
+# phase's eval loop. Fields and eval_mode semantics match [implementing.eval] above.
+min_rounds = 1
+max_rounds = 3
+type = "eval"
+model = "opus"
+count = 1
+eval_mode = "report"
+
+[ui_implementing.qa]
+# QA placement loop (QA_TEST <-> UI_REFINE). The sub-agent drives the running app
+# through the Playwright MCP — judging placement and controls — and writes the e2e
+# step list that the e2e loop consumes.
+min_rounds = 1
+max_rounds = 3
+type = "eval"
+model = "opus"
+count = 1
+eval_mode = "report"
+
+[ui_implementing.e2e]
+# e2e verification loop (E2E_VERIFY <-> E2E_REMEDIATE). Confirms the authored
+# Playwright tests execute, pass, and cover the QA step list.
+min_rounds = 1
+max_rounds = 3
+type = "eval"
+model = "opus"
+count = 1
+eval_mode = "report"
+# Command that runs the authored Playwright test suite, and the directory the
+# test files live in. Both are REQUIRED and validated non-empty at the phase
+# boundary — the e2e loop has nothing to run without them, so there is no default.
+test_command = ""
+test_dir = ""
+
 # --- Paths ---
 # Directory locations for scaffold state and domain artifacts.
 

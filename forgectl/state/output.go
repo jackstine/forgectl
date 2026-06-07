@@ -1,6 +1,7 @@
 package state
 
 import (
+	"encoding/json"
 	"fmt"
 	"io"
 	"os"
@@ -20,6 +21,17 @@ func (s *ForgeState) CurrentEvalMode() string {
 		return EvalModeFor(s.Config.Specifying.Eval, s.Config.General)
 	case PhasePlanning:
 		return EvalModeFor(s.Config.Planning.Eval, s.Config.General)
+	case PhaseUIImplementing:
+		// The ui_implementing phase has three eval loops; the effective mode
+		// depends on which evaluator state the session is in.
+		switch s.State {
+		case StateQATest:
+			return EvalModeFor(s.Config.UIImplementing.QA, s.Config.General)
+		case StateE2EVerify:
+			return EvalModeFor(s.Config.UIImplementing.E2E.EvalConfig, s.Config.General)
+		default: // EVALUATE (code loop) and all non-evaluator states
+			return EvalModeFor(s.Config.UIImplementing.Eval, s.Config.General)
+		}
 	default:
 		return EvalModeFor(s.Config.Implementing.Eval, s.Config.General)
 	}
@@ -36,6 +48,8 @@ func PrintAdvanceOutput(w io.Writer, s *ForgeState, dir string) {
 		printPlanningOutput(w, s, dir)
 	case PhaseImplementing:
 		printImplementingOutput(w, s, dir)
+	case PhaseUIImplementing:
+		printUIImplementingOutput(w, s, dir)
 	case PhaseReverseEngineering:
 		printReverseEngineeringOutput(w, s, dir)
 	}
@@ -149,11 +163,11 @@ func writeImplementReviewReminders(w io.Writer, indent string, hasSpecCommits, h
 // function. It emits a single leading blank line before the first section it
 // writes (and one between the two), so callers should NOT pre-emit a separator.
 //   - report:         lists prior rounds as "Round n: VERDICT — <report path>";
-//                     REPORT OUTPUT names the report file to write.
+//     REPORT OUTPUT names the report file to write.
 //   - direct:         lists prior rounds as "Round n: VERDICT — (direct corrections)";
-//                     REPORT OUTPUT instructs direct corrections to the <directNoun>
-//                     files — UNLESS directShowsReport is false (reconciliation),
-//                     where the REPORT OUTPUT section is omitted entirely.
+//     REPORT OUTPUT instructs direct corrections to the <directNoun>
+//     files — UNLESS directShowsReport is false (reconciliation),
+//     where the REPORT OUTPUT section is omitted entirely.
 //   - conversational: both sections omitted.
 func writeEvalTrailingSections(w io.Writer, mode string, evals []EvalRecord, reportFile, directNoun string, directShowsReport bool) {
 	if mode != "report" && mode != "direct" {
@@ -1022,61 +1036,8 @@ func printImplementingOutput(w io.Writer, s *ForgeState, dir string) {
 		fmt.Fprintf(w, "Item:    [%s] %s\n", item.ID, item.Name)
 		fmt.Fprintf(w, "         %s\n", item.Description)
 		fmt.Fprintf(w, "         (%d of %d in batch)\n", batch.CurrentItemIndex+1, len(batch.Items))
-
-		if len(item.Steps) > 0 {
-			fmt.Fprintf(w, "Steps:\n")
-			for i, step := range item.Steps {
-				fmt.Fprintf(w, "  %d. %s\n", i+1, step)
-			}
-		}
-		if len(item.Files) > 0 {
-			fmt.Fprintf(w, "Files:   %s\n", strings.Join(item.Files, ", "))
-		}
 		specCommits := s.Planning.CurrentPlan.SpecCommits
-		if len(item.Specs) > 0 {
-			for i, spec := range item.Specs {
-				if i == 0 {
-					fmt.Fprintf(w, "Specs:   %s\n", spec)
-				} else {
-					fmt.Fprintf(w, "         %s\n", spec)
-				}
-				// Each spec entry carries a copy-pasteable git command bounded to
-				// the plan's spec_commits. git show (not git log -p) keeps the
-				// output to exactly the named commits; the '**/<file>' pathspec
-				// self-filters that list to the commits that touched the spec.
-				// Spec entries are display-only names with an optional #anchor, so
-				// strip the anchor and glob the basename rather than treating it
-				// as a validated on-disk path. Omitted when spec_commits is empty.
-				if len(specCommits) > 0 {
-					file, _, _ := strings.Cut(spec, "#")
-					fmt.Fprintf(w, "         Read: git show %s -- '**/%s'\n", strings.Join(specCommits, " "), file)
-				}
-			}
-		}
-		if len(item.Refs) > 0 {
-			for i, ref := range item.Refs {
-				if i == 0 {
-					fmt.Fprintf(w, "Refs:    %s\n", ref)
-				} else {
-					fmt.Fprintf(w, "         %s\n", ref)
-				}
-			}
-		}
-
-		// Test summary.
-		testCounts := map[string]int{}
-		for _, t := range item.Tests {
-			testCounts[t.Category]++
-		}
-		var testParts []string
-		for _, cat := range []string{"functional", "rejection", "edge_case"} {
-			if c, ok := testCounts[cat]; ok {
-				testParts = append(testParts, fmt.Sprintf("%d %s", c, cat))
-			}
-		}
-		if len(testParts) > 0 {
-			fmt.Fprintf(w, "Tests:   %s\n", strings.Join(testParts, ", "))
-		}
+		writeItemBody(w, item, specCommits)
 
 		if batch.EvalRound > 0 {
 			planDir := currentPlanDir(s)
@@ -1206,6 +1167,565 @@ func printImplementingOutput(w io.Writer, s *ForgeState, dir string) {
 			fmt.Fprintf(w, "Action:  Domain complete. Advance to continue to next domain.\n")
 		} else {
 			fmt.Fprintf(w, "Action:  All items complete. Session done.\n")
+		}
+	}
+}
+
+// --- UI Implementing ---
+
+// qaStepListPath returns the QA step-list path for a batch (latest round
+// overwrites), relative to the project root.
+func qaStepListPath(s *ForgeState, batchNum int) string {
+	return filepath.Join(currentPlanDir(s), "qa", fmt.Sprintf("batch-%d-steps.json", batchNum))
+}
+
+// qaReportPath returns the QA report path for a batch round, relative to the
+// project root.
+func qaReportPath(s *ForgeState, batchNum, round int) string {
+	return filepath.Join(currentPlanDir(s), "qa", fmt.Sprintf("batch-%d-round-%d.md", batchNum, round))
+}
+
+// e2eReportPath returns the e2e verification report path for a batch round,
+// relative to the project root.
+func e2eReportPath(s *ForgeState, batchNum, round int) string {
+	return filepath.Join(currentPlanDir(s), "e2e", fmt.Sprintf("batch-%d-round-%d.md", batchNum, round))
+}
+
+// countQAScenarios reads the QA step list for the batch and returns the scenario
+// count and whether the file exists. A missing file returns (0, false); a present
+// file with no scenarios returns (0, true).
+func countQAScenarios(s *ForgeState, dir string, batchNum int) (int, bool) {
+	full := filepath.Join(dir, qaStepListPath(s, batchNum))
+	data, err := os.ReadFile(full)
+	if err != nil {
+		return 0, false
+	}
+	var sl struct {
+		Scenarios []json.RawMessage `json:"scenarios"`
+	}
+	if err := json.Unmarshal(data, &sl); err != nil {
+		return 0, true
+	}
+	return len(sl.Scenarios), true
+}
+
+// printUIImplementingOutput renders the advance/status output for the
+// ui_implementing phase. The phase reuses the implementing IMPLEMENT/code-EVALUATE
+// shape and adds the QA and e2e loops, each with its own Loop/Round lines.
+func printUIImplementingOutput(w io.Writer, s *ForgeState, dir string) {
+	ui := s.UIImplementing
+	cfg := s.Config.UIImplementing
+
+	switch s.State {
+	case StateOrient:
+		plan, err := loadPlan(s, dir)
+		if err != nil {
+			fmt.Fprintf(w, "State:   ORIENT\n")
+			fmt.Fprintf(w, "Phase:   ui_implementing\n")
+			fmt.Fprintf(w, "Error:   %s\n", err)
+			return
+		}
+
+		if ui.CurrentLayer == nil {
+			// Initial orient — show init summary, app, and config.
+			fmt.Fprintf(w, "State:   ORIENT\n")
+			fmt.Fprintf(w, "Phase:   ui_implementing\n")
+			if s.Planning != nil && s.Planning.CurrentPlan != nil {
+				fmt.Fprintf(w, "Plan:    %s\n", s.Planning.CurrentPlan.Name)
+				fmt.Fprintf(w, "Domain:  %s\n", s.Planning.CurrentPlan.Domain)
+				fmt.Fprintf(w, "File:    %s\n", s.Planning.CurrentPlan.File)
+			} else {
+				fmt.Fprintf(w, "Domain:  %s\n", ui.CurrentPlanDomain)
+				fmt.Fprintf(w, "File:    %s\n", ui.CurrentPlanFile)
+			}
+			fmt.Fprintf(w, "Config:  ui_implementing.batch=%d, eval.rounds=%d-%d, qa.rounds=%d-%d, e2e.rounds=%d-%d\n",
+				cfg.Batch, cfg.Eval.MinRounds, cfg.Eval.MaxRounds, cfg.QA.MinRounds, cfg.QA.MaxRounds, cfg.E2E.MinRounds, cfg.E2E.MaxRounds)
+			fmt.Fprintf(w, "App:     launch=%q url=%s\n", cfg.App.LaunchCommand, cfg.App.URL)
+			fmt.Fprintf(w, "\nInitialized plan.json for UI implementation:\n")
+			fmt.Fprintf(w, "  Items:  %d (passes: pending, rounds: 0)\n", len(plan.Items))
+			fmt.Fprintf(w, "  Layers: %d", len(plan.Layers))
+			for i, l := range plan.Layers {
+				if i == 0 {
+					fmt.Fprintf(w, " (%s %s: %d items", l.ID, l.Name, len(l.Items))
+				} else {
+					fmt.Fprintf(w, ", %s %s: %d items", l.ID, l.Name, len(l.Items))
+				}
+			}
+			fmt.Fprintf(w, ")\n")
+
+			if s.Config.General.UserGuided {
+				fmt.Fprintf(w, "Action:  STOP please review and discuss with user before continuing.\n")
+				fmt.Fprintf(w, "         After completion of the above, advance to select first batch.\n")
+			} else {
+				fmt.Fprintf(w, "Action:  Selecting first batch. Run: forgectl advance\n")
+			}
+			return
+		}
+
+		// Non-initial orient — mirror the implementing phase's layer-progress output.
+		fmt.Fprintf(w, "State:    ORIENT\n")
+		fmt.Fprintf(w, "Phase:    ui_implementing\n")
+		fmt.Fprintf(w, "Layer:    %s %s\n", ui.CurrentLayer.ID, ui.CurrentLayer.Name)
+
+		layer := findLayer(plan, ui.CurrentLayer.ID)
+		if layer != nil {
+			terminal, passed, failed, total := 0, 0, 0, len(layer.Items)
+			for _, id := range layer.Items {
+				if item := findItem(plan, id); item != nil {
+					if item.Passes == "passed" {
+						terminal++
+						passed++
+					} else if item.Passes == "failed" {
+						terminal++
+						failed++
+					}
+				}
+			}
+			if failed > 0 {
+				fmt.Fprintf(w, "Progress: %d/%d items terminal (%d passed, %d failed)\n", terminal, total, passed, failed)
+			} else {
+				fmt.Fprintf(w, "Progress: %d/%d items passed\n", terminal, total)
+			}
+		}
+
+		layerComplete := layer != nil && allLayerItemsTerminal(plan, *layer)
+		nextExists := false
+		for i, l := range plan.Layers {
+			if l.ID == ui.CurrentLayer.ID && i+1 < len(plan.Layers) {
+				nextExists = true
+				nextLayer := plan.Layers[i+1]
+				if layerComplete {
+					var ids []string
+					for _, id := range nextLayer.Items {
+						ids = append(ids, fmt.Sprintf("[%s]", id))
+					}
+					fmt.Fprintf(w, "Next:     %s %s — %d items: %s\n", nextLayer.ID, nextLayer.Name, len(nextLayer.Items), strings.Join(ids, ", "))
+				}
+				break
+			}
+		}
+		if !layerComplete && layer != nil {
+			pending := 0
+			for _, id := range layer.Items {
+				if item := findItem(plan, id); item != nil && item.Passes == "pending" {
+					pending++
+				}
+			}
+			if pending > cfg.Batch {
+				pending = cfg.Batch
+			}
+			if pending > 0 {
+				fmt.Fprintf(w, "Next:     %d unblocked items in next batch\n", pending)
+			}
+		}
+
+		var actionContinue string
+		if layerComplete {
+			if nextExists {
+				actionContinue = "advance to next layer."
+			} else {
+				actionContinue = "advance to continue."
+			}
+		} else {
+			actionContinue = "advance to select next batch."
+		}
+		if s.Config.General.UserGuided {
+			fmt.Fprintf(w, "Action:   STOP please review and discuss with user before continuing.\n")
+			fmt.Fprintf(w, "          After completion of the above, %s\n", actionContinue)
+		} else {
+			fmt.Fprintf(w, "Action:   After completion of the above, %s\n", actionContinue)
+		}
+
+	case StateImplement:
+		batch := ui.CurrentBatch
+		plan, err := loadPlan(s, dir)
+		if err != nil {
+			fmt.Fprintf(w, "Error: %s\n", err)
+			return
+		}
+		itemID := batch.Items[batch.CurrentItemIndex]
+		item := findItem(plan, itemID)
+		if item == nil {
+			fmt.Fprintf(w, "Error: item %q not found in plan\n", itemID)
+			return
+		}
+
+		fmt.Fprintf(w, "State:   IMPLEMENT\n")
+		fmt.Fprintf(w, "Phase:   ui_implementing\n")
+		fmt.Fprintf(w, "Layer:   %s %s\n", ui.CurrentLayer.ID, ui.CurrentLayer.Name)
+		fmt.Fprintf(w, "Batch:   %d/%d\n", ui.BatchNumber, countTotalBatches(plan, cfg.Batch))
+
+		if batch.EvalRound > 0 {
+			fmt.Fprintf(w, "Round:   %d/%d\n", batch.EvalRound, cfg.Eval.MaxRounds)
+			if len(batch.Evals) > 0 {
+				lastEval := batch.Evals[len(batch.Evals)-1]
+				evalFile := filepath.Join(currentPlanDir(s), "evals", fmt.Sprintf("batch-%d-round-%d.md", ui.BatchNumber, lastEval.Round))
+				fmt.Fprintf(w, "Eval:    %s\n", evalFile)
+				note := fmt.Sprintf("%s recorded for round %d.", lastEval.Verdict, lastEval.Round)
+				if lastEval.Verdict == "PASS" && batch.EvalRound < cfg.Eval.MinRounds {
+					note += fmt.Sprintf(" Minimum rounds not yet met (%d/%d).", batch.EvalRound, cfg.Eval.MinRounds)
+				}
+				fmt.Fprintf(w, "Note:    %s\n", note)
+			}
+		}
+
+		fmt.Fprintf(w, "Item:    [%s] %s\n", item.ID, item.Name)
+		fmt.Fprintf(w, "         %s\n", item.Description)
+		fmt.Fprintf(w, "         (%d of %d in batch)\n", batch.CurrentItemIndex+1, len(batch.Items))
+		var uiSpecCommits []string
+		if s.Planning != nil && s.Planning.CurrentPlan != nil {
+			uiSpecCommits = s.Planning.CurrentPlan.SpecCommits
+		}
+		writeItemBody(w, item, uiSpecCommits)
+
+		if batch.EvalRound > 0 && len(batch.Evals) > 0 {
+			lastEval := batch.Evals[len(batch.Evals)-1]
+			evalFile := filepath.Join(currentPlanDir(s), "evals", fmt.Sprintf("batch-%d-round-%d.md", ui.BatchNumber, lastEval.Round))
+			writeRefineBody(w, EvalModeFor(cfg.Eval, s.Config.General), evalFile, "Action:  ", "         ")
+			fmt.Fprintf(w, "         After completion of the above, advance to continue.\n")
+		} else {
+			fmt.Fprintf(w, "Action:  Implement this item.\n")
+			fmt.Fprintf(w, "         After completion of the above, advance to continue.\n")
+		}
+
+	case StateEvaluate:
+		batch := ui.CurrentBatch
+		plan, _ := loadPlan(s, dir)
+		totalBatches := 0
+		if plan != nil {
+			totalBatches = countTotalBatches(plan, cfg.Batch)
+		}
+		fmt.Fprintf(w, "State:    EVALUATE\n")
+		fmt.Fprintf(w, "Phase:    ui_implementing\n")
+		fmt.Fprintf(w, "Layer:    %s %s\n", ui.CurrentLayer.ID, ui.CurrentLayer.Name)
+		fmt.Fprintf(w, "Batch:    %d/%d\n", ui.BatchNumber, totalBatches)
+		fmt.Fprintf(w, "Round:    %d/%d\n", batch.EvalRound, cfg.Eval.MaxRounds)
+		fmt.Fprintf(w, "Loop:     code\n")
+		writeUIBatchItems(w, plan, batch.Items)
+		writeUIReviewLine(w, batch, "          ")
+		evalType := cfg.Eval.Type
+		writeEvalEntryAction(w, EvalModeFor(cfg.Eval, s.Config.General), evalEntryAction{
+			label:        "Action:   ",
+			indent:       "          ",
+			spawnEval:    fmt.Sprintf("Please spawn 1 %s sub-agent to evaluate the implementation batch.", evalType),
+			spawnCorrect: fmt.Sprintf("Please spawn 1 %s sub-agent to evaluate and correct the batch.", evalType),
+			runEval:      "The sub-agent should run: forgectl eval",
+			stagedNote:   "Batch files have been staged. Sub-agent makes corrections directly.",
+			reportTail:   "advance with --eval-report <path> --verdict PASS|FAIL",
+		})
+
+	case StateQATest:
+		batch := ui.CurrentBatch
+		plan, _ := loadPlan(s, dir)
+		totalBatches := 0
+		if plan != nil {
+			totalBatches = countTotalBatches(plan, cfg.Batch)
+		}
+		fmt.Fprintf(w, "State:    QA_TEST\n")
+		fmt.Fprintf(w, "Phase:    ui_implementing\n")
+		fmt.Fprintf(w, "Layer:    %s %s\n", ui.CurrentLayer.ID, ui.CurrentLayer.Name)
+		fmt.Fprintf(w, "Batch:    %d/%d\n", ui.BatchNumber, totalBatches)
+		fmt.Fprintf(w, "Round:    %d/%d\n", batch.QARound, cfg.QA.MaxRounds)
+		fmt.Fprintf(w, "Loop:     qa\n")
+		fmt.Fprintf(w, "App:      launch=%q url=%s\n", cfg.App.LaunchCommand, cfg.App.URL)
+		writeUIBatchItems(w, plan, batch.Items)
+		fmt.Fprintf(w, "Steps:    %s\n", qaStepListPath(s, ui.BatchNumber))
+		writeUIReviewLine(w, batch, "          ")
+
+		qaType := cfg.QA.Type
+		switch EvalModeFor(cfg.QA, s.Config.General) {
+		case "direct":
+			fmt.Fprintf(w, "Action:   Please spawn 1 %s sub-agent to QA and correct the UI.\n", qaType)
+			fmt.Fprintf(w, "          The sub-agent makes placement corrections directly, writes the e2e step list,\n")
+			fmt.Fprintf(w, "          and hands off the step list with: forgectl handoff <step-list>\n")
+			fmt.Fprintf(w, "          After completion of the above, advance with --verdict PASS|FAIL\n")
+		case "conversational":
+			fmt.Fprintf(w, "Action:   Please spawn 1 %s sub-agent to QA the running UI.\n", qaType)
+			fmt.Fprintf(w, "          The sub-agent should run: forgectl eval\n")
+			fmt.Fprintf(w, "          It drives the running app at the URL above through the Playwright MCP,\n")
+			fmt.Fprintf(w, "          writes the e2e step list to the Steps path above, communicates its verdict verbally,\n")
+			fmt.Fprintf(w, "          and hands off the step list with: forgectl handoff <step-list>\n")
+			fmt.Fprintf(w, "          After completion of the above, advance with --verdict PASS|FAIL\n")
+		default: // report
+			fmt.Fprintf(w, "Action:   Please spawn 1 %s sub-agent to QA the running UI.\n", qaType)
+			fmt.Fprintf(w, "          The sub-agent should run: forgectl eval\n")
+			fmt.Fprintf(w, "          It drives the running app at the URL above through the Playwright MCP —\n")
+			fmt.Fprintf(w, "          snapshot to judge placement, exercise each control, read the console for errors —\n")
+			fmt.Fprintf(w, "          judges UI placement and controls, writes the e2e step list to the Steps path above,\n")
+			fmt.Fprintf(w, "          and hands its outputs back with: forgectl handoff <qa-report> <step-list>\n")
+			fmt.Fprintf(w, "          After completion of the above, advance with --eval-report <path> --verdict PASS|FAIL\n")
+		}
+
+	case StateUIRefine:
+		batch := ui.CurrentBatch
+		plan, _ := loadPlan(s, dir)
+		fmt.Fprintf(w, "State:   UI_REFINE\n")
+		fmt.Fprintf(w, "Phase:   ui_implementing\n")
+		fmt.Fprintf(w, "Layer:   %s %s\n", ui.CurrentLayer.ID, ui.CurrentLayer.Name)
+		fmt.Fprintf(w, "Batch:   %d/%d\n", ui.BatchNumber, countTotalBatches(plan, cfg.Batch))
+		fmt.Fprintf(w, "Round:   %d/%d\n", batch.QARound, cfg.QA.MaxRounds)
+		fmt.Fprintf(w, "Loop:    qa\n")
+		qaMode := EvalModeFor(cfg.QA, s.Config.General)
+		var lastQA *EvalRecord
+		if len(batch.QAEvals) > 0 {
+			lastQA = &batch.QAEvals[len(batch.QAEvals)-1]
+		}
+		qaReport := qaReportPath(s, ui.BatchNumber, batch.QARound)
+		if lastQA != nil {
+			if qaMode == "report" {
+				if lastQA.EvalReport != "" {
+					qaReport = lastQA.EvalReport
+				}
+				fmt.Fprintf(w, "QA:      %s\n", qaReport)
+			}
+			fmt.Fprintf(w, "Note:    %s recorded for QA round %d.\n", lastQA.Verdict, lastQA.Round)
+		}
+		writeUIBatchItems(w, plan, batch.Items)
+		switch qaMode {
+		case "direct":
+			fmt.Fprintf(w, "Action:  Review unstaged changes from the QA evaluator (git diff).\n")
+			fmt.Fprintf(w, "         Accept, revise, or revert the placement corrections.\n")
+		case "conversational":
+			fmt.Fprintf(w, "Action:  Make placement and control corrections based off communication with the QA evaluator.\n")
+		default: // report
+			fmt.Fprintf(w, "Action:  Study the QA report %q\n", qaReport)
+			fmt.Fprintf(w, "         and iterate on UI placement and controls as needed.\n")
+		}
+		fmt.Fprintf(w, "         Apply \"fresh\" eyes and a tightened lens when reviewing the work.\n")
+		fmt.Fprintf(w, "         After completion of the above, advance to continue.\n")
+
+	case StateE2EAuthor:
+		batch := ui.CurrentBatch
+		plan, _ := loadPlan(s, dir)
+		scenarios, _ := countQAScenarios(s, dir, ui.BatchNumber)
+		fmt.Fprintf(w, "State:   E2E_AUTHOR\n")
+		fmt.Fprintf(w, "Phase:   ui_implementing\n")
+		fmt.Fprintf(w, "Layer:   %s %s\n", ui.CurrentLayer.ID, ui.CurrentLayer.Name)
+		fmt.Fprintf(w, "Batch:   %d/%d\n", ui.BatchNumber, countTotalBatches(plan, cfg.Batch))
+		fmt.Fprintf(w, "Loop:    e2e\n")
+		fmt.Fprintf(w, "Steps:   %s (%d scenarios)\n", qaStepListPath(s, ui.BatchNumber), scenarios)
+		if scenarios == 0 {
+			fmt.Fprintf(w, "Action:  No e2e scenarios were produced for this batch. Advance to continue.\n")
+			return
+		}
+		fmt.Fprintf(w, "Tests:   %s\n", cfg.E2E.TestDir)
+		fmt.Fprintf(w, "Run:     %s\n", cfg.E2E.TestCommand)
+		fmt.Fprintf(w, "Action:  Author e2e tests from the step list above into the Tests directory, then run them.\n")
+		fmt.Fprintf(w, "         After completion of the above, advance to continue.\n")
+		_ = batch
+
+	case StateE2EVerify:
+		batch := ui.CurrentBatch
+		plan, _ := loadPlan(s, dir)
+		totalBatches := 0
+		if plan != nil {
+			totalBatches = countTotalBatches(plan, cfg.Batch)
+		}
+		fmt.Fprintf(w, "State:    E2E_VERIFY\n")
+		fmt.Fprintf(w, "Phase:    ui_implementing\n")
+		fmt.Fprintf(w, "Layer:    %s %s\n", ui.CurrentLayer.ID, ui.CurrentLayer.Name)
+		fmt.Fprintf(w, "Batch:    %d/%d\n", ui.BatchNumber, totalBatches)
+		fmt.Fprintf(w, "Round:    %d/%d\n", batch.E2ERound, cfg.E2E.MaxRounds)
+		fmt.Fprintf(w, "Loop:     e2e\n")
+		fmt.Fprintf(w, "Run:      %s\n", cfg.E2E.TestCommand)
+		writeUIBatchItems(w, plan, batch.Items)
+		writeUIReviewLine(w, batch, "          ")
+		e2eType := cfg.E2E.Type
+		writeEvalEntryAction(w, EvalModeFor(cfg.E2E.EvalConfig, s.Config.General), evalEntryAction{
+			label:        "Action:   ",
+			indent:       "          ",
+			spawnEval:    fmt.Sprintf("Please spawn 1 %s sub-agent to verify the e2e tests.", e2eType),
+			spawnCorrect: fmt.Sprintf("Please spawn 1 %s sub-agent to verify and correct the e2e tests.", e2eType),
+			runEval:      "The sub-agent should run: forgectl eval",
+			stagedNote:   "e2e test changes are unstaged. Sub-agent makes corrections directly.",
+			reportTail:   "advance with --eval-report <path> --verdict PASS|FAIL",
+		})
+
+	case StateE2ERemediate:
+		batch := ui.CurrentBatch
+		plan, _ := loadPlan(s, dir)
+		fmt.Fprintf(w, "State:   E2E_REMEDIATE\n")
+		fmt.Fprintf(w, "Phase:   ui_implementing\n")
+		fmt.Fprintf(w, "Layer:   %s %s\n", ui.CurrentLayer.ID, ui.CurrentLayer.Name)
+		fmt.Fprintf(w, "Batch:   %d/%d\n", ui.BatchNumber, countTotalBatches(plan, cfg.Batch))
+		fmt.Fprintf(w, "Round:   %d/%d\n", batch.E2ERound, cfg.E2E.MaxRounds)
+		fmt.Fprintf(w, "Loop:    e2e\n")
+		e2eMode := EvalModeFor(cfg.E2E.EvalConfig, s.Config.General)
+		var lastE2E *EvalRecord
+		if len(batch.E2EEvals) > 0 {
+			lastE2E = &batch.E2EEvals[len(batch.E2EEvals)-1]
+		}
+		e2eReport := e2eReportPath(s, ui.BatchNumber, batch.E2ERound)
+		if lastE2E != nil {
+			if e2eMode == "report" {
+				if lastE2E.EvalReport != "" {
+					e2eReport = lastE2E.EvalReport
+				}
+				fmt.Fprintf(w, "Eval:    %s\n", e2eReport)
+			}
+			fmt.Fprintf(w, "Note:    %s recorded for e2e round %d.\n", lastE2E.Verdict, lastE2E.Round)
+		}
+		fmt.Fprintf(w, "Run:     %s\n", cfg.E2E.TestCommand)
+		switch e2eMode {
+		case "direct":
+			fmt.Fprintf(w, "Action:  Review unstaged changes from the e2e evaluator (git diff). Accept, revise, or revert, then re-run.\n")
+		case "conversational":
+			fmt.Fprintf(w, "Action:  Make corrections based off communication with the e2e evaluator, then re-run.\n")
+		default: // report
+			fmt.Fprintf(w, "Action:  Study the e2e report above. Fix the failing tests or the UI under test, then re-run.\n")
+		}
+		fmt.Fprintf(w, "         Apply \"fresh\" eyes and a tightened lens when reviewing the work.\n")
+		fmt.Fprintf(w, "         After completion of the above, advance to continue.\n")
+
+	case StateCommit:
+		batch := ui.CurrentBatch
+		plan, _ := loadPlan(s, dir)
+		fmt.Fprintf(w, "State:   COMMIT\n")
+		fmt.Fprintf(w, "Phase:   ui_implementing\n")
+		fmt.Fprintf(w, "Layer:   %s %s\n", ui.CurrentLayer.ID, ui.CurrentLayer.Name)
+		fmt.Fprintf(w, "Batch:   %d/%d\n", ui.BatchNumber, countTotalBatches(plan, cfg.Batch))
+		fmt.Fprintf(w, "Items:\n")
+		if plan != nil && batch != nil {
+			// Name the loop that force-accepted, if any.
+			forceLoop, forceMax := "", 0
+			switch {
+			case batch.E2EForceAccepted:
+				forceLoop, forceMax = "e2e", cfg.E2E.MaxRounds
+			case batch.QAForceAccepted:
+				forceLoop, forceMax = "qa", cfg.QA.MaxRounds
+			case batch.CodeForceAccepted:
+				forceLoop, forceMax = "code", cfg.Eval.MaxRounds
+			}
+			for _, id := range batch.Items {
+				if item := findItem(plan, id); item != nil {
+					status := item.Passes
+					if item.Passes == "failed" && forceLoop != "" {
+						status = fmt.Sprintf("failed (%s force-accept, %d/%d rounds)", forceLoop, forceMax, forceMax)
+					}
+					fmt.Fprintf(w, "  - [%s] %s\n", item.ID, status)
+				}
+			}
+		}
+		if s.Config.General.EnableCommits {
+			fmt.Fprintf(w, "Action:  Advance with --message \"your commit message\" to commit and continue.\n")
+		} else {
+			fmt.Fprintf(w, "Action:  Advance to continue.\n")
+		}
+
+	case StateDone:
+		plan, _ := loadPlan(s, dir)
+		fmt.Fprintf(w, "State:   DONE\n")
+		fmt.Fprintf(w, "Phase:   ui_implementing\n")
+		moreDomains := (s.Planning != nil && len(s.Planning.Queue) > 0) ||
+			(ui != nil && len(ui.PlanQueue) > 0)
+		fmt.Fprintf(w, "Summary:\n")
+		if plan != nil {
+			totalItems, totalPassed := 0, 0
+			for _, layer := range plan.Layers {
+				passed, total := 0, len(layer.Items)
+				for _, id := range layer.Items {
+					if item := findItem(plan, id); item != nil && item.Passes == "passed" {
+						passed++
+					}
+				}
+				fmt.Fprintf(w, "  %s %s:  %d/%d passed\n", layer.ID, layer.Name, passed, total)
+				totalItems += total
+				totalPassed += passed
+			}
+			codeR, qaR, e2eR, batches := 0, 0, 0, 0
+			for _, lh := range ui.LayerHistory {
+				for _, bh := range lh.Batches {
+					batches++
+					codeR += bh.EvalRounds
+					qaR += bh.QARounds
+					e2eR += bh.E2ERounds
+				}
+			}
+			fmt.Fprintf(w, "  Total:     %d/%d items passed\n", totalPassed, totalItems)
+			fmt.Fprintf(w, "  Rounds:    code %d, qa %d, e2e %d (across %d batches)\n", codeR, qaR, e2eR, batches)
+		}
+		if moreDomains {
+			fmt.Fprintf(w, "Action:  Domain complete. Advance to continue to next domain.\n")
+		} else {
+			fmt.Fprintf(w, "Action:  All items complete. Session done.\n")
+		}
+	}
+}
+
+// writeItemBody renders the Steps/Files/Specs/Refs/Tests block of a plan item,
+// shared by the implementing and ui_implementing IMPLEMENT output. specCommits is
+// the plan's spec_commits list; when non-empty a copy-pasteable git show command
+// is printed under each spec entry.
+func writeItemBody(w io.Writer, item *PlanItem, specCommits []string) {
+	if len(item.Steps) > 0 {
+		fmt.Fprintf(w, "Steps:\n")
+		for i, step := range item.Steps {
+			fmt.Fprintf(w, "  %d. %s\n", i+1, step)
+		}
+	}
+	if len(item.Files) > 0 {
+		fmt.Fprintf(w, "Files:   %s\n", strings.Join(item.Files, ", "))
+	}
+	if len(item.Specs) > 0 {
+		for i, spec := range item.Specs {
+			if i == 0 {
+				fmt.Fprintf(w, "Specs:   %s\n", spec)
+			} else {
+				fmt.Fprintf(w, "         %s\n", spec)
+			}
+			if len(specCommits) > 0 {
+				file, _, _ := strings.Cut(spec, "#")
+				fmt.Fprintf(w, "         Read: git show %s -- '**/%s'\n", strings.Join(specCommits, " "), file)
+			}
+		}
+	}
+	for i, ref := range item.Refs {
+		if i == 0 {
+			fmt.Fprintf(w, "Refs:    %s\n", ref)
+		} else {
+			fmt.Fprintf(w, "         %s\n", ref)
+		}
+	}
+	testCounts := map[string]int{}
+	for _, t := range item.Tests {
+		testCounts[t.Category]++
+	}
+	var testParts []string
+	for _, cat := range []string{"functional", "rejection", "edge_case"} {
+		if c, ok := testCounts[cat]; ok {
+			testParts = append(testParts, fmt.Sprintf("%d %s", c, cat))
+		}
+	}
+	if len(testParts) > 0 {
+		fmt.Fprintf(w, "Tests:   %s\n", strings.Join(testParts, ", "))
+	}
+}
+
+// writeUIBatchItems renders the "Items:" list of a ui_implementing batch under
+// evaluation (the whole batch, no single active item).
+func writeUIBatchItems(w io.Writer, plan *PlanJSON, items []string) {
+	fmt.Fprintf(w, "Items:\n")
+	if plan == nil {
+		return
+	}
+	for _, id := range items {
+		if item := findItem(plan, id); item != nil {
+			fmt.Fprintf(w, "  - [%s] %s\n", item.ID, item.Name)
+		}
+	}
+}
+
+// writeUIReviewLine renders the Review: block listing the current batch's
+// handed-off artifacts before the Action line, when any have been handed off.
+func writeUIReviewLine(w io.Writer, batch *UIBatchState, indent string) {
+	if batch == nil || len(batch.HandedOffArtifacts) == 0 {
+		return
+	}
+	for i, artifact := range batch.HandedOffArtifacts {
+		if i == 0 {
+			fmt.Fprintf(w, "Review:   %s\n", artifact)
+		} else {
+			fmt.Fprintf(w, "%s%s\n", indent, artifact)
 		}
 	}
 }
@@ -1630,7 +2150,6 @@ func PrintStatus(w io.Writer, s *ForgeState, dir string, verbose bool) {
 	printProgressLine(w, s, dir)
 	fmt.Fprintln(w)
 
-
 	if !verbose {
 		return
 	}
@@ -1794,6 +2313,9 @@ func phaseConfig(s *ForgeState) (batch, minRounds, maxRounds int) {
 	case PhaseReverseEngineering:
 		// Reverse engineering has no batch; report the reconcile round bounds.
 		return 0, s.Config.ReverseEngineering.Reconcile.MinRounds, s.Config.ReverseEngineering.Reconcile.MaxRounds
+	case PhaseUIImplementing:
+		// Report the batch size and the primary (code) eval round bounds.
+		return s.Config.UIImplementing.Batch, s.Config.UIImplementing.Eval.MinRounds, s.Config.UIImplementing.Eval.MaxRounds
 	default: // implementing
 		return s.Config.Implementing.Batch, s.Config.Implementing.Eval.MinRounds, s.Config.Implementing.Eval.MaxRounds
 	}
@@ -1816,7 +2338,7 @@ func printProgressLine(w io.Writer, s *ForgeState, dir string) {
 		}
 		fmt.Fprintf(w, "Progress: round %d of %d\n", s.Planning.Round, s.Config.Planning.Eval.MaxRounds)
 
-	case PhaseImplementing:
+	case PhaseImplementing, PhaseUIImplementing:
 		plan, _ := loadPlan(s, dir)
 		if plan == nil {
 			return
@@ -1853,6 +2375,17 @@ func PrintEvalOutput(w io.Writer, s *ForgeState, dir string) error {
 		return printPlanningEval(w, s)
 	case PhaseImplementing:
 		return printImplementingEval(w, s, dir)
+	case PhaseUIImplementing:
+		switch s.State {
+		case StateEvaluate:
+			return printUICodeEval(w, s, dir)
+		case StateQATest:
+			return PrintUIQAEvalOutput(w, s, dir)
+		case StateE2EVerify:
+			return PrintUIE2EEvalOutput(w, s, dir)
+		default:
+			return fmt.Errorf("eval is only valid in ui_implementing EVALUATE, QA_TEST, or E2E_VERIFY state (current: %s %s)", s.Phase, s.State)
+		}
 	default:
 		return fmt.Errorf("eval is only valid in planning or implementing EVALUATE state (current: %s %s)", s.Phase, s.State)
 	}
@@ -1921,8 +2454,22 @@ func printImplementingEval(w io.Writer, s *ForgeState, dir string) error {
 		return planErr
 	}
 
+	writeEvalItemList(w, plan, batch.Items)
+
+	// Previous evaluations + report output, per eval_mode.
+	evalDir := filepath.Join(currentPlanDir(s), "evals")
+	reportFile := filepath.Join(evalDir, fmt.Sprintf("batch-%d-round-%d.md", impl.BatchNumber, evalRound))
+	writeEvalTrailingSections(w, EvalModeFor(s.Config.Implementing.Eval, s.Config.General), batch.Evals, reportFile, "batch", true)
+
+	return nil
+}
+
+// writeEvalItemList renders the per-item block (description, specs, refs, files,
+// steps, tests) shared by the implementing and ui_implementing evaluation
+// contexts. Items not found in the plan are skipped.
+func writeEvalItemList(w io.Writer, plan *PlanJSON, items []string) {
 	rendered := 0
-	for i, id := range batch.Items {
+	for i, id := range items {
 		item := findItem(plan, id)
 		if item == nil {
 			continue
@@ -1934,22 +2481,18 @@ func printImplementingEval(w io.Writer, s *ForgeState, dir string) error {
 
 		fmt.Fprintf(w, "[%d] %s — %s\n", i+1, item.ID, item.Name)
 		fmt.Fprintf(w, "    Description: %s\n", item.Description)
-		if len(item.Specs) > 0 {
-			for i, spec := range item.Specs {
-				if i == 0 {
-					fmt.Fprintf(w, "    Specs:       %s\n", spec)
-				} else {
-					fmt.Fprintf(w, "                 %s\n", spec)
-				}
+		for j, spec := range item.Specs {
+			if j == 0 {
+				fmt.Fprintf(w, "    Specs:       %s\n", spec)
+			} else {
+				fmt.Fprintf(w, "                 %s\n", spec)
 			}
 		}
-		if len(item.Refs) > 0 {
-			for i, ref := range item.Refs {
-				if i == 0 {
-					fmt.Fprintf(w, "    Refs:        %s\n", ref)
-				} else {
-					fmt.Fprintf(w, "                 %s\n", ref)
-				}
+		for j, ref := range item.Refs {
+			if j == 0 {
+				fmt.Fprintf(w, "    Refs:        %s\n", ref)
+			} else {
+				fmt.Fprintf(w, "                 %s\n", ref)
 			}
 		}
 		if len(item.Files) > 0 {
@@ -1968,13 +2511,171 @@ func printImplementingEval(w io.Writer, s *ForgeState, dir string) error {
 			}
 		}
 	}
+}
 
-	// Previous evaluations + report output, per eval_mode. The report path is
-	// computed by the shared helper so it is identical to the path the EVALUATE
-	// status action shows the engineer.
-	reportFile := implEvalReportPath(s)
-	writeEvalTrailingSections(w, EvalModeFor(s.Config.Implementing.Eval, s.Config.General), batch.Evals, reportFile, "batch", true)
+// writePreviousEvaluations renders the trailing --- PREVIOUS EVALUATIONS ---
+// section for the QA and e2e loops (the code loop uses writeEvalTrailingSections,
+// which couples this section with REPORT OUTPUT). Omitted when there are no
+// prior rounds.
+func writePreviousEvaluations(w io.Writer, evals []EvalRecord) {
+	if len(evals) == 0 {
+		return
+	}
+	fmt.Fprintf(w, "\n--- PREVIOUS EVALUATIONS ---\n\n")
+	for _, e := range evals {
+		fmt.Fprintf(w, "Round %d: %s", e.Round, e.Verdict)
+		if e.EvalReport != "" {
+			fmt.Fprintf(w, " — %s", e.EvalReport)
+		}
+		fmt.Fprintln(w)
+	}
+}
 
+// printUICodeEval renders the code-evaluation context for the ui_implementing
+// EVALUATE state. It embeds the same impl-eval.md prompt and item list as the
+// implementing phase; only the round source (the pre-incremented eval_round) and
+// config block differ.
+func printUICodeEval(w io.Writer, s *ForgeState, dir string) error {
+	ui := s.UIImplementing
+	batch := ui.CurrentBatch
+	cfg := s.Config.UIImplementing
+
+	evalRound := batch.EvalRound // pre-incremented on entry to EVALUATE
+
+	fmt.Fprintf(w, "=== IMPLEMENTATION EVALUATION ROUND %d/%d ===\n", evalRound, cfg.Eval.MaxRounds)
+	fmt.Fprintf(w, "Layer: %s %s\n", ui.CurrentLayer.ID, ui.CurrentLayer.Name)
+
+	plan, planErr := loadPlan(s, dir)
+	totalBatches := 0
+	if planErr == nil && plan != nil {
+		totalBatches = countTotalBatches(plan, cfg.Batch)
+	}
+	fmt.Fprintf(w, "Batch: %d/%d\n", ui.BatchNumber, totalBatches)
+
+	fmt.Fprintf(w, "\n--- EVALUATOR INSTRUCTIONS ---\n\n")
+	fmt.Fprintf(w, "%s\n", evaluators.ImplEval)
+
+	fmt.Fprintf(w, "\n--- ITEMS TO EVALUATE ---\n\n")
+	if planErr != nil {
+		return planErr
+	}
+	writeEvalItemList(w, plan, batch.Items)
+
+	reportFile := filepath.Join(currentPlanDir(s), "evals", fmt.Sprintf("batch-%d-round-%d.md", ui.BatchNumber, evalRound))
+	writeEvalTrailingSections(w, EvalModeFor(cfg.Eval, s.Config.General), batch.Evals, reportFile, "batch", true)
+	return nil
+}
+
+// PrintUIQAEvalOutput renders the QA evaluation context for the QA_TEST state:
+// the QA evaluator prompt, the running application, the batch items, the step-list
+// target, and (per eval_mode) the report target and hand-off instructions.
+func PrintUIQAEvalOutput(w io.Writer, s *ForgeState, dir string) error {
+	ui := s.UIImplementing
+	batch := ui.CurrentBatch
+	cfg := s.Config.UIImplementing
+	mode := EvalModeFor(cfg.QA, s.Config.General)
+	round := batch.QARound
+
+	fmt.Fprintf(w, "=== UI QA EVALUATION ROUND %d/%d ===\n", round, cfg.QA.MaxRounds)
+	fmt.Fprintf(w, "Layer: %s %s\n", ui.CurrentLayer.ID, ui.CurrentLayer.Name)
+	plan, planErr := loadPlan(s, dir)
+	totalBatches := 0
+	if planErr == nil && plan != nil {
+		totalBatches = countTotalBatches(plan, cfg.Batch)
+	}
+	fmt.Fprintf(w, "Batch: %d/%d\n", ui.BatchNumber, totalBatches)
+
+	fmt.Fprintf(w, "\n--- QA EVALUATOR INSTRUCTIONS ---\n\n")
+	fmt.Fprintf(w, "%s\n", evaluators.UIQAEval)
+
+	fmt.Fprintf(w, "\n--- APPLICATION ---\n\n")
+	fmt.Fprintf(w, "Launch:        %s\n", cfg.App.LaunchCommand)
+	fmt.Fprintf(w, "URL:           %s\n", cfg.App.URL)
+	fmt.Fprintf(w, "Ready timeout: %ds\n", cfg.App.ReadyTimeoutSeconds)
+	fmt.Fprintf(w, "Driver:        Playwright MCP — navigate to the URL, snapshot for placement,\n")
+	fmt.Fprintf(w, "               click/type to exercise controls, read console for runtime errors\n")
+
+	fmt.Fprintf(w, "\n--- ITEMS TO QA ---\n\n")
+	if planErr != nil {
+		return planErr
+	}
+	writeEvalItemList(w, plan, batch.Items)
+
+	stepList := qaStepListPath(s, ui.BatchNumber)
+	report := qaReportPath(s, ui.BatchNumber, round)
+
+	// STEP LIST OUTPUT — present in every mode (the step list is always written).
+	fmt.Fprintf(w, "\n--- STEP LIST OUTPUT ---\n\n")
+	fmt.Fprintf(w, "Write the e2e step list to:\n")
+	fmt.Fprintf(w, "  %s\n", stepList)
+
+	// REPORT OUTPUT — report names the file; direct corrects in place; conversational omits.
+	switch mode {
+	case "report":
+		fmt.Fprintf(w, "\n--- REPORT OUTPUT ---\n\n")
+		fmt.Fprintf(w, "Write your QA report to:\n")
+		fmt.Fprintf(w, "  %s\n", report)
+	case "direct":
+		fmt.Fprintf(w, "\n--- REPORT OUTPUT ---\n\n")
+		fmt.Fprintf(w, "Make placement corrections directly to the UI under test.\n")
+	}
+
+	// HANDOFF — present in every mode. report/direct hand off the step list (and,
+	// in report mode, the report); conversational hands off the step list alone.
+	fmt.Fprintf(w, "\n--- HANDOFF ---\n\n")
+	fmt.Fprintf(w, "When finished, register your generated files with:\n")
+	if mode == "report" {
+		fmt.Fprintf(w, "  forgectl handoff %s \\\n", report)
+		fmt.Fprintf(w, "                   %s\n", stepList)
+	} else {
+		fmt.Fprintf(w, "  forgectl handoff %s\n", stepList)
+	}
+
+	writePreviousEvaluations(w, batch.QAEvals)
+	return nil
+}
+
+// PrintUIE2EEvalOutput renders the e2e verification context for the E2E_VERIFY
+// state: the e2e evaluator prompt, the e2e suite (step list, test command, test
+// dir), and (in report mode) the report target and hand-off instructions.
+func PrintUIE2EEvalOutput(w io.Writer, s *ForgeState, dir string) error {
+	ui := s.UIImplementing
+	batch := ui.CurrentBatch
+	cfg := s.Config.UIImplementing
+	mode := EvalModeFor(cfg.E2E.EvalConfig, s.Config.General)
+	round := batch.E2ERound
+
+	fmt.Fprintf(w, "=== UI E2E VERIFICATION ROUND %d/%d ===\n", round, cfg.E2E.MaxRounds)
+	fmt.Fprintf(w, "Layer: %s %s\n", ui.CurrentLayer.ID, ui.CurrentLayer.Name)
+	plan, planErr := loadPlan(s, dir)
+	totalBatches := 0
+	if planErr == nil && plan != nil {
+		totalBatches = countTotalBatches(plan, cfg.Batch)
+	}
+	fmt.Fprintf(w, "Batch: %d/%d\n", ui.BatchNumber, totalBatches)
+
+	fmt.Fprintf(w, "\n--- E2E EVALUATOR INSTRUCTIONS ---\n\n")
+	fmt.Fprintf(w, "%s\n", evaluators.UIE2EEval)
+
+	fmt.Fprintf(w, "\n--- E2E SUITE ---\n\n")
+	fmt.Fprintf(w, "Step list:    %s\n", qaStepListPath(s, ui.BatchNumber))
+	fmt.Fprintf(w, "Test command: %s\n", cfg.E2E.TestCommand)
+	fmt.Fprintf(w, "Test dir:     %s\n", cfg.E2E.TestDir)
+	fmt.Fprintf(w, "Runner:       Playwright test runner (the authored tests are Playwright test files)\n")
+
+	// REPORT OUTPUT and HANDOFF appear only in report mode (no report file exists
+	// in direct/conversational mode).
+	if mode == "report" {
+		report := e2eReportPath(s, ui.BatchNumber, round)
+		fmt.Fprintf(w, "\n--- REPORT OUTPUT ---\n\n")
+		fmt.Fprintf(w, "Write your e2e verification report to:\n")
+		fmt.Fprintf(w, "  %s\n", report)
+		fmt.Fprintf(w, "\n--- HANDOFF ---\n\n")
+		fmt.Fprintf(w, "When finished, register your report with:\n")
+		fmt.Fprintf(w, "  forgectl handoff %s\n", report)
+	}
+
+	writePreviousEvaluations(w, batch.E2EEvals)
 	return nil
 }
 
@@ -2173,8 +2874,8 @@ func PrintReverseEngineeringEvalOutput(w io.Writer, s *ForgeState) error {
 
 // currentPlanDir returns the directory containing the active plan file.
 func currentPlanDir(s *ForgeState) string {
-	if s.Planning != nil && s.Planning.CurrentPlan != nil {
-		return filepath.Dir(s.Planning.CurrentPlan.File)
+	if pf := currentPlanFile(s); pf != "" {
+		return filepath.Dir(pf)
 	}
 	return "."
 }
