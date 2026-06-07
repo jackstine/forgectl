@@ -858,6 +858,10 @@ func advanceUIImplementing(s *ForgeState, in AdvanceInput, dir string) error {
 		return advanceUIFromImplement(s, in, dir)
 	case StateEvaluate:
 		return advanceUIFromEvaluate(s, in, dir)
+	case StateQATest:
+		return advanceUIFromQATest(s, in, dir)
+	case StateUIRefine:
+		return advanceUIFromUIRefine(s)
 	case StateCommit:
 		return advanceUIFromCommit(s, in, dir)
 	case StateDone:
@@ -984,6 +988,59 @@ func advanceUIFromEvaluate(s *ForgeState, in AdvanceInput, dir string) error {
 	// Below min (PASS) or below max (FAIL) — re-implement the batch.
 	batch.CurrentItemIndex = 0
 	s.State = StateImplement
+	return nil
+}
+
+func advanceUIFromQATest(s *ForgeState, in AdvanceInput, dir string) error {
+	cfg := s.Config.UIImplementing
+	if err := requireVerdict(in, EvalModeFor(cfg.QA, s.Config.General)); err != nil {
+		return err
+	}
+
+	ui := s.UIImplementing
+	batch := ui.CurrentBatch
+
+	// QARound was incremented on entry to QA_TEST; record against it directly.
+	// Record only after the step-list invariant is satisfied for the exit paths.
+	toE2E := (in.Verdict == "PASS" && batch.QARound >= cfg.QA.MinRounds) ||
+		(in.Verdict == "FAIL" && batch.QARound >= cfg.QA.MaxRounds)
+
+	if toE2E {
+		// Invariant 6: the QA loop must produce the e2e step list on every exit
+		// toward E2E_AUTHOR. Confirm presence (and count scenarios) before exiting.
+		count, exists := countQAScenarios(s, dir, ui.BatchNumber)
+		if !exists {
+			return fmt.Errorf("QA step list %q does not exist; the QA evaluator must write it before advancing toward E2E_AUTHOR", qaStepListPath(s, ui.BatchNumber))
+		}
+		if count == 0 {
+			fmt.Fprintf(os.Stderr, "WARN: QA step list %q has 0 scenarios; the e2e loop will pass vacuously.\n", qaStepListPath(s, ui.BatchNumber))
+		}
+		batch.QAEvals = append(batch.QAEvals, EvalRecord{
+			Round:      batch.QARound,
+			Verdict:    in.Verdict,
+			EvalReport: in.EvalReport,
+		})
+		if in.Verdict == "FAIL" {
+			batch.QAForceAccepted = true
+		}
+		s.State = StateE2EAuthor
+		return nil
+	}
+
+	// Below min (PASS) or below max (FAIL) — iterate on the UI.
+	batch.QAEvals = append(batch.QAEvals, EvalRecord{
+		Round:      batch.QARound,
+		Verdict:    in.Verdict,
+		EvalReport: in.EvalReport,
+	})
+	s.State = StateUIRefine
+	return nil
+}
+
+func advanceUIFromUIRefine(s *ForgeState) error {
+	batch := s.UIImplementing.CurrentBatch
+	batch.QARound++ // re-entering the QA loop
+	s.State = StateQATest
 	return nil
 }
 

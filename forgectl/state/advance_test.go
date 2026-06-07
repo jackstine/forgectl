@@ -3232,3 +3232,115 @@ func TestAdvanceUICommitFailedOnForceAccept(t *testing.T) {
 		t.Errorf("item should be marked failed when a loop force-accepted, got %q", findItem(plan, "a").Passes)
 	}
 }
+
+// writeQAStepList writes a QA step list with the given number of scenarios at the
+// path the ui_implementing scaffold expects for the batch.
+func writeQAStepList(t *testing.T, s *ForgeState, dir string, batchNum, scenarios int) {
+	t.Helper()
+	rel := qaStepListPath(s, batchNum)
+	full := filepath.Join(dir, rel)
+	os.MkdirAll(filepath.Dir(full), 0755)
+	var scs []map[string]any
+	for i := 0; i < scenarios; i++ {
+		scs = append(scs, map[string]any{"id": i, "name": "scenario"})
+	}
+	data, _ := json.Marshal(map[string]any{"batch": batchNum, "round": 1, "scenarios": scs})
+	if err := os.WriteFile(full, data, 0644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// uiAtQATest drives a fresh ui state to the QA_TEST state (code eval passed),
+// returning the state ready for QA transitions.
+func uiAtQATest(t *testing.T, dir string, qaMin, qaMax int) *ForgeState {
+	t.Helper()
+	s := newUIImplementingState(dir, 1, 1)
+	s.Config.UIImplementing.QA.MinRounds = qaMin
+	s.Config.UIImplementing.QA.MaxRounds = qaMax
+	// Skip eval_mode report requirement for QA in these tests.
+	s.Config.UIImplementing.QA.EvalMode = "conversational"
+	Advance(s, AdvanceInput{}, dir)             // ORIENT → IMPLEMENT
+	Advance(s, AdvanceInput{Message: "x"}, dir) // IMPLEMENT → EVALUATE
+	report := filepath.Join(dir, "r.md")
+	os.WriteFile(report, []byte("r"), 0644)
+	s.Config.UIImplementing.Eval.EvalMode = "conversational"
+	Advance(s, AdvanceInput{Verdict: "PASS"}, dir) // EVALUATE → QA_TEST
+	if s.State != StateQATest {
+		t.Fatalf("setup: expected QA_TEST, got %s", s.State)
+	}
+	return s
+}
+
+// Functional: QA_TEST FAIL below qa.max transitions to UI_REFINE; UI_REFINE
+// advance returns to QA_TEST with qa_round incremented.
+func TestAdvanceUIQAFailToRefineAndBack(t *testing.T) {
+	dir := t.TempDir()
+	s := uiAtQATest(t, dir, 1, 3)
+	if s.UIImplementing.CurrentBatch.QARound != 1 {
+		t.Fatalf("qa_round should be 1 on QA_TEST entry, got %d", s.UIImplementing.CurrentBatch.QARound)
+	}
+	if err := Advance(s, AdvanceInput{Verdict: "FAIL"}, dir); err != nil {
+		t.Fatalf("QA FAIL: %v", err)
+	}
+	if s.State != StateUIRefine {
+		t.Fatalf("expected UI_REFINE, got %s", s.State)
+	}
+	if err := Advance(s, AdvanceInput{}, dir); err != nil {
+		t.Fatalf("UI_REFINE advance: %v", err)
+	}
+	if s.State != StateQATest {
+		t.Fatalf("expected QA_TEST, got %s", s.State)
+	}
+	if s.UIImplementing.CurrentBatch.QARound != 2 {
+		t.Errorf("qa_round should be 2 after UI_REFINE→QA_TEST, got %d", s.UIImplementing.CurrentBatch.QARound)
+	}
+}
+
+// Functional: QA_TEST PASS at >= qa.min with the step-list file present transitions
+// to E2E_AUTHOR.
+func TestAdvanceUIQAPassToE2EAuthor(t *testing.T) {
+	dir := t.TempDir()
+	s := uiAtQATest(t, dir, 1, 3)
+	writeQAStepList(t, s, dir, s.UIImplementing.BatchNumber, 3)
+	if err := Advance(s, AdvanceInput{Verdict: "PASS"}, dir); err != nil {
+		t.Fatalf("QA PASS: %v", err)
+	}
+	if s.State != StateE2EAuthor {
+		t.Fatalf("expected E2E_AUTHOR, got %s", s.State)
+	}
+	if len(s.UIImplementing.CurrentBatch.QAEvals) != 1 {
+		t.Errorf("expected 1 recorded QA eval, got %d", len(s.UIImplementing.CurrentBatch.QAEvals))
+	}
+}
+
+// Rejection: advancing out of QA_TEST toward E2E_AUTHOR with the step-list file
+// absent is rejected naming the expected path; the state remains QA_TEST.
+func TestAdvanceUIQAStepListAbsentRejected(t *testing.T) {
+	dir := t.TempDir()
+
+	// PASS at min with no step list → reject, stay QA_TEST.
+	s := uiAtQATest(t, dir, 1, 3)
+	err := Advance(s, AdvanceInput{Verdict: "PASS"}, dir)
+	if err == nil {
+		t.Fatal("expected rejection when step list absent on PASS@min")
+	}
+	if !strings.Contains(err.Error(), qaStepListPath(s, s.UIImplementing.BatchNumber)) {
+		t.Errorf("error should name the step-list path, got: %v", err)
+	}
+	if s.State != StateQATest {
+		t.Errorf("state should remain QA_TEST after rejection, got %s", s.State)
+	}
+
+	// FAIL force-accept at qa.max with no step list → also rejected, stay QA_TEST.
+	s2 := uiAtQATest(t, dir, 1, 1) // max=1: first FAIL force-accepts
+	err2 := Advance(s2, AdvanceInput{Verdict: "FAIL"}, dir)
+	if err2 == nil {
+		t.Fatal("expected rejection when step list absent on force-accept@max")
+	}
+	if s2.State != StateQATest {
+		t.Errorf("state should remain QA_TEST after force-accept rejection, got %s", s2.State)
+	}
+	if s2.UIImplementing.CurrentBatch.QAForceAccepted {
+		t.Error("QAForceAccepted must not be set when the exit was rejected")
+	}
+}

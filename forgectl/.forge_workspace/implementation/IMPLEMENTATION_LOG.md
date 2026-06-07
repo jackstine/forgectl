@@ -40,3 +40,10 @@ Log of implementation updates across sessions. Add a new entry after each unit o
 - **Batch:** 5/6
 - **Eval Rounds:** 1
 - **Notes:** advanceUIImplementing core spine — ORIENT batch selection with three-counter reset, one-at-a-time IMPLEMENT (eval_round++ on entry to EVALUATE, --message gate on round 1), code EVALUATE loop into QA_TEST (qa_round=1, CodeForceAccepted at eval.max), COMMIT terminal marking (passed unless any loop force-accepted) + archiveUIBatch, DONE phase-shift routing. Added requireVerdict helper; dropped the unused *ImplementingState param from allLayersComplete. QA/e2e states fall to the default error pending the next two items.
+
+### 2026-06-07 — L2 State Machine: Batch 6 (advance.qa)
+- **Errors:** None
+- **All Tests Pass:** Yes
+- **Batch:** 6/6
+- **Eval Rounds:** 1
+- **Notes:** QA loop — advanceUIFromQATest records QAEval against QARound (incremented on entry), routes PASS>=qa.min / FAIL>=qa.max to E2E_AUTHOR (QAForceAccepted on FAIL) else UI_REFINE; enforces invariant 6 (step-list file present, counted via countQAScenarios) on both exits before recording the eval/force flag — rejection naming the path leaves the state at QA_TEST. advanceUIFromUIRefine increments qa_round back to QA_TEST. Zero-scenario step list warns and proceeds. E2E states pending advance.e2e.
