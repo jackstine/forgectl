@@ -33,3 +33,10 @@ Log of implementation updates across sessions. Add a new entry after each unit o
 - **Batch:** 4/6
 - **Eval Rounds:** 1
 - **Notes:** printUIImplementingOutput covers all ten phase states (Loop/Round/App/Steps/Run lines, Review block, COMMIT force-accept naming, DONE per-loop totals, user_guided STOP); dispatch wired in PrintAdvanceOutput/CurrentEvalMode/phaseConfig/printProgressLine. PrintUIQAEvalOutput/PrintUIE2EEvalOutput/printUICodeEval render eval context per eval_mode; PrintEvalOutput routes ui_implementing by state. Generalized loadPlan/savePlan/currentPlanDir via currentPlanFile (single source of truth) and extracted writeItemBody/writeEvalItemList/writePreviousEvaluations. **Round convention:** all three loops increment their counter on entry to the evaluator state and display it directly (per the transition table). L1 complete.
+
+### 2026-06-07 — L2 State Machine: Batch 5 (advance.core)
+- **Errors:** None
+- **All Tests Pass:** Yes
+- **Batch:** 5/6
+- **Eval Rounds:** 1
+- **Notes:** advanceUIImplementing core spine — ORIENT batch selection with three-counter reset, one-at-a-time IMPLEMENT (eval_round++ on entry to EVALUATE, --message gate on round 1), code EVALUATE loop into QA_TEST (qa_round=1, CodeForceAccepted at eval.max), COMMIT terminal marking (passed unless any loop force-accepted) + archiveUIBatch, DONE phase-shift routing. Added requireVerdict helper; dropped the unused *ImplementingState param from allLayersComplete. QA/e2e states fall to the default error pending the next two items.

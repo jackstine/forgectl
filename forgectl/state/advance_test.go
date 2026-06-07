@@ -434,8 +434,8 @@ func TestCrossReferenceEvalRequiresVerdictAndReport(t *testing.T) {
 	s := newSpecifyingState(1)
 	s.Config.Specifying.Eval.EnableEvalOutput = true
 	advanceToAccept(t, s)
-	Advance(s, AdvanceInput{}, "")  // ACCEPT → CROSS_REFERENCE
-	Advance(s, AdvanceInput{}, "")  // CROSS_REFERENCE → CROSS_REFERENCE_EVAL
+	Advance(s, AdvanceInput{}, "") // ACCEPT → CROSS_REFERENCE
+	Advance(s, AdvanceInput{}, "") // CROSS_REFERENCE → CROSS_REFERENCE_EVAL
 
 	// Missing both.
 	err := Advance(s, AdvanceInput{}, "")
@@ -527,10 +527,10 @@ func TestCrossReferenceEvalPassRound2SkipsReview(t *testing.T) {
 	crEvalFile := filepath.Join(dir, "cr-eval.md")
 	os.WriteFile(crEvalFile, []byte("cross-ref eval"), 0644)
 
-	Advance(s, AdvanceInput{}, "")                                             // ACCEPT → CROSS_REFERENCE
-	Advance(s, AdvanceInput{}, "")                                             // CROSS_REFERENCE → CROSS_REFERENCE_EVAL (round 1)
-	Advance(s, AdvanceInput{Verdict: "FAIL", EvalReport: crEvalFile}, "")     // FAIL at round 1 → CROSS_REFERENCE
-	Advance(s, AdvanceInput{}, "")                                             // CROSS_REFERENCE → CROSS_REFERENCE_EVAL (round 2)
+	Advance(s, AdvanceInput{}, "")                                        // ACCEPT → CROSS_REFERENCE
+	Advance(s, AdvanceInput{}, "")                                        // CROSS_REFERENCE → CROSS_REFERENCE_EVAL (round 1)
+	Advance(s, AdvanceInput{Verdict: "FAIL", EvalReport: crEvalFile}, "") // FAIL at round 1 → CROSS_REFERENCE
+	Advance(s, AdvanceInput{}, "")                                        // CROSS_REFERENCE → CROSS_REFERENCE_EVAL (round 2)
 
 	// PASS at round 2 (round>1, min_rounds met) → skip review, go to DONE (queue empty).
 	if err := Advance(s, AdvanceInput{Verdict: "PASS", EvalReport: crEvalFile}, ""); err != nil {
@@ -572,9 +572,9 @@ func TestCrossReferenceReviewEmptyQueueToDone(t *testing.T) {
 	crEvalFile := filepath.Join(dir, "cr-eval.md")
 	os.WriteFile(crEvalFile, []byte("cross-ref eval"), 0644)
 
-	Advance(s, AdvanceInput{}, "")                                          // ACCEPT → CROSS_REFERENCE
-	Advance(s, AdvanceInput{}, "")                                          // CROSS_REFERENCE → CROSS_REFERENCE_EVAL
-	Advance(s, AdvanceInput{Verdict: "PASS", EvalReport: crEvalFile}, "")  // → CROSS_REFERENCE_REVIEW
+	Advance(s, AdvanceInput{}, "")                                        // ACCEPT → CROSS_REFERENCE
+	Advance(s, AdvanceInput{}, "")                                        // CROSS_REFERENCE → CROSS_REFERENCE_EVAL
+	Advance(s, AdvanceInput{Verdict: "PASS", EvalReport: crEvalFile}, "") // → CROSS_REFERENCE_REVIEW
 
 	if err := Advance(s, AdvanceInput{}, ""); err != nil {
 		t.Fatal(err)
@@ -812,10 +812,10 @@ func TestReconcileEvalPassAtRound2SkipsReview(t *testing.T) {
 	evalFile := filepath.Join(dir, "re-eval.md")
 	os.WriteFile(evalFile, []byte("reconcile eval"), 0644)
 
-	Advance(s, AdvanceInput{}, "")                                        // DONE → RECONCILE
-	Advance(s, AdvanceInput{}, "")                                        // RECONCILE → RECONCILE_EVAL (round 1)
-	Advance(s, AdvanceInput{Verdict: "FAIL", EvalReport: evalFile}, "")  // FAIL → RECONCILE
-	Advance(s, AdvanceInput{}, "")                                        // RECONCILE → RECONCILE_EVAL (round 2)
+	Advance(s, AdvanceInput{}, "")                                      // DONE → RECONCILE
+	Advance(s, AdvanceInput{}, "")                                      // RECONCILE → RECONCILE_EVAL (round 1)
+	Advance(s, AdvanceInput{Verdict: "FAIL", EvalReport: evalFile}, "") // FAIL → RECONCILE
+	Advance(s, AdvanceInput{}, "")                                      // RECONCILE → RECONCILE_EVAL (round 2)
 
 	// PASS at round 2 → skip REVIEW → COMPLETE.
 	if err := Advance(s, AdvanceInput{Verdict: "PASS", EvalReport: evalFile}, ""); err != nil {
@@ -879,10 +879,10 @@ func TestReconcileEvalForcedAtRound2GoesToComplete(t *testing.T) {
 	evalFile := filepath.Join(dir, "re-eval.md")
 	os.WriteFile(evalFile, []byte("reconcile eval"), 0644)
 
-	Advance(s, AdvanceInput{}, "")                                        // DONE → RECONCILE
-	Advance(s, AdvanceInput{}, "")                                        // RECONCILE → RECONCILE_EVAL (round 1)
-	Advance(s, AdvanceInput{Verdict: "FAIL", EvalReport: evalFile}, "")  // FAIL at round 1 (below max=2) → RECONCILE
-	Advance(s, AdvanceInput{}, "")                                        // RECONCILE → RECONCILE_EVAL (round 2)
+	Advance(s, AdvanceInput{}, "")                                      // DONE → RECONCILE
+	Advance(s, AdvanceInput{}, "")                                      // RECONCILE → RECONCILE_EVAL (round 1)
+	Advance(s, AdvanceInput{Verdict: "FAIL", EvalReport: evalFile}, "") // FAIL at round 1 (below max=2) → RECONCILE
+	Advance(s, AdvanceInput{}, "")                                      // RECONCILE → RECONCILE_EVAL (round 2)
 
 	// FAIL at round 2 with max_rounds=2 → forced → round>1 → COMPLETE.
 	if err := Advance(s, AdvanceInput{Verdict: "FAIL", EvalReport: evalFile}, ""); err != nil {
@@ -1191,7 +1191,7 @@ func TestGenqueueRefineWithValidQueueToPhaseShift(t *testing.T) {
 func TestGenqueuePhaseShiftToPlanningWithoutFrom(t *testing.T) {
 	dir := t.TempDir()
 	s := newGenqueueState(dir)
-	Advance(s, AdvanceInput{}, dir)                       // → REFINE
+	Advance(s, AdvanceInput{}, dir) // → REFINE
 	writeValidPlanQueue(t, dir, s.GeneratePlanningQueue.PlanQueueFile)
 	Advance(s, AdvanceInput{}, dir) // → PHASE_SHIFT
 
@@ -1291,7 +1291,7 @@ func TestAutoGenerateUsesSetRoots(t *testing.T) {
 		Completed: []CompletedSpec{
 			{ID: 1, Name: "Spec1", Domain: "mydom", File: "mydom/specs/a.md"},
 		},
-		Queue:       []SpecQueueEntry{},
+		Queue:   []SpecQueueEntry{},
 		Domains: map[string]DomainMeta{"mydom": {CodeSearchRoots: []string{"mydom/src/", "mydom/pkg/"}}},
 	}
 
@@ -2003,7 +2003,7 @@ func TestImplementLastItemGoesToEvaluate(t *testing.T) {
 	dir := t.TempDir()
 	s := newImplementingState(dir, 2, 2)
 
-	Advance(s, AdvanceInput{}, dir) // ORIENT → IMPLEMENT
+	Advance(s, AdvanceInput{}, dir)                  // ORIENT → IMPLEMENT
 	Advance(s, AdvanceInput{Message: "impl 1"}, dir) // item 1 → item 2
 
 	err := Advance(s, AdvanceInput{Message: "impl 2"}, dir) // item 2 → EVALUATE
@@ -2327,10 +2327,10 @@ func advanceToDone(t *testing.T, s *ForgeState) {
 	crEvalFile := filepath.Join(dir, "cr-eval.md")
 	os.WriteFile(crEvalFile, []byte("cross-ref eval"), 0644)
 
-	Advance(s, AdvanceInput{}, "")                                             // ACCEPT → CROSS_REFERENCE
-	Advance(s, AdvanceInput{}, "")                                             // CROSS_REFERENCE → CROSS_REFERENCE_EVAL
-	Advance(s, AdvanceInput{Verdict: "PASS", EvalReport: crEvalFile}, "")      // CROSS_REFERENCE_EVAL → CROSS_REFERENCE_REVIEW
-	Advance(s, AdvanceInput{}, "")                                             // CROSS_REFERENCE_REVIEW → DONE (queue empty)
+	Advance(s, AdvanceInput{}, "")                                        // ACCEPT → CROSS_REFERENCE
+	Advance(s, AdvanceInput{}, "")                                        // CROSS_REFERENCE → CROSS_REFERENCE_EVAL
+	Advance(s, AdvanceInput{Verdict: "PASS", EvalReport: crEvalFile}, "") // CROSS_REFERENCE_EVAL → CROSS_REFERENCE_REVIEW
+	Advance(s, AdvanceInput{}, "")                                        // CROSS_REFERENCE_REVIEW → DONE (queue empty)
 }
 
 func advanceToComplete(t *testing.T, s *ForgeState) {
@@ -2340,10 +2340,10 @@ func advanceToComplete(t *testing.T, s *ForgeState) {
 	os.WriteFile(reEvalFile, []byte("reconcile eval"), 0644)
 
 	advanceToDone(t, s)
-	Advance(s, AdvanceInput{}, "")                                                // DONE → RECONCILE
-	Advance(s, AdvanceInput{}, "")                                                // RECONCILE → RECONCILE_EVAL
-	Advance(s, AdvanceInput{Verdict: "PASS", EvalReport: reEvalFile}, "")        // RECONCILE_EVAL PASS → RECONCILE_REVIEW
-	Advance(s, AdvanceInput{}, "")                                                // RECONCILE_REVIEW → COMPLETE (empty queue)
+	Advance(s, AdvanceInput{}, "")                                        // DONE → RECONCILE
+	Advance(s, AdvanceInput{}, "")                                        // RECONCILE → RECONCILE_EVAL
+	Advance(s, AdvanceInput{Verdict: "PASS", EvalReport: reEvalFile}, "") // RECONCILE_EVAL PASS → RECONCILE_REVIEW
+	Advance(s, AdvanceInput{}, "")                                        // RECONCILE_REVIEW → COMPLETE (empty queue)
 }
 
 // newSpecifyingStateWithConfig creates a specifying state with paths config so auto-generation can write files.
@@ -3045,5 +3045,190 @@ func TestREReconcileDomainGaps(t *testing.T) {
 	gaps := ReverseEngineeringDomainGaps(re, dir)
 	if len(gaps) != 1 || gaps[0] != "specs/missing.md" {
 		t.Fatalf("gaps = %v, want [specs/missing.md] (api entry excluded, present excluded)", gaps)
+	}
+}
+
+// newUIImplementingState builds a ForgeState in the ui_implementing phase with a
+// single-layer plan of numItems on disk at ui/plan.json, ready at ORIENT.
+func newUIImplementingState(dir string, numItems, batchSize int) *ForgeState {
+	notesDir := filepath.Join(dir, "ui", "notes")
+	os.MkdirAll(notesDir, 0755)
+	os.WriteFile(filepath.Join(notesDir, "n.md"), []byte("notes"), 0644)
+
+	var items []PlanItem
+	var itemIDs []string
+	for i := 0; i < numItems; i++ {
+		id := string(rune('a' + i))
+		items = append(items, PlanItem{
+			ID: id, Name: "Item " + id, Description: "desc " + id,
+			DependsOn: []string{}, Passes: "pending", Rounds: 0,
+			Tests: []PlanTest{{Category: "functional", Description: "it works"}},
+		})
+		itemIDs = append(itemIDs, id)
+	}
+	plan := PlanJSON{
+		Context: PlanContext{Domain: "portal", Module: "portal"},
+		Layers:  []PlanLayerDef{{ID: "L0", Name: "Shell", Items: itemIDs}},
+		Items:   items,
+	}
+	data, _ := json.Marshal(plan)
+	os.WriteFile(filepath.Join(dir, "ui", "plan.json"), data, 0644)
+
+	cfg := DefaultForgeConfig()
+	cfg.UIImplementing.Batch = batchSize
+	cfg.UIImplementing.App.LaunchCommand = "npm run dev"
+	cfg.UIImplementing.App.URL = "http://localhost:5173"
+	cfg.UIImplementing.E2E.TestCommand = "npm run e2e"
+	cfg.UIImplementing.E2E.TestDir = "e2e/"
+
+	return &ForgeState{
+		Phase:  PhaseUIImplementing,
+		State:  StateOrient,
+		Config: cfg,
+		Planning: &PlanningState{CurrentPlan: &ActivePlan{
+			ID: 1, Name: "Portal", Domain: "portal", File: "ui/plan.json",
+		}},
+		UIImplementing: func() *UIImplementingState {
+			u := NewUIImplementingState()
+			u.CurrentPlanFile = "ui/plan.json"
+			u.CurrentPlanDomain = "portal"
+			return u
+		}(),
+	}
+}
+
+// Functional: ORIENT selects the first batch, transitions to IMPLEMENT, and resets
+// all three loop round counters to 0.
+func TestAdvanceUIOrientSelectsBatchResetsCounters(t *testing.T) {
+	dir := t.TempDir()
+	s := newUIImplementingState(dir, 2, 2)
+	if err := Advance(s, AdvanceInput{}, dir); err != nil {
+		t.Fatalf("ORIENT advance: %v", err)
+	}
+	if s.State != StateImplement {
+		t.Fatalf("expected IMPLEMENT, got %s", s.State)
+	}
+	b := s.UIImplementing.CurrentBatch
+	if b == nil {
+		t.Fatal("expected a current batch")
+	}
+	if len(b.Items) != 2 {
+		t.Errorf("expected batch of 2, got %d", len(b.Items))
+	}
+	if b.EvalRound != 0 || b.QARound != 0 || b.E2ERound != 0 {
+		t.Errorf("counters must reset to 0, got eval=%d qa=%d e2e=%d", b.EvalRound, b.QARound, b.E2ERound)
+	}
+}
+
+// Functional: code EVALUATE PASS at >= eval.min transitions to QA_TEST with
+// qa_round 1; FAIL at eval.max force-accepts and still transitions to QA_TEST
+// flagged code-force-accepted.
+func TestAdvanceUICodeEvaluateToQA(t *testing.T) {
+	dir := t.TempDir()
+
+	// PASS at min rounds → QA_TEST, qa_round 1, not force-accepted.
+	s := newUIImplementingState(dir, 1, 1)
+	Advance(s, AdvanceInput{}, dir)             // ORIENT → IMPLEMENT
+	Advance(s, AdvanceInput{Message: "x"}, dir) // IMPLEMENT (last) → EVALUATE
+	if s.State != StateEvaluate {
+		t.Fatalf("expected EVALUATE, got %s", s.State)
+	}
+	if s.UIImplementing.CurrentBatch.EvalRound != 1 {
+		t.Errorf("eval_round should be 1 on entry to EVALUATE, got %d", s.UIImplementing.CurrentBatch.EvalRound)
+	}
+	report := filepath.Join(dir, "r.md")
+	os.WriteFile(report, []byte("r"), 0644)
+	if err := Advance(s, AdvanceInput{Verdict: "PASS", EvalReport: report}, dir); err != nil {
+		t.Fatalf("EVALUATE PASS: %v", err)
+	}
+	if s.State != StateQATest {
+		t.Fatalf("expected QA_TEST, got %s", s.State)
+	}
+	if s.UIImplementing.CurrentBatch.QARound != 1 {
+		t.Errorf("qa_round should be 1, got %d", s.UIImplementing.CurrentBatch.QARound)
+	}
+	if s.UIImplementing.CurrentBatch.CodeForceAccepted {
+		t.Error("CodeForceAccepted should be false on clean PASS")
+	}
+
+	// FAIL repeatedly to eval.max → force-accept → QA_TEST.
+	s2 := newUIImplementingState(dir, 1, 1) // eval max=3
+	Advance(s2, AdvanceInput{}, dir)
+	for round := 1; round <= 3; round++ {
+		// (re)enter EVALUATE
+		if s2.State == StateImplement {
+			Advance(s2, AdvanceInput{Message: "x"}, dir)
+		}
+		if s2.State != StateEvaluate {
+			t.Fatalf("round %d: expected EVALUATE, got %s", round, s2.State)
+		}
+		if err := Advance(s2, AdvanceInput{Verdict: "FAIL", EvalReport: report}, dir); err != nil {
+			t.Fatalf("round %d FAIL: %v", round, err)
+		}
+	}
+	if s2.State != StateQATest {
+		t.Fatalf("expected QA_TEST after eval.max FAIL, got %s", s2.State)
+	}
+	if !s2.UIImplementing.CurrentBatch.CodeForceAccepted {
+		t.Error("CodeForceAccepted should be true after force-accept at eval.max")
+	}
+	if s2.UIImplementing.CurrentBatch.QARound != 1 {
+		t.Errorf("qa_round should be 1 after force-accept entry, got %d", s2.UIImplementing.CurrentBatch.QARound)
+	}
+}
+
+// Functional: COMMIT marks items passed when no loop force-accepted, and DONE
+// transitions to PHASE_SHIFT (ui_implementing → planning) when the planning queue
+// is non-empty (interleaved mode).
+func TestAdvanceUICommitPassedAndDonePhaseShift(t *testing.T) {
+	dir := t.TempDir()
+	s := newUIImplementingState(dir, 1, 1)
+	// Drive to a batch, then place the machine at COMMIT with all loops clean.
+	Advance(s, AdvanceInput{}, dir) // ORIENT → IMPLEMENT
+	s.UIImplementing.CurrentLayer = &LayerRef{ID: "L0", Name: "Shell"}
+	s.State = StateCommit
+
+	if err := Advance(s, AdvanceInput{}, dir); err != nil {
+		t.Fatalf("COMMIT advance: %v", err)
+	}
+	plan, _ := loadPlan(s, dir)
+	if findItem(plan, "a").Passes != "passed" {
+		t.Errorf("item should be marked passed at COMMIT with no force-accept, got %q", findItem(plan, "a").Passes)
+	}
+	if s.UIImplementing.CurrentBatch != nil {
+		t.Error("batch should be archived (nil) after COMMIT")
+	}
+	if len(s.UIImplementing.LayerHistory) != 1 {
+		t.Errorf("expected one archived layer history, got %d", len(s.UIImplementing.LayerHistory))
+	}
+	if s.State != StateDone {
+		t.Fatalf("expected DONE (all layers complete), got %s", s.State)
+	}
+
+	// DONE with a non-empty planning queue → PHASE_SHIFT ui_implementing→planning.
+	s.Planning.Queue = []PlanQueueEntry{{Name: "next", Domain: "portal", File: "ui2/plan.json"}}
+	if err := Advance(s, AdvanceInput{}, dir); err != nil {
+		t.Fatalf("DONE advance: %v", err)
+	}
+	if s.State != StatePhaseShift || s.PhaseShift == nil ||
+		s.PhaseShift.From != PhaseUIImplementing || s.PhaseShift.To != PhasePlanning {
+		t.Errorf("expected PHASE_SHIFT ui_implementing→planning, got state=%s shift=%+v", s.State, s.PhaseShift)
+	}
+}
+
+// Functional: COMMIT marks items failed when a loop force-accepted in the batch.
+func TestAdvanceUICommitFailedOnForceAccept(t *testing.T) {
+	dir := t.TempDir()
+	s := newUIImplementingState(dir, 1, 1)
+	Advance(s, AdvanceInput{}, dir)
+	s.UIImplementing.CurrentLayer = &LayerRef{ID: "L0", Name: "Shell"}
+	s.UIImplementing.CurrentBatch.E2EForceAccepted = true
+	s.State = StateCommit
+	if err := Advance(s, AdvanceInput{}, dir); err != nil {
+		t.Fatalf("COMMIT advance: %v", err)
+	}
+	plan, _ := loadPlan(s, dir)
+	if findItem(plan, "a").Passes != "failed" {
+		t.Errorf("item should be marked failed when a loop force-accepted, got %q", findItem(plan, "a").Passes)
 	}
 }

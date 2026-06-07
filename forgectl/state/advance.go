@@ -30,6 +30,8 @@ func Advance(s *ForgeState, in AdvanceInput, dir string) error {
 		return advancePlanning(s, in, dir)
 	case PhaseImplementing:
 		return advanceImplementing(s, in, dir)
+	case PhaseUIImplementing:
+		return advanceUIImplementing(s, in, dir)
 	case PhaseReverseEngineering:
 		return advanceReverseEngineering(s, in, dir)
 	default:
@@ -632,7 +634,7 @@ func advanceImplementing(s *ForgeState, in AdvanceInput, dir string) error {
 		if err != nil {
 			return err
 		}
-		if allLayersComplete(plan, impl) {
+		if allLayersComplete(plan) {
 			s.State = StateDone
 		} else {
 			s.State = StateOrient
@@ -836,6 +838,261 @@ func advanceImplFromEvaluate(s *ForgeState, in AdvanceInput, dir string) error {
 	}
 
 	return nil
+}
+
+// --- UI Implementing Phase ---
+//
+// The ui_implementing phase runs each batch through three sequential loops —
+// code eval, QA, then e2e — before COMMIT. Each loop carries its own round
+// counter (EvalRound/QARound/E2ERound) and history. A loop's counter is
+// incremented when the batch ENTERS that loop's evaluator state (code:
+// IMPLEMENT→EVALUATE; qa: →QA_TEST; e2e: →E2E_VERIFY), so each evaluator state
+// records its verdict against the counter directly and the output renders the
+// counter without an offset.
+
+func advanceUIImplementing(s *ForgeState, in AdvanceInput, dir string) error {
+	switch s.State {
+	case StateOrient:
+		return advanceUIFromOrient(s, dir)
+	case StateImplement:
+		return advanceUIFromImplement(s, in, dir)
+	case StateEvaluate:
+		return advanceUIFromEvaluate(s, in, dir)
+	case StateCommit:
+		return advanceUIFromCommit(s, in, dir)
+	case StateDone:
+		return advanceUIFromDone(s)
+	default:
+		return fmt.Errorf("cannot advance from state %q in ui_implementing phase", s.State)
+	}
+}
+
+func advanceUIFromOrient(s *ForgeState, dir string) error {
+	plan, err := loadPlan(s, dir)
+	if err != nil {
+		return err
+	}
+	ui := s.UIImplementing
+
+	for _, layer := range plan.Layers {
+		if ui.CurrentLayer != nil && ui.CurrentLayer.ID == layer.ID {
+			if allLayerItemsTerminal(plan, layer) {
+				continue
+			}
+		}
+		// All prior layers must be complete.
+		allPriorComplete := true
+		for _, priorLayer := range plan.Layers {
+			if priorLayer.ID == layer.ID {
+				break
+			}
+			if !allLayerItemsTerminal(plan, priorLayer) {
+				allPriorComplete = false
+				break
+			}
+		}
+		if !allPriorComplete {
+			continue
+		}
+		batch := selectBatch(plan, layer, s.Config.UIImplementing.Batch)
+		if len(batch) == 0 {
+			continue
+		}
+		ui.CurrentLayer = &LayerRef{ID: layer.ID, Name: layer.Name}
+		ui.BatchNumber++
+		// Reset all three loop counters for the new batch.
+		ui.CurrentBatch = &UIBatchState{
+			Items:            batch,
+			CurrentItemIndex: 0,
+			EvalRound:        0,
+			QARound:          0,
+			E2ERound:         0,
+		}
+		s.State = StateImplement
+		return nil
+	}
+
+	s.State = StateDone
+	return nil
+}
+
+func advanceUIFromImplement(s *ForgeState, in AdvanceInput, dir string) error {
+	ui := s.UIImplementing
+	batch := ui.CurrentBatch
+
+	plan, err := loadPlan(s, dir)
+	if err != nil {
+		return err
+	}
+
+	// First round requires --message when enable_commits is true (EvalRound is
+	// still 0 until the batch's first code evaluation).
+	if batch.EvalRound == 0 && s.Config.General.EnableCommits && in.Message == "" {
+		return fmt.Errorf("--message is required for first-round implementation when enable_commits is true")
+	}
+
+	itemID := batch.Items[batch.CurrentItemIndex]
+	setItemPasses(plan, itemID, "done")
+	if err := savePlan(s, dir, plan); err != nil {
+		return err
+	}
+
+	if batch.CurrentItemIndex < len(batch.Items)-1 {
+		batch.CurrentItemIndex++
+		s.State = StateImplement
+		return nil
+	}
+
+	// Last item — increment item rounds and enter the code EVALUATE loop.
+	for _, id := range batch.Items {
+		incrementItemRounds(plan, id)
+	}
+	if err := savePlan(s, dir, plan); err != nil {
+		return err
+	}
+	batch.EvalRound++ // entering the code-eval loop
+	s.State = StateEvaluate
+	return nil
+}
+
+func advanceUIFromEvaluate(s *ForgeState, in AdvanceInput, dir string) error {
+	cfg := s.Config.UIImplementing
+	if err := requireVerdict(in, EvalModeFor(cfg.Eval, s.Config.General)); err != nil {
+		return err
+	}
+
+	ui := s.UIImplementing
+	batch := ui.CurrentBatch
+
+	// EvalRound was incremented on entry to EVALUATE; record against it directly.
+	batch.Evals = append(batch.Evals, EvalRecord{
+		Round:      batch.EvalRound,
+		Verdict:    in.Verdict,
+		EvalReport: in.EvalReport,
+	})
+
+	toQA := (in.Verdict == "PASS" && batch.EvalRound >= cfg.Eval.MinRounds) ||
+		(in.Verdict == "FAIL" && batch.EvalRound >= cfg.Eval.MaxRounds)
+	if toQA {
+		if in.Verdict == "FAIL" {
+			batch.CodeForceAccepted = true
+		}
+		batch.QARound++ // entering the QA loop
+		s.State = StateQATest
+		return nil
+	}
+	// Below min (PASS) or below max (FAIL) — re-implement the batch.
+	batch.CurrentItemIndex = 0
+	s.State = StateImplement
+	return nil
+}
+
+func advanceUIFromCommit(s *ForgeState, in AdvanceInput, dir string) error {
+	if s.Config.General.EnableCommits && in.Message == "" {
+		return fmt.Errorf("--message is required in COMMIT state when enable_commits is true")
+	}
+	ui := s.UIImplementing
+	batch := ui.CurrentBatch
+
+	plan, err := loadPlan(s, dir)
+	if err != nil {
+		return err
+	}
+
+	// Items are marked terminal here, after all three loops have run: passed
+	// when every loop stayed within budget, failed when any loop force-accepted.
+	forced := batch.CodeForceAccepted || batch.QAForceAccepted || batch.E2EForceAccepted
+	status := "passed"
+	if forced {
+		status = "failed"
+	}
+	for _, id := range batch.Items {
+		setItemPasses(plan, id, status)
+	}
+	if err := savePlan(s, dir, plan); err != nil {
+		return err
+	}
+
+	archiveUIBatch(s)
+
+	if allLayersComplete(plan) {
+		s.State = StateDone
+	} else {
+		s.State = StateOrient
+	}
+	return nil
+}
+
+func advanceUIFromDone(s *ForgeState) error {
+	ui := s.UIImplementing
+	if s.Planning != nil && len(s.Planning.Queue) > 0 {
+		// Interleaved mode: return to planning for the next domain.
+		s.State = StatePhaseShift
+		s.PhaseShift = &PhaseShiftInfo{From: PhaseUIImplementing, To: PhasePlanning}
+	} else if ui != nil && len(ui.PlanQueue) > 0 {
+		// All-first mode: implement the next plan from the queue (domain boundary).
+		s.State = StatePhaseShift
+		s.PhaseShift = &PhaseShiftInfo{From: PhaseUIImplementing, To: PhaseImplementing}
+	} else {
+		return fmt.Errorf("session complete.")
+	}
+	return nil
+}
+
+// requireVerdict validates the shared --verdict / --eval-report rules for the
+// three ui_implementing evaluator states. --eval-report is required only in
+// report mode.
+func requireVerdict(in AdvanceInput, mode string) error {
+	if in.Verdict == "" {
+		return fmt.Errorf("--verdict is required in this state")
+	}
+	if in.Verdict != "PASS" && in.Verdict != "FAIL" {
+		return fmt.Errorf("--verdict must be PASS or FAIL")
+	}
+	if mode == "report" && in.EvalReport == "" {
+		return fmt.Errorf("--eval-report is required in report mode")
+	}
+	if in.EvalReport != "" {
+		if err := checkEvalReportExists(in.EvalReport); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// archiveUIBatch records the current batch's three loop counters and histories
+// into UILayerHistory and clears the current batch.
+func archiveUIBatch(s *ForgeState) {
+	ui := s.UIImplementing
+	batch := ui.CurrentBatch
+
+	history := UIBatchHistory{
+		BatchNumber: ui.BatchNumber,
+		Items:       batch.Items,
+		EvalRounds:  batch.EvalRound,
+		QARounds:    batch.QARound,
+		E2ERounds:   batch.E2ERound,
+		Evals:       batch.Evals,
+		QAEvals:     batch.QAEvals,
+		E2EEvals:    batch.E2EEvals,
+	}
+
+	found := false
+	for i := range ui.LayerHistory {
+		if ui.LayerHistory[i].LayerID == ui.CurrentLayer.ID {
+			ui.LayerHistory[i].Batches = append(ui.LayerHistory[i].Batches, history)
+			found = true
+			break
+		}
+	}
+	if !found {
+		ui.LayerHistory = append(ui.LayerHistory, UILayerHistory{
+			LayerID: ui.CurrentLayer.ID,
+			Batches: []UIBatchHistory{history},
+		})
+	}
+
+	ui.CurrentBatch = nil
 }
 
 // --- Phase Shift ---
@@ -1227,7 +1484,7 @@ func allLayerItemsTerminal(plan *PlanJSON, layer PlanLayerDef) bool {
 	return true
 }
 
-func allLayersComplete(plan *PlanJSON, impl *ImplementingState) bool {
+func allLayersComplete(plan *PlanJSON) bool {
 	for _, layer := range plan.Layers {
 		if !allLayerItemsTerminal(plan, layer) {
 			return false
