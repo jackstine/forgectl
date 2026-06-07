@@ -368,10 +368,21 @@
         "Create docs/schemas/qa-step-list.md describing the QA step-list JSON (batch, round, scenarios[] with id/name/preconditions/steps/expected/priority).",
         "Leave plan-json.md unchanged (kind is not on plan.json)."
       ],
-      "files": ["../docs/schemas/forge-state.md", "../docs/schemas/plan-queue.md", "../docs/schemas/qa-step-list.md"],
-      "specs": ["ui-batch-implementation.md#data-models", "state-persistence.md#state-file-schema"],
-      "refs": ["notes/docs.md"],
-      "tests": []
+      "files": [
+        "../docs/schemas/forge-state.md",
+        "../docs/schemas/plan-queue.md",
+        "../docs/schemas/qa-step-list.md"
+      ],
+      "specs": [
+        "ui-batch-implementation.md#data-models",
+        "state-persistence.md#state-file-schema"
+      ],
+      "refs": [
+        "notes/docs.md"
+      ],
+      "tests": [],
+      "passes": "passed",
+      "rounds": 1
     },
     {
       "id": "docs.config",
@@ -382,10 +393,20 @@
         "configurations.md: add a full [ui_implementing] section (batch, commit_strategy, app.*, eval/qa/e2e loops); add ui_implementing to --phase values; add QA_TEST/E2E_VERIFY to --verdict context; add the ui_plan/ workspace path to the directory structure.",
         "default-config.toml: append a commented [ui_implementing] block with [ui_implementing.app]/[.eval]/[.qa]/[.e2e] mirroring the [implementing] style and the DefaultForgeConfig values."
       ],
-      "files": ["../docs/configurations.md", "../docs/default-config.toml"],
-      "specs": ["ui-batch-implementation.md#configuration", "session-init.md#configuration"],
-      "refs": ["notes/docs.md"],
-      "tests": []
+      "files": [
+        "../docs/configurations.md",
+        "../docs/default-config.toml"
+      ],
+      "specs": [
+        "ui-batch-implementation.md#configuration",
+        "session-init.md#configuration"
+      ],
+      "refs": [
+        "notes/docs.md"
+      ],
+      "tests": [],
+      "passes": "passed",
+      "rounds": 1
     },
     {
       "id": "docs.diagrams",
@@ -397,10 +418,20 @@
         "Check 05-skills-and-roles.txt for a QA/e2e sub-agent role mention and add if missing.",
         "Do not rewrite diagrams that are already correct."
       ],
-      "files": ["../docs/diagrams/05-skills-and-roles.txt", "../docs/diagrams/10-ui-implementing-phase.txt", "../docs/diagrams/00-full-lifecycle.txt"],
-      "specs": ["ui-batch-implementation.md#state-machine"],
-      "refs": ["notes/docs.md"],
-      "tests": []
+      "files": [
+        "../docs/diagrams/05-skills-and-roles.txt",
+        "../docs/diagrams/10-ui-implementing-phase.txt",
+        "../docs/diagrams/00-full-lifecycle.txt"
+      ],
+      "specs": [
+        "ui-batch-implementation.md#state-machine"
+      ],
+      "refs": [
+        "notes/docs.md"
+      ],
+      "tests": [],
+      "passes": "passed",
+      "rounds": 1
     }
   ]
 }

@@ -23,7 +23,8 @@
   │      ├── specs/                                                         │
   │      ├── implementation_planning/                                       │
   │      ├── implement_from_specs/                                          │
-  │      └── implementation/                                                │
+  │      ├── implementation/                                                │
+  │      └── ui_implementation/                                             │
   │                                                                         │
   └─────────────────────────────────────────────────────────────────────────┘
 
@@ -253,6 +254,46 @@
   │    ├── git-commit-guidelines.md                                         │
   │    ├── subagent-usage.md                                                │
   │    └── implementation-log-format.md                                     │
+  └─────────────────────────────────────────────────────────────────────────┘
+
+
+  ═══════════════════════════════════════════════════════════════════════════
+  SKILL 6: UI IMPLEMENTATION
+  ═══════════════════════════════════════════════════════════════════════════
+
+  ┌─────────────────────────────────────────────────────────────────────────┐
+  │  Role:   Senior Frontend Software Engineer                              │
+  │  Phase:  UI Implementing (full scaffold; extends Implementing)          │
+  │  Uses:   forgectl scaffold                                              │
+  │  File:   skills/ui_implementation/SKILL.md                              │
+  │                                                                         │
+  │  Purpose: Implement user-facing UI (plan.json kind: ui) and verify it  │
+  │           the way a user would, before each batch commits.             │
+  │                                                                         │
+  │  Workflow (each batch passes three sequential verification loops):     │
+  │    ORIENT ──► IMPLEMENT (per item) ──► EVALUATE        ◄ Loop 1: code  │
+  │      ──► QA_TEST ⇄ UI_REFINE                           ◄ Loop 2: qa    │
+  │      ──► E2E_AUTHOR ──► E2E_VERIFY ⇄ E2E_REMEDIATE     ◄ Loop 3: e2e   │
+  │      ──► COMMIT ──► ORIENT (next batch) | DONE                         │
+  │                                                                         │
+  │  Three evaluator sub-agent roles (all run `forgectl eval`, return      │
+  │  artifacts with `forgectl handoff`):                                    │
+  │    - Code evaluator  — EVALUATE; same role as the implementing phase.  │
+  │    - QA evaluator    — QA_TEST; drives the running app through the      │
+  │                        Playwright MCP (navigate/snapshot/click/type/   │
+  │                        console), judges placement & controls, and      │
+  │                        writes the e2e step list (QA→e2e contract).     │
+  │    - E2E evaluator   — E2E_VERIFY; confirms the authored Playwright    │
+  │                        tests pass and cover the QA step list.          │
+  │                                                                         │
+  │  Requires (validated at init): ui_implementing.app.launch_command,     │
+  │    .app.url, .e2e.test_command, .e2e.test_dir.                         │
+  │                                                                         │
+  │  References:                                                            │
+  │    skills/ui_implementation/references/                                 │
+  │    ├── forgectl-workflow.md                                             │
+  │    ├── qa-playwright.md                                                 │
+  │    └── subagent-usage.md                                                │
   └─────────────────────────────────────────────────────────────────────────┘
 
 

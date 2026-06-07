@@ -18,7 +18,7 @@
 
 ## PlanEntry
 
-All 6 fields are required on every entry. No extra fields allowed.
+The 6 required fields must appear on every entry, plus the optional `kind` field. No other fields allowed.
 
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
@@ -28,6 +28,7 @@ All 6 fields are required on every entry. No extra fields allowed.
 | `specs` | string[] | **yes** | Spec file paths to study during planning, relative to project root. Can be empty `[]`. |
 | `spec_commits` | string[] | **yes** | Git commit hashes associated with the specs. Used to view spec diffs during planning. Can be empty `[]`. |
 | `code_search_roots` | string[] | **yes** | Directory roots for codebase exploration during STUDY_CODE. Can be empty `[]`. |
+| `kind` | string | no | Implementation target the plan routes to at phase shift: `"code"` (default — enters the `implementing` phase) or `"ui"` (enters the `ui_implementing` phase). Absent is treated as `"code"`. |
 
 ---
 
@@ -35,7 +36,8 @@ All 6 fields are required on every entry. No extra fields allowed.
 
 - Top-level must have exactly one key: `"plans"`.
 - `plans` array must be non-empty.
-- Each entry must have exactly the 6 fields listed — no more, no fewer. (Note: `topic` was removed; `spec_commits` was added.)
+- Each entry must have the 6 required fields, optionally plus `kind` — no other fields. (Note: `topic` was removed; `spec_commits` was added; `kind` is the only optional field.)
+- `kind`, when present, must be exactly `"code"` or `"ui"`; any other value is rejected naming the offending entry and value. An absent `kind` defaults to `"code"`.
 - All field names and values are case-sensitive.
 
 ---
@@ -55,10 +57,21 @@ All 6 fields are required on every entry. No extra fields allowed.
       ],
       "spec_commits": ["7cede10", "8743b1d"],
       "code_search_roots": ["launcher/", "lib/"]
+    },
+    {
+      "name": "Portal Dashboard Plan",
+      "domain": "portal",
+      "kind": "ui",
+      "file": "portal/.forge_workspace/implementation_plan/plan.json",
+      "specs": ["portal/specs/app-shell.md"],
+      "spec_commits": ["a1b2c3d"],
+      "code_search_roots": ["portal/"]
     }
   ]
 }
 ```
+
+The first entry omits `kind`, so it routes to the `implementing` phase; the second sets `kind: "ui"`, so it routes to the `ui_implementing` phase at its phase shift.
 
 ---
 

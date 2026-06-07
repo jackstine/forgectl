@@ -20,10 +20,16 @@ The scaffold does not spawn sub-agents. It outputs instructions telling the arch
 │       └── sessions/                       ← archived completed sessions (git tracked)
 ├── <domain>/
 │   ├── .forge_workspace/                   ← domain artifacts (plans, notes)
-│   │   └── implementation_plan/
+│   │   ├── implementation_plan/            ← code plan.json + notes/ (implementing)
+│   │   └── ui_plan/                        ← UI plan.json + notes/ (ui_implementing)
+│   │       ├── plan.json
+│   │       ├── qa/                         ← QA reports + batch-N-steps.json (per round)
+│   │       └── e2e/                        ← e2e verification reports (per round)
 │   └── specs/
 └── ...
 ```
+
+The `ui_implementing` phase stores its QA and e2e artifacts in `qa/` and `e2e/` subdirectories **alongside the active plan.json** — the scaffold derives these paths from the plan file's directory, not a fixed location. `ui_plan/` is the conventional name for a UI plan's directory (set by the plan-queue entry's `file` field); a UI plan whose `file` points elsewhere keeps its `qa/`/`e2e/` beside it.
 
 ### Project Root Discovery
 
@@ -119,6 +125,41 @@ model = "opus"
 count = 1
 eval_mode = "report"
 enable_eval_output = false
+
+[ui_implementing]
+batch = 2
+commit_strategy = "scoped"
+
+[ui_implementing.app]
+launch_command = "npm run dev"
+url = "http://localhost:5173"
+ready_timeout_seconds = 30
+
+[ui_implementing.eval]
+min_rounds = 1
+max_rounds = 3
+type = "eval"
+model = "opus"
+count = 1
+eval_mode = "report"
+
+[ui_implementing.qa]
+min_rounds = 1
+max_rounds = 3
+type = "eval"
+model = "opus"
+count = 1
+eval_mode = "report"
+
+[ui_implementing.e2e]
+min_rounds = 1
+max_rounds = 3
+type = "eval"
+model = "opus"
+count = 1
+eval_mode = "report"
+test_command = "npm run e2e"
+test_dir = "e2e/"
 
 [paths]
 state_dir = ".forgectl/state"
@@ -581,6 +622,68 @@ Back-compat for sessions predating `eval_mode`. Consulted only when `eval_mode` 
 
 Controls which files are staged when the scaffold auto-commits during the implementing phase. A per-item commit is made at IMPLEMENT (first round only) and a per-batch commit is made at COMMIT. See `docs/auto-committing.md` for full behavior details.
 
+### UI Implementing Phase
+
+Configures the `ui_implementing` phase, which a plan-queue entry with `kind = "ui"` routes to at phase shift (and `init --phase ui_implementing` starts directly). Each batch passes through three sequential verification loops — **code-eval** (`eval`), **QA** (`qa`), and **e2e** (`e2e`) — each carrying its own independent round budget and eval mode. The `eval`/`qa`/`e2e` loops each accept the same fields as `implementing.eval` (`min_rounds`, `max_rounds`, `type`, `model`, `count`, `eval_mode`); only the fields unique to this phase are detailed below.
+
+#### `ui_implementing.batch`
+
+- **Type:** integer
+- **Default:** 1 (the sample config uses 2)
+- **Constraint:** >= 1
+
+Maximum unblocked plan items per UI-implementation batch, selected in dependency order from the current layer.
+
+#### `ui_implementing.commit_strategy`
+
+- **Type:** string
+- **Default:** `"scoped"`
+- **Valid values:** `strict`, `all-specs`, `scoped`, `tracked`, `all`
+
+Git staging strategy for `ui_implementing` commits — same semantics as `implementing.commit_strategy`.
+
+#### `ui_implementing.app.launch_command`
+
+- **Type:** string
+- **Default:** none — **required**, validated non-empty at the phase boundary
+
+Shell command that starts the application (e.g. `npm run dev`). The QA loop cannot drive a UI it cannot launch, so init / phase shift into `ui_implementing` rejects an empty value naming this key.
+
+#### `ui_implementing.app.url`
+
+- **Type:** string
+- **Default:** none — **required**, validated non-empty at the phase boundary
+
+URL the QA sub-agent navigates to through the Playwright MCP (e.g. `http://localhost:5173`). Required for the same reason as `launch_command`.
+
+#### `ui_implementing.app.ready_timeout_seconds`
+
+- **Type:** integer
+- **Default:** 30
+
+How long to wait for the application to become reachable before QA begins.
+
+#### `ui_implementing.eval` / `ui_implementing.qa` / `ui_implementing.e2e`
+
+- **Fields:** `min_rounds`, `max_rounds`, `type`, `model`, `count`, `eval_mode` (each as in `implementing.eval`)
+- **Defaults:** `min_rounds = 1`, `max_rounds = 3`, `type = "eval"`, `model = "opus"`, `count = 1`, `eval_mode = "report"`
+
+The three loops are independent — `eval` drives the EVALUATE ⇄ IMPLEMENT code-level loop, `qa` drives the QA_TEST ⇄ UI_REFINE placement loop, and `e2e` drives the E2E_VERIFY ⇄ E2E_REMEDIATE verification loop. Each `eval_mode` is resolved per loop, so (for example) QA can run in `report` mode while e2e runs in `direct`. `--eval-report` is accepted only in the loop whose current evaluator state is `report` mode.
+
+#### `ui_implementing.e2e.test_command`
+
+- **Type:** string
+- **Default:** none — **required**, validated non-empty at the phase boundary
+
+Command that runs the authored Playwright test suite (e.g. `npm run e2e`). The e2e loop has nothing to verify without it.
+
+#### `ui_implementing.e2e.test_dir`
+
+- **Type:** string
+- **Default:** none — **required**, validated non-empty at the phase boundary
+
+Directory the authored Playwright test files live in (e.g. `e2e/`).
+
 ### Paths
 
 #### `paths.state_dir`
@@ -720,7 +823,7 @@ After `init`, the effective configuration is stored in the state file's `config`
 | Flag | Required | Description |
 |------|----------|-------------|
 | `--from <path>` | yes | Input file (spec queue, plan queue, or plan.json) |
-| `--phase <specifying\|planning\|implementing>` | no (default: specifying) | Starting phase |
+| `--phase <specifying\|planning\|implementing\|ui_implementing>` | no (default: specifying) | Starting phase. `ui_implementing` takes the same plan.json as `implementing` and additionally requires the `ui_implementing.app.*` / `ui_implementing.e2e.*` keys. |
 
 All other configuration is read from `.forgectl/config`.
 
@@ -729,10 +832,12 @@ All other configuration is read from `.forgectl/config`.
 | Flag | Context | Description |
 |------|---------|-------------|
 | `--guided` / `--no-guided` | any state | Toggle guided mode (updates `config.general.user_guided` in state) |
-| `--verdict PASS\|FAIL` | EVALUATE, RECONCILE_EVAL, CROSS_REFERENCE_EVAL | Evaluation verdict |
-| `--eval-report <path>` | EVALUATE, RECONCILE_EVAL, CROSS_REFERENCE_EVAL | Path to evaluation report |
-| `--message <text>`, `-m <text>` | COMPLETE (specifying), ACCEPT (planning), IMPLEMENT first round (implementing), COMMIT (implementing) — when `enable_commits: true` | Commit message |
+| `--verdict PASS\|FAIL` | EVALUATE, RECONCILE_EVAL, CROSS_REFERENCE_EVAL; plus QA_TEST and E2E_VERIFY (ui_implementing) | Evaluation verdict |
+| `--eval-report <path>` | EVALUATE, RECONCILE_EVAL, CROSS_REFERENCE_EVAL; plus QA_TEST and E2E_VERIFY (ui_implementing) | Path to evaluation report (per loop, in `report` mode) |
+| `--message <text>`, `-m <text>` | COMPLETE (specifying), ACCEPT (planning), IMPLEMENT first round + COMMIT (implementing and ui_implementing) — when `enable_commits: true` | Commit message |
 | `--from <path>` | PHASE_SHIFT (specifying→generate_planning_queue, generate_planning_queue→planning) | Plan queue input file |
+
+The `ui_implementing` phase also uses two sub-agent commands shared with the evaluator states: `eval` (outputs evaluation context) and `handoff <file>…` (registers the sub-agent's generated artifacts for review). Both are valid only in EVALUATE, QA_TEST, and E2E_VERIFY.
 
 ## Non-Config Session Fields
 
@@ -740,7 +845,7 @@ These fields live at the top level of the state file, outside the `config` objec
 
 | Field | Description |
 |-------|-------------|
-| `phase` | Active phase: `specifying`, `generate_planning_queue`, `planning`, `implementing` |
+| `phase` | Active phase: `specifying`, `generate_planning_queue`, `planning`, `implementing`, `ui_implementing` |
 | `state` | Current state within the active phase |
 | `started_at_phase` | Which phase the session was initialized at (display only) |
 | `phase_shift` | Records from/to during PHASE_SHIFT transitions |
