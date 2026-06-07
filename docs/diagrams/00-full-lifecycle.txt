@@ -3,8 +3,10 @@
 ================================================================================
 
   A spec-driven development harness that compiles planning documents into
-  production code through four sequential phases, each governed by a state
-  machine with iterative AI-powered evaluation loops.
+  production code through sequential phases, each governed by a state machine
+  with iterative AI-powered evaluation loops. The implementation phase has two
+  variants — implementing (code) and ui_implementing (code + UI verification) —
+  selected per plan by its "kind" field.
 
                          ┌──────────────────────┐
                          │    Planning Docs /    │
@@ -72,13 +74,17 @@
   │   Input:  plan-queue.json + specs/*.md                                  │
   │   Output: plan.json + notes/*.md                                        │
   │                                                                         │
+  │   Each plan carries kind: "code" (default) or "ui". The phase shift     │
+  │   routes code → implementing, ui → ui_implementing.                     │
+  │                                                                         │
   │   plan_all_before_implementing: false (default, interleaved)            │
-  │     Each domain: planning → PHASE_SHIFT → implementing                  │
-  │     Implementing DONE → PHASE_SHIFT → planning (next domain)            │
+  │     Each domain: planning → PHASE_SHIFT → implementation (by kind)      │
+  │     Implementation DONE → PHASE_SHIFT → planning (next domain)          │
   │                                                                         │
   │   plan_all_before_implementing: true (all planning first)               │
   │     All domains planned with PHASE_SHIFT between each domain            │
-  │     DONE → PHASE_SHIFT → implementing (all domains)                     │
+  │     DONE → PHASE_SHIFT → implementation; domain boundaries re-route     │
+  │     by kind, so code and ui domains interleave                          │
   │                                                                         │
   │   ┌───────┐  ┌───────────┐  ┌───────────┐  ┌──────────────┐           │
   │   │ORIENT ├─►│STUDY_SPECS├─►│STUDY_CODE ├─►│STUDY_PACKAGES│           │
@@ -114,14 +120,19 @@
                      │  PHASE_SHIFT  (context refresh)
                      │  Mutates plan.json: adds passes + rounds fields
                      │
+                     │  Routed by plan kind:
+                     │    kind: code → implementing
+                     │    kind: ui   → ui_implementing
+                     │
                      │  Domain boundaries also fire PHASE_SHIFT:
                      │    planning → planning (plan_all: true)
-                     │    implementing → planning (plan_all: false)
-                     │    implementing → implementing (plan_all: true)
+                     │    implementation → planning (plan_all: false)
+                     │    implementation → implementation (plan_all: true,
+                     │      next domain re-routed by kind)
                      ▼
   ┌─────────────────────────────────────────────────────────────────────────┐
   │                                                                         │
-  │   PHASE 4: IMPLEMENTING                                                 │
+  │   PHASE 4a: IMPLEMENTING            (plan kind: code — the default)      │
   │   Role: Senior Software Engineer                                        │
   │                                                                         │
   │   Input:  plan.json (with passes/rounds)                                │
@@ -144,6 +155,30 @@
   │                                    ┌────────┐                          │
   │                                    │  DONE  │──► PHASE_SHIFT           │
   │                                    └────────┘    (if plans remain)     │
+  │                                                                         │
+  └─────────────────────────────────────────────────────────────────────────┘
+
+  ┌─────────────────────────────────────────────────────────────────────────┐
+  │                                                                         │
+  │   PHASE 4b: UI_IMPLEMENTING         (plan kind: ui)                      │
+  │   Role: Senior Software Engineer (UI)    See: 10-ui-implementing-phase   │
+  │                                                                         │
+  │   Input:  plan.json (with passes/rounds)                                │
+  │   Output: UI code + QA reports + authored e2e tests + eval reports       │
+  │                                                                         │
+  │   Reuses the implementing spine, then inserts TWO verification loops     │
+  │   between code EVALUATE and COMMIT — three sequential gates per batch:   │
+  │                                                                         │
+  │   ORIENT ─► IMPLEMENT(1..n) ─► [ CODE EVAL ] ─► [ QA ] ─► [ E2E ] ─►     │
+  │                                  impl-eval      ui-qa      ui-e2e        │
+  │                                  verdict        QA_TEST ⟲  E2E_VERIFY ⟲  │
+  │                                                 UI_REFINE  E2E_REMEDIATE │
+  │                                                    │           │         │
+  │                                              (Playwright   (Playwright   │
+  │                                               MCP)          test runner) │
+  │                                                                         │
+  │   ─► COMMIT ─► ... ─► DONE ──► PHASE_SHIFT (if plans remain)            │
+  │   Item passed only if all three loops PASS within budget; else failed.  │
   │                                                                         │
   └─────────────────────────────────────────────────────────────────────────┘
 
@@ -172,6 +207,12 @@
       Interleaved: plan domain → implement domain → plan domain → ...
     plan_all_before_implementing: true
       All planning first, then all implementing (PHASE_SHIFT at each domain boundary)
+
+  Implementation routing (per plan):
+    kind: code (default) → implementing      (code-only batches)
+    kind: ui             → ui_implementing    (code batches + QA + e2e loops)
+    The planning → implementation PHASE_SHIFT reads kind to pick the variant;
+    ui_implementing additionally requires ui_implementing.app.* and .e2e.* config.
 
   Config & State:
     .forgectl/config                  TOML config file (phase-scoped)

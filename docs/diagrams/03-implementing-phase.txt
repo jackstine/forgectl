@@ -7,6 +7,10 @@
   Output: Production code + evaluation reports + IMPLEMENTATION_LOG.md
   Evaluator: AI sub-agent verifies code against spec tests
 
+  This is the code variant, entered when a plan's kind is "code" (the default).
+  Plans with kind "ui" enter ui_implementing instead — same spine plus QA and
+  e2e verification loops. See 10-ui-implementing-phase.
+
   ┌─────────────────────────────────────────────────────────────────────────┐
   │  INITIALIZATION                                                         │
   │                                                                         │
@@ -180,9 +184,10 @@
   │    - Planning queue empty → session complete                            │
   │                                                                         │
   │  plan_all_before_implementing: true (all-planning-first)                │
-  │    - Implementing plan queue non-empty →                                │
-  │        PHASE_SHIFT (implementing → implementing, next domain)           │
-  │    - Implementing plan queue empty → session complete                   │
+  │    - Implementation plan queue non-empty →                              │
+  │        PHASE_SHIFT (domain boundary). Next domain routes to             │
+  │        implementing or ui_implementing by that plan's kind.             │
+  │    - Implementation plan queue empty → session complete                 │
   └─────────────────────────────────────────────────────────────────────────┘
 
 

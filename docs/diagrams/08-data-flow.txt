@@ -66,10 +66,12 @@
   ║  │                      │          │                              │   ║
   ║  │ OR: --from override  │          │ {plans: [{                   │   ║
   ║  │ (skips this phase    │          │   name, domain,              │   ║
-  ║  │  entirely)           │          │   file, specs[],             │   ║
-  ║  └─────────────────────┘          │   spec_commits[],            │   ║
+  ║  │  entirely)           │          │   kind: "code"|"ui",         │   ║
+  ║  └─────────────────────┘          │   file, specs[],             │   ║
+  ║                                   │   spec_commits[],            │   ║
   ║                                   │   code_search_roots[]        │   ║
-  ║                                   │ }]}                          │   ║
+  ║                                   │ }]}  kind routes the         │   ║
+  ║                                   │      implementation phase    │   ║
   ║                                   └─────────────────────────────┘   ║
   ║                                                                      ║
   ║                                   ┌─────────────────────────────┐   ║
@@ -89,11 +91,14 @@
   ║  │                      │          │   implementation_plan/       │   ║
   ║  │ {plans: [{           │    ──►   │   ├── plan.json              │   ║
   ║  │   name, domain,      │          │   ├── notes/                 │   ║
-  ║  │   file, specs[],     │          │   │   ├── <pkg-a>.md         │   ║
-  ║  │   spec_commits[],    │          │   │   └── <pkg-b>.md         │   ║
-  ║  │   code_search_roots[]│          │   └── evals/                 │   ║
-  ║  │ }]}                  │          │       ├── round-1.md          │   ║
-  ║  └─────────────────────┘          │       └── round-2.md          │   ║
+  ║  │   kind: code|ui,     │          │   │   ├── <pkg-a>.md         │   ║
+  ║  │   file, specs[],     │          │   │   └── <pkg-b>.md         │   ║
+  ║  │   spec_commits[],    │          │   └── evals/                 │   ║
+  ║  │   code_search_roots[]│          │       ├── round-1.md          │   ║
+  ║  │ }]}                  │          │       └── round-2.md          │   ║
+  ║  │ kind carried through │          │                              │   ║
+  ║  │ planning unchanged   │          │                              │   ║
+  ║  └─────────────────────┘          │                              │   ║
   ║                                   └─────────────────────────────┘   ║
   ║  Spec files (read-only)                                              ║
   ║  Evaluator prompt: evaluators/plan-eval.md (embedded in binary)     ║
@@ -105,9 +110,10 @@
                            │
                            │  plan.json flows down
                            │  (mutated with passes/rounds)
+                           │  routed by kind: code → 4a, ui → 4b
                            ▼
   ╔══════════════════════════════════════════════════════════════════════╗
-  ║  PHASE 4: IMPLEMENTING                                              ║
+  ║  PHASE 4a: IMPLEMENTING   (plan kind: code — the default)           ║
   ║                                                                      ║
   ║  Inputs:                          Outputs:                           ║
   ║  ┌─────────────────────┐          ┌─────────────────────────────┐   ║
@@ -144,6 +150,53 @@
   ╚══════════════════════════════════════════════════════════════════════╝
 
 
+  ╔══════════════════════════════════════════════════════════════════════╗
+  ║  PHASE 4b: UI_IMPLEMENTING   (plan kind: ui)   See: 10-ui-implementing║
+  ║                                                                      ║
+  ║  Same plan.json input as 4a (mutated with passes/rounds), plus two   ║
+  ║  extra verification loops per batch and the UI-specific config.      ║
+  ║                                                                      ║
+  ║  Inputs:                          Outputs:                           ║
+  ║  ┌─────────────────────┐          ┌─────────────────────────────┐   ║
+  ║  │ plan.json (mutated)  │          │ UI production code           │   ║
+  ║  │                      │    ──►   └─────────────────────────────┘   ║
+  ║  │ Required config:     │                                            ║
+  ║  │  ui_implementing.    │          ┌─────────────────────────────┐   ║
+  ║  │   app.launch_command │          │ <domain>/.forgectl_workspace/│   ║
+  ║  │   app.url            │          │   ui_plan/                   │   ║
+  ║  │   e2e.test_command   │          │   ├── plan.json              │   ║
+  ║  │   e2e.test_dir       │          │   ├── evals/                 │   ║
+  ║  └─────────────────────┘          │   │   └── batch-N-round-M.md │   ║
+  ║                                   │   ├── qa/                    │   ║
+  ║  Evaluator prompts (embedded):    │   │   ├── batch-N-steps.json │   ║
+  ║   impl-eval.md  (code)            │   │   │   (step list — the   │   ║
+  ║   ui-qa-eval.md (QA, Playwright   │   │   │    QA→e2e contract)   │   ║
+  ║                 MCP)              │   │   ├── batch-N-round-M.md │   ║
+  ║   ui-e2e-eval.md (e2e, Playwright │   │   │   (QA reports)        │   ║
+  ║                  test runner)     │   │   └── batch-N-round-M-*.png│  ║
+  ║                                   │   │       (screenshot evidence)│  ║
+  ║  Running app (read, via MCP)      │   └── e2e/                   │   ║
+  ║  Source code (read/write)         │       └── batch-N-round-M.md │   ║
+  ║                                   │           (e2e reports)      │   ║
+  ║                                   └─────────────────────────────┘   ║
+  ║                                                                      ║
+  ║                                   ┌─────────────────────────────┐   ║
+  ║                                   │ ui_implementing.e2e.test_dir │   ║
+  ║                                   │   └── *.spec.ts (authored    │   ║
+  ║                                   │       Playwright tests —      │   ║
+  ║                                   │       PERMANENT assets)       │   ║
+  ║                                   └─────────────────────────────┘   ║
+  ║                                                                      ║
+  ║                                   ┌─────────────────────────────┐   ║
+  ║                                   │ plan.json (updated)          │   ║
+  ║                                   │ items[].passes: passed|failed│   ║
+  ║                                   │   passed → all 3 loops passed │   ║
+  ║                                   │   failed → any loop forced    │   ║
+  ║                                   │ items[].rounds: eval+qa+e2e  │   ║
+  ║                                   └─────────────────────────────┘   ║
+  ╚══════════════════════════════════════════════════════════════════════╝
+
+
   ═══════════════════════════════════════════════════════════════════════════
   STATE FILE: .forgectl/state/forgectl-state.json
   ═══════════════════════════════════════════════════════════════════════════
@@ -156,13 +209,20 @@
   │                                                                      │
   │  {                                                                   │
   │    "phase": "specifying | generate_planning_queue | planning |        │
-  │             implementing",                                           │
+  │             implementing | ui_implementing",                         │
   │    "state": "<current state>",                                       │
-  │    "started_at_phase": "specifying | planning | implementing",       │
+  │    "started_at_phase": "specifying | planning | implementing |       │
+  │                        ui_implementing",                             │
   │    "config": {                                                       │
   │      "specifying": { "batch": N, "eval": { ... } },                 │
   │      "planning": { "batch": N, "eval": { ... } },                   │
   │      "implementing": { "batch": N, "eval": { ... } },               │
+  │      "ui_implementing": {                                            │
+  │        "batch": N, "commit_strategy": "...",                        │
+  │        "app": { "launch_command", "url", "ready_timeout_seconds" }, │
+  │        "eval": { ... }, "qa": { ... },                              │
+  │        "e2e": { ..., "test_command", "test_dir" }                   │
+  │      },                                                              │
   │      "general": { "enable_commits": bool, "user_guided": bool }     │
   │    },                                                                │
   │                                                                      │
@@ -172,7 +232,7 @@
   │    // Planning phase:                                                │
   │    "planning": { ... },                                              │
   │                                                                      │
-  │    // Implementing phase:                                            │
+  │    // Implementation phase (implementing or ui_implementing):        │
   │    "implementing": { ... }                                           │
   │  }                                                                   │
   └──────────────────────────────────────────────────────────────────────┘

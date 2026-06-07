@@ -12,7 +12,8 @@
   │   │
   │   │  Required flags:
   │   │    --from <path>  Input file (spec-queue, plan-queue, or plan.json)
-  │   │    --phase <str>  Phase: specifying | planning | implementing
+  │   │    --phase <str>  Phase: specifying | planning | implementing |
+  │   │                          ui_implementing
   │   │
   │   │  Optional flags:
   │   │    --guided       Enable guided mode (user checkpoints)
@@ -35,9 +36,11 @@
   │   │        enable_commits = false
   │   │
   │   │  Input by phase:
-  │   │    specifying   ──►  spec-queue.json
-  │   │    planning     ──►  plan-queue.json
-  │   │    implementing ──►  plan.json
+  │   │    specifying      ──►  spec-queue.json
+  │   │    planning        ──►  plan-queue.json
+  │   │    implementing    ──►  plan.json
+  │   │    ui_implementing ──►  plan.json (+ requires ui_implementing.app.*
+  │   │                          and ui_implementing.e2e.* config, non-empty)
   │   │
   │   │  State file location: .forgectl/state/forgectl-state.json
   │   │
@@ -55,11 +58,18 @@
   │   │  │ SELECT           │ (none required)                            │
   │   │  │ DRAFT            │ --file <path>  (override output, spec only)│
   │   │  │ EVALUATE         │ --verdict PASS|FAIL                        │
-  │   │  │                  │ --eval-report <path>  (if enable_eval_out) │
+  │   │  │                  │ --eval-report <path>  (if report mode)     │
   │   │  │ REFINE           │ (none required)                            │
   │   │  │ ACCEPT           │ --message (planning, if enable_commits)    │
   │   │  │ IMPLEMENT        │ --message (first round, if enable_commits) │
   │   │  │ COMMIT           │ --message (if enable_commits)              │
+  │   │  │ QA_TEST          │ --verdict PASS|FAIL  (ui_implementing)     │
+  │   │  │   (UI)           │ --eval-report <path>  (if qa report mode)  │
+  │   │  │ UI_REFINE  (UI)  │ (none required)                            │
+  │   │  │ E2E_AUTHOR (UI)  │ (none required)                            │
+  │   │  │ E2E_VERIFY       │ --verdict PASS|FAIL  (ui_implementing)     │
+  │   │  │   (UI)           │ --eval-report <path>  (if e2e report mode) │
+  │   │  │ E2E_REMEDIATE(UI)│ (none required)                            │
   │   │  │ RECONCILE        │ (none required)                            │
   │   │  │ RECONCILE_EVAL   │ --verdict PASS|FAIL  --eval-report <path>  │
   │   │  │ RECONCILE_REVIEW │ (none required)                            │
@@ -86,11 +96,28 @@
   │
   ├── eval ────────────── Output evaluation context for sub-agent
   │   │
-  │   │  Valid only in EVALUATE states
+  │   │  Valid in EVALUATE; plus QA_TEST and E2E_VERIFY (ui_implementing)
   │   │  No additional flags
   │   │
   │   └─── Output: Full context needed by AI evaluator
   │                (items, specs, tests, evaluator prompt)
+  │                ui_implementing — QA_TEST embeds ui-qa-eval.md + app url +
+  │                step-list path; E2E_VERIFY embeds ui-e2e-eval.md + test cmd
+  │
+  │
+  ├── handoff ─────────── Register sub-agent artifacts back to the scaffold
+  │   │                   (ui_implementing only — the inverse of eval)
+  │   │
+  │   │  Arguments:
+  │   │    <file> [<file>…]  One or more generated files to register
+  │   │                      (QA report, QA step list, e2e report)
+  │   │
+  │   │  Valid in: EVALUATE, QA_TEST, E2E_VERIFY (same states as eval)
+  │   │  Verifies each file exists; surfaces them on a "Review:" line so the
+  │   │  engineer reviews them before recording a verdict. Carries NO verdict;
+  │   │  coexists with --eval-report (a divergent path warns, does not block).
+  │   │
+  │   └─── Output: "Registered N artifact(s) for review."
   │
   │
   ├── add-queue-item ───── Append a spec to the specifying queue
@@ -134,21 +161,23 @@
   │                          │         │                          │
   │  Uses:                   │         │  Uses:                   │
   │    forgectl init         │         │    forgectl eval         │
-  │    forgectl advance      │         │                          │
-  │    forgectl status       │         │  Reads:                  │
-  │    forgectl add-queue-   │         │    - Spec files          │
-  │             item         │         │    - Implementation      │
-  │    forgectl set-roots    │         │    - Notes/refs          │
-  │                          │         │    - Evaluator prompt    │
-  │  Writes:                 │         │                          │
-  │    - Specs               │         │  Writes:                 │
-  │    - Plans               │         │    - Eval reports        │
-  │    - Code                │         │    (evals/*.md)          │
-  │    - Notes               │         │                          │
+  │    forgectl advance      │         │    forgectl handoff      │
+  │    forgectl status       │         │      (ui_implementing)   │
+  │    forgectl add-queue-   │         │                          │
+  │             item         │         │  Reads:                  │
+  │    forgectl set-roots    │         │    - Spec files          │
+  │                          │         │    - Implementation      │
+  │  Writes:                 │         │    - Notes/refs          │
+  │    - Specs               │         │    - Evaluator prompt    │
+  │    - Plans               │         │                          │
+  │    - Code                │         │  Writes:                 │
+  │    - Notes               │         │    - Eval reports        │
+  │                          │         │    - QA reports/steps    │
+  │                          │         │    - e2e tests/reports   │
   └──────────┬───────────────┘         └──────────┬───────────────┘
              │                                     │
-             │    forgectl advance                  │   forgectl eval
-             │    --verdict --eval-report           │
+             │    forgectl advance                  │   forgectl eval (context in)
+             │    --verdict --eval-report           │   forgectl handoff (files back)
              │                                     │
              └──────────────┬──────────────────────┘
                             │

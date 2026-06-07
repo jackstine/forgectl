@@ -1,0 +1,294 @@
+================================================================================
+           PHASE 4 (UI VARIANT): UI_IMPLEMENTING — State Machine
+================================================================================
+
+  Role: Senior Software Engineer (UI)
+  Input: plan.json (with passes/rounds fields added by PHASE_SHIFT)
+         Selected when the plan's kind is "ui" (see phase-transitions).
+  Output: Production UI code + QA reports + authored e2e tests + eval reports
+  Evaluators (three sub-agents, three prompts):
+    - impl-eval.md     code correctness          (shared with implementing)
+    - ui-qa-eval.md    placement / controls      (drives the Playwright MCP)
+    - ui-e2e-eval.md   end-to-end verification   (Playwright test runner)
+
+  The ui_implementing phase reuses the implementing phase's spine — layers,
+  dependency-ordered batches, one-item-at-a-time IMPLEMENT, the code EVALUATE
+  loop, and the COMMIT batch boundary — and inserts TWO additional verification
+  loops between code EVALUATE and COMMIT: a QA placement loop and an end-to-end
+  (e2e) loop. Each batch passes three sequential gates before it can commit.
+
+  ┌─────────────────────────────────────────────────────────────────────────┐
+  │  INITIALIZATION                                                         │
+  │                                                                         │
+  │  forgectl init \                                                        │
+  │    --from <domain>/.forgectl_workspace/ui_plan/plan.json \              │
+  │    --phase ui_implementing                                              │
+  │                                                                         │
+  │  Required config (validated at entry; missing → stay at PHASE_SHIFT):   │
+  │    ui_implementing.app.launch_command   (start the app for QA)          │
+  │    ui_implementing.app.url              (URL the QA agent navigates to)  │
+  │    ui_implementing.e2e.test_command     (run the authored e2e suite)    │
+  │    ui_implementing.e2e.test_dir         (where e2e tests are authored)   │
+  │                                                                         │
+  │  (Config: ui_implementing.batch; eval/qa/e2e .min_rounds/.max_rounds —  │
+  │   three independent round budgets — in .forgectl/config)                │
+  │  (Optional: --guided for user checkpoints)                              │
+  │                                                                         │
+  │  OR: PHASE_SHIFT from planning when the plan's kind is "ui" (automatic) │
+  └────────────────────────────────┬────────────────────────────────────────┘
+                                   │
+                                   ▼
+
+  ╔═══════════════════════════════════════════════════════════════════════╗
+  ║  BATCH LOOP  (repeats for each batch of unblocked items)             ║
+  ╠═══════════════════════════════════════════════════════════════════════╣
+  ║                                                                       ║
+  ║  ┌────────────────────────────────────────────────────────────────┐  ║
+  ║  │  ORIENT                                                        │  ║
+  ║  │                                                                │  ║
+  ║  │  - Review layer progress (e.g., "2/4 items passed")            │  ║
+  ║  │  - Show next batch composition                                 │  ║
+  ║  │  - Show App: launch + url line                                 │  ║
+  ║  │  - Select batch; reset eval_round, qa_round, e2e_round to 0    │  ║
+  ║  │  - If guided: STOP and discuss with user                       │  ║
+  ║  │                                                                │  ║
+  ║  │  Action: forgectl advance                                      │  ║
+  ║  └────────────────────────────┬───────────────────────────────────┘  ║
+  ║                               │                                       ║
+  ║                               ▼                                       ║
+  ║                                                                       ║
+  ║  ╔════════════════════════════════════════════════════════════════╗   ║
+  ║  ║  ITEM LOOP  (one item at a time within batch — same as impl)   ║   ║
+  ║  ╠════════════════════════════════════════════════════════════════╣   ║
+  ║  ║  IMPLEMENT(1) ──► IMPLEMENT(2) ──► ... ──► IMPLEMENT(n)         ║   ║
+  ║  ║  - One item per advance; full context (steps/files/specs/refs) ║   ║
+  ║  ║  - First round commits each item when enable_commits: true     ║   ║
+  ║  ║    (--message required); item marked pending ──► done          ║   ║
+  ║  ║  - Identical to the implementing phase IMPLEMENT behaviour      ║   ║
+  ║  ╚════════════════════════════════════════╤════════════════════════╝   ║
+  ║                                           │ batch complete             ║
+  ║                                           ▼                            ║
+  ║                                                                       ║
+  ║  ┌ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─┐  ║
+  ║  │  LOOP 1 — CODE EVALUATE   (ui_implementing.eval.min..max)      │  ║
+  ║  │                                                                  │  ║
+  ║  │  ┌────────────────────────────────────────────────────────┐     │  ║
+  ║  │  │  EVALUATE   (Loop: code)                                │     │  ║
+  ║  │  │  1. Spawn 1 opus sub-agent; it runs: forgectl eval      │     │  ║
+  ║  │  │     (embeds impl-eval.md + batch item details)          │     │  ║
+  ║  │  │  2. Sub-agent checks code vs spec; in report mode       │     │  ║
+  ║  │  │     hands its report back: forgectl handoff <report>    │     │  ║
+  ║  │  │  3. Engineer reviews, records verdict:                  │     │  ║
+  ║  │  │     forgectl advance --verdict PASS|FAIL                │     │  ║
+  ║  │  │       (+ --eval-report <path> in report mode)           │     │  ║
+  ║  │  └──────────┬───────────────────────┬─────────────────────┘     │  ║
+  ║  │   FAIL <max │ / PASS <min            │ PASS >=min / FAIL >=max    │  ║
+  ║  │             ▼                        ▼  (force-accept flagged)    │  ║
+  ║  │     IMPLEMENT (round 2+)        ───► QA_TEST  (qa_round = 1)      │  ║
+  ║  │     apply eval_mode, fix,            │                            │  ║
+  ║  │     forgectl advance ──► EVALUATE    │                            │  ║
+  ║  └ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─│─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ┘  ║
+  ║                                         ▼                            ║
+  ║  ┌ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─┐  ║
+  ║  │  LOOP 2 — QA PLACEMENT    (ui_implementing.qa.min..max)        │  ║
+  ║  │                                                                  │  ║
+  ║  │  ┌────────────────────────────────────────────────────────┐     │  ║
+  ║  │  │  QA_TEST   (Loop: qa)                                   │     │  ║
+  ║  │  │  Sub-agent runs: forgectl eval  (embeds ui-qa-eval.md,  │     │  ║
+  ║  │  │    app launch + url, step-list target path).            │     │  ║
+  ║  │  │  Drives the running app through the PLAYWRIGHT MCP:      │     │  ║
+  ║  │  │    - navigate to ui_implementing.app.url                │     │  ║
+  ║  │  │    - read accessibility snapshot → judge placement      │     │  ║
+  ║  │  │    - click / type / fill / select → exercise controls   │     │  ║
+  ║  │  │    - read console → catch runtime errors                │     │  ║
+  ║  │  │    - capture screenshots as evidence                    │     │  ║
+  ║  │  │  ALWAYS writes the QA step list (qa/batch-N-steps.json), │     │  ║
+  ║  │  │  then hands its files back:                             │     │  ║
+  ║  │  │    forgectl handoff <qa-report> <step-list>             │     │  ║
+  ║  │  │    (report+steps in report/direct; steps only in conv.) │     │  ║
+  ║  │  │  Engineer reviews the Review: line, records verdict:    │     │  ║
+  ║  │  │    forgectl advance --verdict PASS|FAIL                 │     │  ║
+  ║  │  │       (+ --eval-report <path> in report mode)           │     │  ║
+  ║  │  └──────────┬───────────────────────┬─────────────────────┘     │  ║
+  ║  │   FAIL <max │ / PASS <min            │ PASS >=min / FAIL >=max    │  ║
+  ║  │             ▼                        ▼  (qa force-accept flagged) │  ║
+  ║  │  ┌────────────────────┐         ───► E2E_AUTHOR                   │  ║
+  ║  │  │  UI_REFINE         │              (step list MUST be present;  │  ║
+  ║  │  │  Iterate placement │               absent → advance rejected) │  ║
+  ║  │  │  & controls: move, │              │                            │  ║
+  ║  │  │  resize, relabel,  │              │                            │  ║
+  ║  │  │  reorder, rewire.  │              │                            │  ║
+  ║  │  │  No commit.        │              │                            │  ║
+  ║  │  │  advance ──────────┼──► QA_TEST   │                            │  ║
+  ║  │  │            (qa_round++)            │                            │  ║
+  ║  │  └────────────────────┘              │                            │  ║
+  ║  └ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─│─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ┘  ║
+  ║                                         ▼                            ║
+  ║  ┌────────────────────────────────────────────────────────────────┐  ║
+  ║  │  E2E_AUTHOR   (Loop: e2e — single bridging state, not a loop)   │  ║
+  ║  │                                                                │  ║
+  ║  │  Engineer reads the QA step list and authors one runnable       │  ║
+  ║  │  PLAYWRIGHT TEST FILE per scenario into ui_implementing.e2e.    │  ║
+  ║  │  test_dir (steps → actions, expected → assertions), then runs   │  ║
+  ║  │  the suite via ui_implementing.e2e.test_command.                │  ║
+  ║  │  Pass, fail, or runner error — the engineer still advances;     │  ║
+  ║  │  the verdict belongs to E2E_VERIFY.                             │  ║
+  ║  │  Zero scenarios → author nothing, advance directly.             │  ║
+  ║  │                                                                │  ║
+  ║  │  Action: forgectl advance   (e2e_round = 1)                    │  ║
+  ║  └────────────────────────────┬───────────────────────────────────┘  ║
+  ║                               ▼                                       ║
+  ║  ┌ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─┐  ║
+  ║  │  LOOP 3 — E2E VERIFICATION  (ui_implementing.e2e.min..max)     │  ║
+  ║  │                                                                  │  ║
+  ║  │  ┌────────────────────────────────────────────────────────┐     │  ║
+  ║  │  │  E2E_VERIFY   (Loop: e2e)                               │     │  ║
+  ║  │  │  Sub-agent runs: forgectl eval  (embeds ui-e2e-eval.md, │     │  ║
+  ║  │  │    step-list path, test command, test dir).             │     │  ║
+  ║  │  │  Confirms the authored Playwright tests run, pass, and  │     │  ║
+  ║  │  │  cover the step list; in report mode hands its report   │     │  ║
+  ║  │  │  back: forgectl handoff <e2e-report>.                   │     │  ║
+  ║  │  │  Zero scenarios → verdict PASS (vacuous).               │     │  ║
+  ║  │  │  Engineer records verdict:                              │     │  ║
+  ║  │  │    forgectl advance --verdict PASS|FAIL                 │     │  ║
+  ║  │  │       (+ --eval-report <path> in report mode)           │     │  ║
+  ║  │  └──────────┬───────────────────────┬─────────────────────┘     │  ║
+  ║  │   FAIL <max │ / PASS <min            │ PASS >=min / FAIL >=max    │  ║
+  ║  │             ▼                        ▼  (e2e force-accept flagged)│  ║
+  ║  │  ┌────────────────────┐         ───► COMMIT                      │  ║
+  ║  │  │  E2E_REMEDIATE     │                                          │  ║
+  ║  │  │  Fix the failing   │                                          │  ║
+  ║  │  │  tests OR the UI   │                                          │  ║
+  ║  │  │  under test, re-run│                                          │  ║
+  ║  │  │  the suite.        │                                          │  ║
+  ║  │  │  No commit.        │                                          │  ║
+  ║  │  │  advance ──────────┼──► E2E_VERIFY                            │  ║
+  ║  │  │           (e2e_round++)                                       │  ║
+  ║  │  └────────────────────┘                                          │  ║
+  ║  └ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ┘  ║
+  ║                               │                                       ║
+  ║                               ▼                                       ║
+  ║  ┌────────────────────────────────────────────────────────────────┐   ║
+  ║  │  COMMIT  (batch boundary — terminal status decided HERE)       │   ║
+  ║  │                                                                │   ║
+  ║  │  Items ──► passed   when code, qa AND e2e all PASSed in budget │   ║
+  ║  │  Items ──► failed   when ANY loop force-accepted at its max    │   ║
+  ║  │                                                                │   ║
+  ║  │  enable_commits: true  → advance --message "<commit msg>"      │   ║
+  ║  │  enable_commits: false → advance                              │   ║
+  ║  └────────────────────────────┬───────────────────────────────────┘   ║
+  ║                               │                                       ║
+  ║              ┌────────────────┴────────────────┐                      ║
+  ║        more batches /                    all items                     ║
+  ║        more layers                       complete                     ║
+  ║              ▼                                  ▼                      ║
+  ║         ► ORIENT                             DONE                     ║
+  ║           (next batch)                          │                      ║
+  ╚═════════════════════════════════════════════════╪══════════════════════╝
+                                                    │
+                                                    ▼
+  ┌─────────────────────────────────────────────────────────────────────────┐
+  │  DONE                                                                   │
+  │                                                                         │
+  │  - All layers complete; all items: passed or failed                     │
+  │  - Summary reports per-layer pass counts AND per-loop round totals:     │
+  │      "Rounds: code 5, qa 4, e2e 6 (across 2 batches)"                   │
+  │                                                                         │
+  │  Transition depends on remaining plans and mode (same as implementing): │
+  │                                                                         │
+  │  plan_all_before_implementing: false (interleaved)                      │
+  │    - Planning queue non-empty →                                         │
+  │        PHASE_SHIFT (ui_implementing → planning, next domain)            │
+  │    - Planning queue empty → session complete                            │
+  │                                                                         │
+  │  plan_all_before_implementing: true (all-planning-first)                │
+  │    - Implementation plan queue non-empty →                              │
+  │        PHASE_SHIFT (domain boundary). Next domain routes to             │
+  │        implementing or ui_implementing by that plan's kind.             │
+  │    - Queue empty → session complete                                     │
+  └─────────────────────────────────────────────────────────────────────────┘
+
+
+  ═══════════════════════════════════════════════════════════════════════════
+  THREE SEQUENTIAL GATES PER BATCH
+  ═══════════════════════════════════════════════════════════════════════════
+
+  Every batch passes all three loops, in order, before COMMIT — none skipped:
+
+    IMPLEMENT(s) ─► [ CODE EVAL ] ─► [ QA ] ─► [ E2E ] ─► COMMIT
+                     impl-eval        ui-qa     ui-e2e
+                     report           Playwright Playwright
+                     verdict          MCP        test runner
+
+  A loop "terminates" when it reaches PASS with rounds >= its min_rounds, or
+  force-accepts at its max_rounds. Each loop carries its own round budget and
+  its own force-accept boundary, so they are tuned independently.
+
+  Per-loop round counters (reset to 0 at batch selection in ORIENT):
+    eval_round   code EVALUATE  loop
+    qa_round     QA_TEST ⟲ UI_REFINE loop
+    e2e_round    E2E_VERIFY ⟲ E2E_REMEDIATE loop
+
+
+  ═══════════════════════════════════════════════════════════════════════════
+  TWO ACTORS, THREE COMMANDS
+  ═══════════════════════════════════════════════════════════════════════════
+
+  ENGINEER (primary agent)          SUB-AGENT (evaluator — code | qa | e2e)
+    forgectl advance                  forgectl eval     (context IN)
+    forgectl status                   forgectl handoff  (artifacts BACK)
+
+  eval and handoff are valid ONLY in the three evaluator states:
+  EVALUATE, QA_TEST, E2E_VERIFY.
+
+  handoff registers the files the sub-agent produced (it verifies each exists),
+  surfaces them on a Review: line for the engineer, and carries NO verdict — the
+  engineer still records the verdict with advance --verdict. It coexists with
+  --eval-report; a divergent --eval-report path warns but does not block.
+
+
+  ═══════════════════════════════════════════════════════════════════════════
+  ITEM STATE PROGRESSION  (in plan.json)
+  ═══════════════════════════════════════════════════════════════════════════
+
+  pending ──► done ──► passed   (all three loops PASSed within their budgets)
+                 └──► failed   (any loop force-accepted at its max_rounds)
+
+  Terminal status is decided ONLY at COMMIT, after all three loops have
+  terminated. While the batch moves through code / qa / e2e, items stay "done".
+
+  The plan.json items[].rounds field holds eval_round + qa_round + e2e_round
+  (a compatibility value matching the implementing-phase shape); the per-loop
+  breakdown lives in batch history, not in that single field.
+
+
+  ═══════════════════════════════════════════════════════════════════════════
+  ARTIFACT LOCATIONS
+  ═══════════════════════════════════════════════════════════════════════════
+
+  <domain>/.forgectl_workspace/ui_plan/
+  ├── plan.json                              the UI plan (mutated: passes/rounds)
+  ├── qa/
+  │   ├── batch-N-steps.json                 QA step list (latest round wins)
+  │   ├── batch-N-round-M.md                 QA reports
+  │   └── batch-N-round-M-*.png              QA screenshot evidence (MCP captures)
+  └── e2e/
+      └── batch-N-round-M.md                 e2e verification reports
+
+  Authored e2e tests are Playwright TEST FILES → ui_implementing.e2e.test_dir
+  within the project (permanent assets), NOT the workspace.
+
+  QA step list  = the contract between LOOP 2 and LOOP 3:
+    produced by QA_TEST (every round, every eval_mode),
+    consumed by E2E_AUTHOR. A QA loop never exits toward E2E_AUTHOR without it.
+
+
+  ═══════════════════════════════════════════════════════════════════════════
+  PLAYWRIGHT REQUIRES NO CONFIG OF ITS OWN
+  ═══════════════════════════════════════════════════════════════════════════
+
+  The scaffold never invokes Playwright. It only surfaces the URL and the test
+  command in its output; the QA sub-agent reaches the Playwright MCP via
+  ui_implementing.app.url, and the e2e suite runs through
+  ui_implementing.e2e.test_command. No ui_implementing.qa.driver key exists —
+  the driver is NAMED in output (so the agent knows to use it), not configured.

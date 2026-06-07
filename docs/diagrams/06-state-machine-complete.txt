@@ -1,8 +1,10 @@
 ================================================================================
-              FORGECTL — Complete State Machine (All 22 States)
+              FORGECTL — Complete State Machine (All 27 States)
 ================================================================================
 
-  4 Phases x Multiple States = 22 Total States
+  5 Phases x Multiple States = 27 Total States
+  (The implementation phase has two variants: implementing and ui_implementing,
+   selected per plan by its kind field — code or ui.)
   State file: .forgectl/state/forgectl-state.json (JSON-backed, atomic writes)
 
 
@@ -139,11 +141,65 @@
                               │                                                     │
                               ▼                                                     ▼
                         PHASE_SHIFT                                           PHASE_SHIFT
-                    (implementing →                                       (implementing →
-                      planning)                                            implementing,
+                    (implementing →                                       (implementation →
+                      planning)                                            implementation,
                           │                                                domain boundary)
-                  ──► planning ORIENT                                  ──► implementing ORIENT
-                      (next domain)                                        (next domain)
+                  ──► planning ORIENT                                  ──► ORIENT, routed by
+                      (next domain)                                        next plan's kind
+                                                                           (implementing or
+                                                                            ui_implementing)
+
+  Note: a plan with kind: ui enters UI_IMPLEMENTING below instead of IMPLEMENTING.
+        Both share this DONE → PHASE_SHIFT exit behaviour.
+
+
+  UI_IMPLEMENTING PHASE        (entered when the plan's kind is "ui")
+  ═══════════════════════════════════════════════════════════════════════════
+
+  Reuses the implementing spine (ORIENT, IMPLEMENT, code EVALUATE, COMMIT) and
+  inserts a QA loop then an e2e loop between EVALUATE and COMMIT. Three loops,
+  three independent round budgets (eval / qa / e2e), each with its own
+  force-accept at max_rounds.
+
+  ORIENT ──► IMPLEMENT ──► IMPLEMENT ──► EVALUATE          ◄── LOOP 1: code
+    ▲         (item 1)      (item N)        │
+    │                                ┌──────┴──────┐
+    │                          PASS>=min      FAIL<max / PASS<min
+    │                          or FAIL>=max         │
+    │                                │              └──► IMPLEMENT (round 2+)
+    │                                ▼
+    │                            QA_TEST ◄───────────┐    ◄── LOOP 2: qa
+    │                                │               │        (Playwright MCP)
+    │                         ┌──────┴──────┐        │
+    │                   PASS>=min      FAIL<max / PASS<min
+    │                   or FAIL>=max         │        │
+    │                         │              ▼        │
+    │                         │          UI_REFINE ───┘
+    │                         ▼          (iterate placement/controls)
+    │                     E2E_AUTHOR                       (bridge: author tests)
+    │                         │
+    │                         ▼
+    │                     E2E_VERIFY ◄──────────┐         ◄── LOOP 3: e2e
+    │                         │                  │            (Playwright runner)
+    │                  ┌──────┴──────┐           │
+    │            PASS>=min      FAIL<max / PASS<min
+    │            or FAIL>=max         │           │
+    │                  │              ▼           │
+    │                  │          E2E_REMEDIATE ──┘
+    │                  ▼          (fix tests or UI, re-run)
+    │               COMMIT
+    │       (items: passed if all 3 loops passed;
+    │        failed if any loop force-accepted)
+    │                  │
+    │           ┌──────┴──────┐
+    └─ more ────┘             │ all done
+       batches               ▼
+                           DONE ──► PHASE_SHIFT (same routing as IMPLEMENTING:
+                                    ui_implementing → planning, or domain
+                                    boundary re-routed by next plan's kind)
+
+  Step list: QA_TEST always writes qa/batch-N-steps.json (the contract feeding
+             E2E_AUTHOR); the QA loop never exits toward E2E_AUTHOR without it.
 
 
 
@@ -159,11 +215,12 @@
   │ Orientation        │ ORIENT                                               │
   │ Selection          │ SELECT                                               │
   │ Research           │ STUDY_SPECS, STUDY_CODE, STUDY_PACKAGES, REVIEW      │
-  │ Creation           │ DRAFT                                                │
+  │ Creation           │ DRAFT, E2E_AUTHOR                                    │
   │ Self-review        │ SELF_REVIEW                                          │
   │ Validation         │ VALIDATE                                             │
-  │ Evaluation         │ EVALUATE, RECONCILE_EVAL                             │
-  │ Iteration          │ REFINE, RECONCILE, RECONCILE_REVIEW                  │
+  │ Evaluation         │ EVALUATE, QA_TEST, E2E_VERIFY, RECONCILE_EVAL        │
+  │ Iteration          │ REFINE, UI_REFINE, E2E_REMEDIATE, RECONCILE,         │
+  │                    │ RECONCILE_REVIEW                                     │
   │ Execution          │ IMPLEMENT                                            │
   │ Acceptance         │ ACCEPT, COMMIT                                       │
   │ Terminal           │ DONE, COMPLETE                                       │
@@ -173,27 +230,35 @@
   Phase availability:
 
   ┌──────────────────┬──────────────────────────────────────────────────────────┐
-  │ State             │ Specifying  Gen-Plan-Q  Planning  Implementing          │
+  │ State             │ Spec   GenPQ   Plan   Impl   UI-Impl                     │
   ├──────────────────┼──────────────────────────────────────────────────────────┤
-  │ ORIENT            │     x           x          x           x                │
-  │ SELECT            │     x                                                   │
-  │ DRAFT             │     x                      x                            │
-  │ SELF_REVIEW       │                             x                           │
-  │ EVALUATE          │     x                      x           x                │
-  │ REFINE            │     x                      x                            │
-  │ ACCEPT            │     x                      x                            │
-  │ DONE              │     x                      x*          x                │
-  │ RECONCILE         │     x                                                   │
-  │ RECONCILE_*       │     x                                                   │
-  │ COMPLETE          │     x                                                   │
-  │ PHASE_SHIFT       │     x           x           x           x               │
-  │ STUDY_SPECS       │                             x                           │
-  │ STUDY_CODE        │                             x                           │
-  │ STUDY_PKGS        │                             x                           │
-  │ REVIEW            │                             x                           │
-  │ VALIDATE          │                             x                           │
-  │ IMPLEMENT         │                                         x               │
-  │ COMMIT            │                                         x               │
+  │ ORIENT            │  x       x      x      x        x                        │
+  │ SELECT            │  x                                                       │
+  │ DRAFT             │  x              x                                        │
+  │ SELF_REVIEW       │                 x                                        │
+  │ EVALUATE          │  x              x      x        x                        │
+  │ REFINE            │  x              x                                        │
+  │ ACCEPT            │  x              x                                        │
+  │ DONE              │  x              x*     x        x                        │
+  │ RECONCILE         │  x                                                       │
+  │ RECONCILE_*       │  x                                                       │
+  │ COMPLETE          │  x                                                       │
+  │ PHASE_SHIFT       │  x       x      x      x        x                        │
+  │ STUDY_SPECS       │                 x                                        │
+  │ STUDY_CODE        │                 x                                        │
+  │ STUDY_PKGS        │                 x                                        │
+  │ REVIEW            │                 x                                        │
+  │ VALIDATE          │                 x                                        │
+  │ IMPLEMENT         │                        x        x                        │
+  │ COMMIT            │                        x        x                        │
+  │ QA_TEST           │                                 x   ◄ UI-only            │
+  │ UI_REFINE         │                                 x   ◄ UI-only            │
+  │ E2E_AUTHOR        │                                 x   ◄ UI-only            │
+  │ E2E_VERIFY        │                                 x   ◄ UI-only            │
+  │ E2E_REMEDIATE     │                                 x   ◄ UI-only            │
   └──────────────────┴──────────────────────────────────────────────────────────┘
 
   * Planning DONE only reachable when plan_all_before_implementing: true
+  Impl = implementing (kind: code).  UI-Impl = ui_implementing (kind: ui).
+  Both implementation variants share ORIENT, IMPLEMENT, EVALUATE, COMMIT, DONE,
+  PHASE_SHIFT; ui_implementing adds the five UI-only states.

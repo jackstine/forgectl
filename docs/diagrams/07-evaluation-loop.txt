@@ -6,6 +6,10 @@
   eval.min_rounds and eval.max_rounds (phase-scoped in .forgectl/config)
   to balance quality with progress.
 
+  The ui_implementing phase runs THREE of these loops in series per batch —
+  code (eval), QA (qa), and e2e — each with its OWN min_rounds/max_rounds
+  budget and its own force-accept boundary. See the dedicated section below.
+
 
   ═══════════════════════════════════════════════════════════════════════════
   GENERIC EVALUATION LOOP
@@ -134,12 +138,59 @@
 
 
   ═══════════════════════════════════════════════════════════════════════════
+  UI_IMPLEMENTING — THREE LOOPS IN SERIES  (per batch)
+  ═══════════════════════════════════════════════════════════════════════════
+
+  Each batch passes three sequential gates. Each gate is an instance of the
+  GENERIC EVALUATION LOOP above, with its own counter and its own budget.
+
+    IMPLEMENT(s) ─► [ LOOP 1: code ] ─► [ LOOP 2: qa ] ─► [ LOOP 3: e2e ] ─► COMMIT
+                     eval_round           qa_round          e2e_round
+                     impl-eval.md         ui-qa-eval.md     ui-e2e-eval.md
+                     EVALUATE             QA_TEST ⟲         E2E_AUTHOR →
+                     (verdict)            UI_REFINE         E2E_VERIFY ⟲ E2E_REMEDIATE
+
+  Budgets (independent, phase-scoped):
+    [ui_implementing.eval]  min_rounds / max_rounds   code correctness
+    [ui_implementing.qa]    min_rounds / max_rounds   placement & controls
+    [ui_implementing.e2e]   min_rounds / max_rounds   end-to-end verification
+
+  ACCEPT vs force-accept work exactly as the DECISION MATRIX above, but PER LOOP:
+  a loop terminates on PASS at >= its min, or force-accepts on FAIL at >= its max.
+  An item is "passed" only if ALL THREE loops passed within budget; if ANY loop
+  force-accepted, the item is "failed". Status is decided at COMMIT.
+
+  QA EVALUATION CRITERIA  (ui-qa-eval.md — drives the Playwright MCP)
+  ┌────┬──────────────────────┬────────────────────────────────────────────┐
+  │  # │ Criterion             │ What the QA sub-agent checks              │
+  ├────┼──────────────────────┼────────────────────────────────────────────┤
+  │  1 │ Placement             │ Layout/structure via accessibility snapshot│
+  │  2 │ Controls              │ Each control click/type/fill/select works  │
+  │  3 │ Runtime health        │ Console free of errors while exercising UI │
+  │  4 │ Reachability          │ App launches and serves at the configured url│
+  │  5 │ Step-list output      │ Emits e2e scenarios (always written)       │
+  └────┴──────────────────────┴────────────────────────────────────────────┘
+
+  E2E VERIFICATION CRITERIA  (ui-e2e-eval.md — Playwright test runner)
+  ┌────┬──────────────────────┬────────────────────────────────────────────┐
+  │  # │ Criterion             │ What the e2e sub-agent checks             │
+  ├────┼──────────────────────┼────────────────────────────────────────────┤
+  │  1 │ Tests run             │ Authored Playwright tests execute          │
+  │  2 │ Tests pass            │ The suite passes via the test command      │
+  │  3 │ Coverage              │ Tests cover the QA step-list scenarios     │
+  └────┴──────────────────────┴────────────────────────────────────────────┘
+  (Zero-scenario step list → E2E_VERIFY verdict PASS, vacuously.)
+
+
+  ═══════════════════════════════════════════════════════════════════════════
   eval_mode CONFIGURATION
   ═══════════════════════════════════════════════════════════════════════════
 
   The per-phase eval_mode config flag controls how an eval sub-agent records its
   findings and how the engineer applies them. It has three values.
-  Configured at: [specifying.eval], [planning.eval], [implementing.eval]
+  Configured at: [specifying.eval], [planning.eval], [implementing.eval],
+  and (one per loop) [ui_implementing.eval], [ui_implementing.qa],
+  [ui_implementing.e2e].
   (Reconciliation and cross-reference eval inherit specifying.eval's mode.)
 
   eval_mode: "report"  (default for new sessions)
@@ -196,3 +247,12 @@
   Specifying:    <domain>/specs/.eval/batch-N-rN.md
   Planning:      <domain>/.forge_workspace/implementation_plan/evals/round-N.md
   Implementing:  <domain>/.forge_workspace/implementation_plan/evals/batch-N-round-M.md
+
+  UI_IMPLEMENTING (three loops, three report trees):
+    code (EVALUATE)   <domain>/.forgectl_workspace/ui_plan/evals/batch-N-round-M.md
+    qa   (QA_TEST)    <domain>/.forgectl_workspace/ui_plan/qa/batch-N-round-M.md
+                      + qa/batch-N-steps.json   (step list, always written)
+                      + qa/batch-N-round-M-*.png (screenshot evidence)
+    e2e  (E2E_VERIFY) <domain>/.forgectl_workspace/ui_plan/e2e/batch-N-round-M.md
+    Authored e2e tests live in ui_implementing.e2e.test_dir (permanent assets),
+    not the workspace. Sub-agents register all reports via forgectl handoff.
