@@ -597,6 +597,66 @@ type ImplementingState struct {
 	PlanQueue         []PlanQueueEntry `json:"plan_queue,omitempty"`
 }
 
+// --- UI implementing phase state ---
+// The ui_implementing phase carries its own state structs (not BatchState/
+// ImplementingState) so each batch can track three independent loops — code-eval,
+// QA, and e2e — each with its own round counter, evaluation history, and
+// force-accept flag. See Round Tracking in ui-batch-implementation.md.
+
+// UIBatchState tracks the current ui_implementing batch across all three loops.
+type UIBatchState struct {
+	Items            []string `json:"items"`
+	CurrentItemIndex int      `json:"current_item_index"`
+	// Per-loop round counters, reset to 0 at ORIENT and incremented per the
+	// transition table. The three loops never share a round namespace.
+	EvalRound int `json:"eval_round"`
+	QARound   int `json:"qa_round"`
+	E2ERound  int `json:"e2e_round"`
+	// Per-loop ordered evaluation histories.
+	Evals    []EvalRecord `json:"evals,omitempty"`     // code-eval loop
+	QAEvals  []EvalRecord `json:"qa_evals,omitempty"`  // QA loop
+	E2EEvals []EvalRecord `json:"e2e_evals,omitempty"` // e2e verification loop
+	// Artifacts the current evaluator round's sub-agent has handed off for review
+	// (latest hand-off replaces prior).
+	HandedOffArtifacts []string `json:"handed_off_artifacts,omitempty"`
+	// Per-loop force-accept flags, set when a loop exhausts its max_rounds on a
+	// FAIL verdict. COMMIT marks items failed iff any flag is set.
+	CodeForceAccepted bool `json:"code_force_accepted,omitempty"`
+	QAForceAccepted   bool `json:"qa_force_accepted,omitempty"`
+	E2EForceAccepted  bool `json:"e2e_force_accepted,omitempty"`
+}
+
+// UIBatchHistory is a completed ui_implementing batch record. The three per-loop
+// round totals and histories feed the DONE summary and status --verbose.
+type UIBatchHistory struct {
+	BatchNumber int          `json:"batch_number"`
+	Items       []string     `json:"items"`
+	EvalRounds  int          `json:"eval_rounds"`
+	QARounds    int          `json:"qa_rounds"`
+	E2ERounds   int          `json:"e2e_rounds"`
+	Evals       []EvalRecord `json:"evals,omitempty"`
+	QAEvals     []EvalRecord `json:"qa_evals,omitempty"`
+	E2EEvals    []EvalRecord `json:"e2e_evals,omitempty"`
+}
+
+// UILayerHistory is the history for a completed ui_implementing layer.
+type UILayerHistory struct {
+	LayerID string           `json:"layer_id"`
+	Batches []UIBatchHistory `json:"batches,omitempty"`
+}
+
+// UIImplementingState holds ui_implementing phase data. It mirrors
+// ImplementingState but with UI-specific batch/history types.
+type UIImplementingState struct {
+	CurrentLayer      *LayerRef        `json:"current_layer"`
+	BatchNumber       int              `json:"batch_number"`
+	CurrentBatch      *UIBatchState    `json:"current_batch"`
+	LayerHistory      []UILayerHistory `json:"layer_history,omitempty"`
+	CurrentPlanFile   string           `json:"current_plan_file,omitempty"`
+	CurrentPlanDomain string           `json:"current_plan_domain,omitempty"`
+	PlanQueue         []PlanQueueEntry `json:"plan_queue,omitempty"`
+}
+
 // --- Reverse engineering phase state ---
 
 // ReverseEngineeringInitInput is the init input file for the reverse_engineering phase.
@@ -662,6 +722,7 @@ type ForgeState struct {
 	GeneratePlanningQueue *GeneratePlanningQueueState `json:"generate_planning_queue,omitempty"`
 	Planning              *PlanningState              `json:"planning"`
 	Implementing          *ImplementingState          `json:"implementing"`
+	UIImplementing        *UIImplementingState        `json:"ui_implementing,omitempty"`
 	ReverseEngineering    *ReverseEngineeringState    `json:"reverse_engineering,omitempty"`
 }
 

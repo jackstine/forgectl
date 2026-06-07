@@ -171,6 +171,109 @@ max_files      = 10
 	}
 }
 
+// Functional: a [ui_implementing] block with app/eval/qa/e2e values overrides the
+// corresponding ForgeConfig fields after load, including the e2e loop's round
+// fields sitting alongside test_command/test_dir.
+func TestLoadConfigUIImplementingToml(t *testing.T) {
+	dir := t.TempDir()
+	forgectlDir := filepath.Join(dir, ".forgectl")
+	if err := os.MkdirAll(forgectlDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	tomlContent := `
+[ui_implementing]
+batch           = 2
+commit_strategy = "all"
+
+[ui_implementing.app]
+launch_command       = "npm run dev"
+url                  = "http://localhost:5173"
+ready_timeout_seconds = 60
+
+[ui_implementing.eval]
+min_rounds = 2
+max_rounds = 5
+model      = "sonnet"
+
+[ui_implementing.qa]
+min_rounds = 1
+max_rounds = 4
+eval_mode  = "direct"
+
+[ui_implementing.e2e]
+min_rounds   = 1
+max_rounds   = 2
+test_command = "npx playwright test"
+test_dir     = "tests/e2e"
+`
+	if err := os.WriteFile(filepath.Join(forgectlDir, "config"), []byte(tomlContent), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := LoadConfig(dir)
+	if err != nil {
+		t.Fatalf("LoadConfig: %v", err)
+	}
+
+	ui := cfg.UIImplementing
+	if ui.Batch != 2 {
+		t.Errorf("ui_implementing.batch: got %d, want 2", ui.Batch)
+	}
+	if ui.CommitStrategy != "all" {
+		t.Errorf("ui_implementing.commit_strategy: got %q, want %q", ui.CommitStrategy, "all")
+	}
+	if ui.App.LaunchCommand != "npm run dev" || ui.App.URL != "http://localhost:5173" {
+		t.Errorf("ui_implementing.app override failed: %+v", ui.App)
+	}
+	if ui.App.ReadyTimeoutSeconds != 60 {
+		t.Errorf("ui_implementing.app.ready_timeout_seconds: got %d, want 60", ui.App.ReadyTimeoutSeconds)
+	}
+	if ui.Eval.MinRounds != 2 || ui.Eval.MaxRounds != 5 || ui.Eval.Model != "sonnet" {
+		t.Errorf("ui_implementing.eval override failed: %+v", ui.Eval)
+	}
+	if ui.QA.MaxRounds != 4 || ui.QA.EvalMode != "direct" {
+		t.Errorf("ui_implementing.qa override failed: %+v", ui.QA)
+	}
+	if ui.E2E.MinRounds != 1 || ui.E2E.MaxRounds != 2 {
+		t.Errorf("ui_implementing.e2e round fields override failed: %+v", ui.E2E.EvalConfig)
+	}
+	if ui.E2E.TestCommand != "npx playwright test" || ui.E2E.TestDir != "tests/e2e" {
+		t.Errorf("ui_implementing.e2e test fields override failed: %+v", ui.E2E)
+	}
+}
+
+// Edge case: when [ui_implementing] is absent from config, all UIImplementing
+// fields fall back to DefaultForgeConfig values.
+func TestLoadConfigUIImplementingDefaults(t *testing.T) {
+	dir := t.TempDir()
+	forgectlDir := filepath.Join(dir, ".forgectl")
+	if err := os.MkdirAll(forgectlDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	// A config with no [ui_implementing] block at all.
+	if err := os.WriteFile(filepath.Join(forgectlDir, "config"), []byte("[implementing]\nbatch = 3\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := LoadConfig(dir)
+	if err != nil {
+		t.Fatalf("LoadConfig: %v", err)
+	}
+
+	want := DefaultForgeConfig().UIImplementing
+	got := cfg.UIImplementing
+	if got.Batch != want.Batch || got.CommitStrategy != want.CommitStrategy {
+		t.Errorf("ui_implementing defaults not applied: got batch=%d strategy=%q", got.Batch, got.CommitStrategy)
+	}
+	if got.App.ReadyTimeoutSeconds != want.App.ReadyTimeoutSeconds {
+		t.Errorf("ui_implementing.app.ready_timeout_seconds default: got %d, want %d", got.App.ReadyTimeoutSeconds, want.App.ReadyTimeoutSeconds)
+	}
+	if got.Eval.MaxRounds != want.Eval.MaxRounds || got.QA.Model != want.QA.Model || got.E2E.EvalMode != want.E2E.EvalMode {
+		t.Errorf("ui_implementing loop defaults not applied: eval=%+v qa=%+v e2e=%+v", got.Eval, got.QA, got.E2E.EvalConfig)
+	}
+}
+
 // TestLoadConfigInvalidToml verifies an error is returned for malformed TOML.
 func TestLoadConfigInvalidToml(t *testing.T) {
 	dir := t.TempDir()
@@ -380,6 +483,78 @@ func TestValidateConfigBatchBelowOne(t *testing.T) {
 	}
 	if !found {
 		t.Errorf("expected specifying.batch violation, got: %v", errs)
+	}
+}
+
+// Rejection: ValidateConfig rejects ui_implementing.batch < 1.
+func TestValidateConfigUIImplementingBatchBelowOne(t *testing.T) {
+	cfg := DefaultForgeConfig()
+	cfg.UIImplementing.Batch = 0
+	errs := ValidateConfig(cfg)
+	found := false
+	for _, e := range errs {
+		if strings.Contains(e, "ui_implementing.batch") {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("expected ui_implementing.batch violation, got: %v", errs)
+	}
+}
+
+// Rejection: ValidateConfig rejects min_rounds > max_rounds for each of the eval,
+// qa, and e2e loops, naming the offending loop.
+func TestValidateConfigUIImplementingMinExceedsMax(t *testing.T) {
+	for _, loop := range []string{"eval", "qa", "e2e"} {
+		t.Run(loop, func(t *testing.T) {
+			cfg := DefaultForgeConfig()
+			switch loop {
+			case "eval":
+				cfg.UIImplementing.Eval.MinRounds = 5
+				cfg.UIImplementing.Eval.MaxRounds = 3
+			case "qa":
+				cfg.UIImplementing.QA.MinRounds = 5
+				cfg.UIImplementing.QA.MaxRounds = 3
+			case "e2e":
+				cfg.UIImplementing.E2E.MinRounds = 5
+				cfg.UIImplementing.E2E.MaxRounds = 3
+			}
+			errs := ValidateConfig(cfg)
+			want := "ui_implementing." + loop + ".min_rounds"
+			found := false
+			for _, e := range errs {
+				if strings.Contains(e, want) {
+					found = true
+				}
+			}
+			if !found {
+				t.Errorf("expected violation naming %s, got: %v", want, errs)
+			}
+		})
+	}
+}
+
+// Rejection: ValidateConfig rejects an invalid ui_implementing commit_strategy and
+// an invalid loop eval_mode.
+func TestValidateConfigUIImplementingBadStrategyAndEvalMode(t *testing.T) {
+	cfg := DefaultForgeConfig()
+	cfg.UIImplementing.CommitStrategy = "bogus"
+	cfg.UIImplementing.QA.EvalMode = "loud"
+	errs := ValidateConfig(cfg)
+	var foundStrategy, foundMode bool
+	for _, e := range errs {
+		if strings.Contains(e, "ui_implementing.commit_strategy") {
+			foundStrategy = true
+		}
+		if strings.Contains(e, "ui_implementing.qa.eval_mode") {
+			foundMode = true
+		}
+	}
+	if !foundStrategy {
+		t.Errorf("expected ui_implementing.commit_strategy violation, got: %v", errs)
+	}
+	if !foundMode {
+		t.Errorf("expected ui_implementing.qa.eval_mode violation, got: %v", errs)
 	}
 }
 

@@ -190,7 +190,8 @@
           "passes": false
         }
       ],
-      "passes": "pending"
+      "passes": "passed",
+      "rounds": 1
     },
     {
       "id": "config.validate",
@@ -233,7 +234,8 @@
           "passes": false
         }
       ],
-      "passes": "pending"
+      "passes": "passed",
+      "rounds": 1
     },
     {
       "id": "types.kind",
@@ -311,7 +313,8 @@
           "passes": false
         }
       ],
-      "passes": "pending"
+      "passes": "passed",
+      "rounds": 1
     },
     {
       "id": "evaluators.embed",

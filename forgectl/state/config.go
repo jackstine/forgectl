@@ -90,6 +90,32 @@ type tomlImplementingConfig struct {
 	Eval           tomlEvalConfig `toml:"eval"`
 }
 
+// tomlUIAppConfig mirrors UIAppConfig for TOML decoding.
+type tomlUIAppConfig struct {
+	LaunchCommand       string `toml:"launch_command"`
+	URL                 string `toml:"url"`
+	ReadyTimeoutSeconds int    `toml:"ready_timeout_seconds"`
+}
+
+// tomlUIE2EConfig mirrors UIE2EConfig for TOML decoding. tomlEvalConfig is
+// embedded so the loop's round fields sit at the same [ui_implementing.e2e]
+// level as test_command/test_dir.
+type tomlUIE2EConfig struct {
+	tomlEvalConfig        // embedded: min/max rounds, model, type, count, eval_mode
+	TestCommand    string `toml:"test_command"`
+	TestDir        string `toml:"test_dir"`
+}
+
+// tomlUIImplementingConfig mirrors UIImplementingConfig for TOML decoding.
+type tomlUIImplementingConfig struct {
+	Batch          int             `toml:"batch"`
+	CommitStrategy string          `toml:"commit_strategy"`
+	App            tomlUIAppConfig `toml:"app"`
+	Eval           tomlEvalConfig  `toml:"eval"`
+	QA             tomlEvalConfig  `toml:"qa"`
+	E2E            tomlUIE2EConfig `toml:"e2e"`
+}
+
 // tomlREReconcileConfig mirrors REReconcileConfig for TOML decoding.
 type tomlREReconcileConfig struct {
 	MinRounds       int             `toml:"min_rounds"`
@@ -133,11 +159,12 @@ type tomlGeneralConfig struct {
 
 // tomlForgeConfig is the intermediate struct for TOML decoding of .forgectl/config.
 type tomlForgeConfig struct {
-	General      tomlGeneralConfig      `toml:"general"`
-	Domains      []tomlDomainConfig     `toml:"domains"`
-	Specifying   tomlSpecifyingConfig   `toml:"specifying"`
-	Planning     tomlPlanningConfig     `toml:"planning"`
-	Implementing tomlImplementingConfig `toml:"implementing"`
+	General        tomlGeneralConfig        `toml:"general"`
+	Domains        []tomlDomainConfig       `toml:"domains"`
+	Specifying     tomlSpecifyingConfig     `toml:"specifying"`
+	Planning       tomlPlanningConfig       `toml:"planning"`
+	Implementing   tomlImplementingConfig   `toml:"implementing"`
+	UIImplementing tomlUIImplementingConfig `toml:"ui_implementing"`
 
 	ReverseEngineering tomlReverseEngineeringConfig `toml:"reverse_engineering"`
 
@@ -268,6 +295,32 @@ func mergeTomlConfig(cfg *ForgeConfig, raw *tomlForgeConfig) {
 		cfg.Implementing.CommitStrategy = raw.Implementing.CommitStrategy
 	}
 	mergeEvalConfig(&cfg.Implementing.Eval, &raw.Implementing.Eval)
+
+	// UI Implementing
+	if raw.UIImplementing.Batch > 0 {
+		cfg.UIImplementing.Batch = raw.UIImplementing.Batch
+	}
+	if raw.UIImplementing.CommitStrategy != "" {
+		cfg.UIImplementing.CommitStrategy = raw.UIImplementing.CommitStrategy
+	}
+	if raw.UIImplementing.App.LaunchCommand != "" {
+		cfg.UIImplementing.App.LaunchCommand = raw.UIImplementing.App.LaunchCommand
+	}
+	if raw.UIImplementing.App.URL != "" {
+		cfg.UIImplementing.App.URL = raw.UIImplementing.App.URL
+	}
+	if raw.UIImplementing.App.ReadyTimeoutSeconds > 0 {
+		cfg.UIImplementing.App.ReadyTimeoutSeconds = raw.UIImplementing.App.ReadyTimeoutSeconds
+	}
+	mergeEvalConfig(&cfg.UIImplementing.Eval, &raw.UIImplementing.Eval)
+	mergeEvalConfig(&cfg.UIImplementing.QA, &raw.UIImplementing.QA)
+	mergeEvalConfig(&cfg.UIImplementing.E2E.EvalConfig, &raw.UIImplementing.E2E.tomlEvalConfig)
+	if raw.UIImplementing.E2E.TestCommand != "" {
+		cfg.UIImplementing.E2E.TestCommand = raw.UIImplementing.E2E.TestCommand
+	}
+	if raw.UIImplementing.E2E.TestDir != "" {
+		cfg.UIImplementing.E2E.TestDir = raw.UIImplementing.E2E.TestDir
+	}
 
 	// Reverse engineering
 	mergeReverseEngineeringConfig(&cfg.ReverseEngineering, &raw.ReverseEngineering)
@@ -449,6 +502,9 @@ func ValidateConfig(cfg ForgeConfig) []string {
 	if cfg.Implementing.CommitStrategy != "" && !validStrategies[cfg.Implementing.CommitStrategy] {
 		errs = append(errs, fmt.Sprintf("implementing.commit_strategy: invalid value %q", cfg.Implementing.CommitStrategy))
 	}
+	if cfg.UIImplementing.CommitStrategy != "" && !validStrategies[cfg.UIImplementing.CommitStrategy] {
+		errs = append(errs, fmt.Sprintf("ui_implementing.commit_strategy: invalid value %q", cfg.UIImplementing.CommitStrategy))
+	}
 
 	validEvalModes := map[string]bool{
 		"report":         true,
@@ -466,6 +522,17 @@ func ValidateConfig(cfg ForgeConfig) []string {
 	if cfg.Implementing.Eval.EvalMode != "" && !validEvalModes[cfg.Implementing.Eval.EvalMode] {
 		errs = append(errs, fmt.Sprintf("implementing.eval.eval_mode: invalid value %q", cfg.Implementing.Eval.EvalMode))
 	}
+	// ui_implementing carries three independent eval loops, each with its own eval_mode.
+	uiLoops := map[string]EvalConfig{
+		"eval": cfg.UIImplementing.Eval,
+		"qa":   cfg.UIImplementing.QA,
+		"e2e":  cfg.UIImplementing.E2E.EvalConfig,
+	}
+	for _, name := range []string{"eval", "qa", "e2e"} {
+		if mode := uiLoops[name].EvalMode; mode != "" && !validEvalModes[mode] {
+			errs = append(errs, fmt.Sprintf("ui_implementing.%s.eval_mode: invalid value %q", name, mode))
+		}
+	}
 
 	if cfg.Specifying.Batch < 1 {
 		errs = append(errs, "specifying.batch must be >= 1")
@@ -475,6 +542,9 @@ func ValidateConfig(cfg ForgeConfig) []string {
 	}
 	if cfg.Implementing.Batch < 1 {
 		errs = append(errs, "implementing.batch must be >= 1")
+	}
+	if cfg.UIImplementing.Batch < 1 {
+		errs = append(errs, "ui_implementing.batch must be >= 1")
 	}
 	if cfg.Logs.RetentionDays < 0 {
 		errs = append(errs, "logs.retention_days must be >= 0")
@@ -491,6 +561,11 @@ func ValidateConfig(cfg ForgeConfig) []string {
 	}
 	if cfg.Implementing.Eval.MinRounds > cfg.Implementing.Eval.MaxRounds {
 		errs = append(errs, "implementing.eval.min_rounds cannot exceed max_rounds")
+	}
+	for _, name := range []string{"eval", "qa", "e2e"} {
+		if uiLoops[name].MinRounds > uiLoops[name].MaxRounds {
+			errs = append(errs, fmt.Sprintf("ui_implementing.%s.min_rounds cannot exceed max_rounds", name))
+		}
 	}
 	if cfg.ReverseEngineering.Reconcile.MinRounds > cfg.ReverseEngineering.Reconcile.MaxRounds {
 		errs = append(errs, "reverse_engineering.reconcile.min_rounds cannot exceed max_rounds")

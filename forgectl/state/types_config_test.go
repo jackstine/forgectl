@@ -2,6 +2,7 @@ package state
 
 import (
 	"encoding/json"
+	"reflect"
 	"testing"
 )
 
@@ -379,5 +380,86 @@ func TestUIImplementingConfigJSONRoundTrip(t *testing.T) {
 	}
 	if got.E2E.TestDir != original.E2E.TestDir || got.E2E.MaxRounds != original.E2E.MaxRounds {
 		t.Errorf("e2e round-trip mismatch: got %+v", got.E2E)
+	}
+}
+
+// Functional: NewUIImplementingState returns a zero-valued UIImplementingState
+// (nil current_batch, batch_number 0) ready for ORIENT.
+func TestNewUIImplementingState(t *testing.T) {
+	s := NewUIImplementingState()
+	if s == nil {
+		t.Fatal("NewUIImplementingState returned nil")
+	}
+	if s.CurrentBatch != nil {
+		t.Errorf("current_batch must be nil at construction, got %+v", s.CurrentBatch)
+	}
+	if s.BatchNumber != 0 {
+		t.Errorf("batch_number must be 0 at construction, got %d", s.BatchNumber)
+	}
+	if s.CurrentLayer != nil {
+		t.Errorf("current_layer must be nil at construction, got %+v", s.CurrentLayer)
+	}
+	if s.LayerHistory == nil {
+		t.Error("layer_history should be initialized (non-nil empty slice)")
+	}
+}
+
+// Functional: a ForgeState carrying a populated UIImplementing with all three round
+// counters and histories round-trips through Save/Load unchanged.
+func TestForgeStateUIImplementingSaveLoadRoundTrip(t *testing.T) {
+	dir := t.TempDir()
+
+	original := &ForgeState{
+		Phase:          PhaseUIImplementing,
+		State:          StateE2EVerify,
+		StartedAtPhase: PhaseUIImplementing,
+		Config:         DefaultForgeConfig(),
+		UIImplementing: &UIImplementingState{
+			CurrentLayer: &LayerRef{ID: "L0", Name: "Foundations"},
+			BatchNumber:  2,
+			CurrentBatch: &UIBatchState{
+				Items:              []string{"a", "b"},
+				CurrentItemIndex:   1,
+				EvalRound:          2,
+				QARound:            3,
+				E2ERound:           1,
+				Evals:              []EvalRecord{{Round: 1, Verdict: "FAIL", EvalReport: "evals/code-r1.md"}, {Round: 2, Verdict: "PASS"}},
+				QAEvals:            []EvalRecord{{Round: 1, Verdict: "PASS", EvalReport: "evals/qa-r1.md"}},
+				E2EEvals:           []EvalRecord{{Round: 1, Verdict: "PASS"}},
+				HandedOffArtifacts: []string{"qa/batch-2-steps.json"},
+				CodeForceAccepted:  true,
+				QAForceAccepted:    false,
+				E2EForceAccepted:   false,
+			},
+			LayerHistory: []UILayerHistory{
+				{
+					LayerID: "L0",
+					Batches: []UIBatchHistory{
+						{
+							BatchNumber: 1,
+							Items:       []string{"x"},
+							EvalRounds:  1, QARounds: 2, E2ERounds: 1,
+							Evals:    []EvalRecord{{Round: 1, Verdict: "PASS"}},
+							QAEvals:  []EvalRecord{{Round: 1, Verdict: "FAIL"}, {Round: 2, Verdict: "PASS"}},
+							E2EEvals: []EvalRecord{{Round: 1, Verdict: "PASS"}},
+						},
+					},
+				},
+			},
+			CurrentPlanFile:   "forgectl/.forge_workspace/implementation_plan/plan.json",
+			CurrentPlanDomain: "forgectl",
+		},
+	}
+
+	if err := Save(dir, original); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+	loaded, err := Load(dir)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+
+	if !reflect.DeepEqual(original.UIImplementing, loaded.UIImplementing) {
+		t.Errorf("UIImplementing round-trip mismatch:\n original = %+v\n loaded  = %+v", original.UIImplementing, loaded.UIImplementing)
 	}
 }

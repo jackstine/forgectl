@@ -200,6 +200,14 @@ func NewImplementingState() *ImplementingState {
 	}
 }
 
+// NewUIImplementingState creates initial ui_implementing state, ready for ORIENT
+// (no batch selected yet, batch number 0).
+func NewUIImplementingState() *UIImplementingState {
+	return &UIImplementingState{
+		LayerHistory: []UILayerHistory{},
+	}
+}
+
 // NewReverseEngineeringState creates initial reverse_engineering state. The
 // domain index is 1-based; the queue and per-domain reconcile map start empty.
 func NewReverseEngineeringState(concept string, domains []string) *ReverseEngineeringState {
