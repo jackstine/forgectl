@@ -3344,3 +3344,139 @@ func TestAdvanceUIQAStepListAbsentRejected(t *testing.T) {
 		t.Error("QAForceAccepted must not be set when the exit was rejected")
 	}
 }
+
+// uiAtE2EAuthor drives a fresh ui state through code-eval and QA to E2E_AUTHOR
+// with a step list of the given scenario count.
+func uiAtE2EAuthor(t *testing.T, dir string, e2eMin, e2eMax, scenarios int) *ForgeState {
+	t.Helper()
+	s := uiAtQATest(t, dir, 1, 3)
+	s.Config.UIImplementing.E2E.MinRounds = e2eMin
+	s.Config.UIImplementing.E2E.MaxRounds = e2eMax
+	s.Config.UIImplementing.E2E.EvalMode = "conversational"
+	writeQAStepList(t, s, dir, s.UIImplementing.BatchNumber, scenarios)
+	if err := Advance(s, AdvanceInput{Verdict: "PASS"}, dir); err != nil { // QA PASS → E2E_AUTHOR
+		t.Fatalf("QA PASS: %v", err)
+	}
+	if s.State != StateE2EAuthor {
+		t.Fatalf("setup: expected E2E_AUTHOR, got %s", s.State)
+	}
+	return s
+}
+
+// Functional: E2E_AUTHOR advances to E2E_VERIFY (e2e_round 1); E2E_VERIFY FAIL
+// below e2e.max transitions to E2E_REMEDIATE; E2E_REMEDIATE returns to E2E_VERIFY
+// with e2e_round incremented.
+func TestAdvanceUIE2EAuthorVerifyRemediate(t *testing.T) {
+	dir := t.TempDir()
+	s := uiAtE2EAuthor(t, dir, 1, 3, 3)
+	if err := Advance(s, AdvanceInput{}, dir); err != nil { // E2E_AUTHOR → E2E_VERIFY
+		t.Fatalf("E2E_AUTHOR advance: %v", err)
+	}
+	if s.State != StateE2EVerify {
+		t.Fatalf("expected E2E_VERIFY, got %s", s.State)
+	}
+	if s.UIImplementing.CurrentBatch.E2ERound != 1 {
+		t.Errorf("e2e_round should be 1 on E2E_VERIFY entry, got %d", s.UIImplementing.CurrentBatch.E2ERound)
+	}
+	if err := Advance(s, AdvanceInput{Verdict: "FAIL"}, dir); err != nil { // FAIL < max → REMEDIATE
+		t.Fatalf("E2E_VERIFY FAIL: %v", err)
+	}
+	if s.State != StateE2ERemediate {
+		t.Fatalf("expected E2E_REMEDIATE, got %s", s.State)
+	}
+	if err := Advance(s, AdvanceInput{}, dir); err != nil { // REMEDIATE → VERIFY
+		t.Fatalf("E2E_REMEDIATE advance: %v", err)
+	}
+	if s.State != StateE2EVerify {
+		t.Fatalf("expected E2E_VERIFY, got %s", s.State)
+	}
+	if s.UIImplementing.CurrentBatch.E2ERound != 2 {
+		t.Errorf("e2e_round should be 2 after REMEDIATE→VERIFY, got %d", s.UIImplementing.CurrentBatch.E2ERound)
+	}
+}
+
+// Functional: E2E_VERIFY PASS at >= e2e.min with no loop force-accepted transitions
+// to COMMIT with items passed; FAIL at e2e.max transitions to COMMIT with items
+// failed.
+func TestAdvanceUIE2EPassAndForceToCommit(t *testing.T) {
+	dir := t.TempDir()
+
+	// Clean PASS → COMMIT, items passed.
+	s := uiAtE2EAuthor(t, dir, 1, 3, 2)
+	Advance(s, AdvanceInput{}, dir) // → E2E_VERIFY (round 1)
+	if err := Advance(s, AdvanceInput{Verdict: "PASS"}, dir); err != nil {
+		t.Fatalf("E2E PASS: %v", err)
+	}
+	if s.State != StateCommit {
+		t.Fatalf("expected COMMIT, got %s", s.State)
+	}
+	if s.UIImplementing.CurrentBatch.E2EForceAccepted {
+		t.Error("E2EForceAccepted must be false on clean PASS")
+	}
+	// Run COMMIT and confirm items passed.
+	Advance(s, AdvanceInput{}, dir)
+	plan, _ := loadPlan(s, dir)
+	if findItem(plan, "a").Passes != "passed" {
+		t.Errorf("clean e2e PASS should yield passed items, got %q", findItem(plan, "a").Passes)
+	}
+
+	// FAIL to e2e.max → force-accept → COMMIT, items failed.
+	s2 := uiAtE2EAuthor(t, dir, 1, 2, 2)                                    // e2e max=2
+	Advance(s2, AdvanceInput{}, dir)                                        // → E2E_VERIFY round 1
+	Advance(s2, AdvanceInput{Verdict: "FAIL"}, dir)                         // round 1 FAIL <max → REMEDIATE
+	Advance(s2, AdvanceInput{}, dir)                                        // REMEDIATE → VERIFY round 2
+	if err := Advance(s2, AdvanceInput{Verdict: "FAIL"}, dir); err != nil { // round 2 FAIL >=max → force COMMIT
+		t.Fatalf("E2E FAIL force: %v", err)
+	}
+	if s2.State != StateCommit {
+		t.Fatalf("expected COMMIT after e2e.max FAIL, got %s", s2.State)
+	}
+	if !s2.UIImplementing.CurrentBatch.E2EForceAccepted {
+		t.Error("E2EForceAccepted should be true after force-accept at e2e.max")
+	}
+	Advance(s2, AdvanceInput{}, dir)
+	plan2, _ := loadPlan(s2, dir)
+	if findItem(plan2, "a").Passes != "failed" {
+		t.Errorf("e2e force-accept should yield failed items, got %q", findItem(plan2, "a").Passes)
+	}
+}
+
+// Edge case: a zero-scenario step list passes the e2e loop vacuously (E2E_AUTHOR →
+// E2E_VERIFY PASS at min rounds), and the three loops bound their rounds
+// independently given different per-loop max_rounds.
+func TestAdvanceUIE2EZeroScenarioVacuousAndIndependentBudgets(t *testing.T) {
+	dir := t.TempDir()
+
+	// Zero scenarios: QA still produces an (empty) step list, e2e passes at min.
+	s := uiAtE2EAuthor(t, dir, 1, 3, 0)
+	if err := Advance(s, AdvanceInput{}, dir); err != nil { // E2E_AUTHOR → E2E_VERIFY even with 0 scenarios
+		t.Fatalf("E2E_AUTHOR (0 scenarios) advance: %v", err)
+	}
+	if s.State != StateE2EVerify {
+		t.Fatalf("zero-scenario step list should still reach E2E_VERIFY, got %s", s.State)
+	}
+	if err := Advance(s, AdvanceInput{Verdict: "PASS"}, dir); err != nil {
+		t.Fatalf("vacuous e2e PASS: %v", err)
+	}
+	if s.State != StateCommit {
+		t.Fatalf("vacuous pass should reach COMMIT at e2e.min, got %s", s.State)
+	}
+
+	// Independent budgets: with e2e.max=1, the e2e loop force-accepts after one
+	// FAIL while the code/qa loops (max=3) are unaffected — confirms the counters
+	// and bounds are per-loop.
+	s2 := uiAtE2EAuthor(t, dir, 1, 1, 2) // e2e max=1
+	Advance(s2, AdvanceInput{}, dir)     // → E2E_VERIFY round 1
+	Advance(s2, AdvanceInput{Verdict: "FAIL"}, dir)
+	if s2.State != StateCommit {
+		t.Fatalf("e2e max=1 FAIL should force-accept to COMMIT, got %s", s2.State)
+	}
+	if !s2.UIImplementing.CurrentBatch.E2EForceAccepted {
+		t.Error("expected E2EForceAccepted with e2e.max=1")
+	}
+	// The code and QA loops ran only their minimum (1 round each), independent of e2e.
+	if s2.UIImplementing.CurrentBatch.EvalRound != 1 || s2.UIImplementing.CurrentBatch.QARound != 1 {
+		t.Errorf("code/qa rounds should be independent (1 each), got eval=%d qa=%d",
+			s2.UIImplementing.CurrentBatch.EvalRound, s2.UIImplementing.CurrentBatch.QARound)
+	}
+}

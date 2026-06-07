@@ -572,7 +572,8 @@
           "passes": false
         }
       ],
-      "passes": "pending"
+      "passes": "passed",
+      "rounds": 1
     },
     {
       "id": "advance.phaseshift",

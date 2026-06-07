@@ -862,6 +862,12 @@ func advanceUIImplementing(s *ForgeState, in AdvanceInput, dir string) error {
 		return advanceUIFromQATest(s, in, dir)
 	case StateUIRefine:
 		return advanceUIFromUIRefine(s)
+	case StateE2EAuthor:
+		return advanceUIFromE2EAuthor(s)
+	case StateE2EVerify:
+		return advanceUIFromE2EVerify(s, in, dir)
+	case StateE2ERemediate:
+		return advanceUIFromE2ERemediate(s)
 	case StateCommit:
 		return advanceUIFromCommit(s, in, dir)
 	case StateDone:
@@ -1041,6 +1047,51 @@ func advanceUIFromUIRefine(s *ForgeState) error {
 	batch := s.UIImplementing.CurrentBatch
 	batch.QARound++ // re-entering the QA loop
 	s.State = StateQATest
+	return nil
+}
+
+func advanceUIFromE2EAuthor(s *ForgeState) error {
+	// Bridging state: no verdict. Always enter the e2e verification loop. A
+	// zero-scenario step list still advances (it passes vacuously in E2E_VERIFY).
+	batch := s.UIImplementing.CurrentBatch
+	batch.E2ERound++ // entering the e2e loop
+	s.State = StateE2EVerify
+	return nil
+}
+
+func advanceUIFromE2EVerify(s *ForgeState, in AdvanceInput, dir string) error {
+	cfg := s.Config.UIImplementing
+	if err := requireVerdict(in, EvalModeFor(cfg.E2E.EvalConfig, s.Config.General)); err != nil {
+		return err
+	}
+
+	batch := s.UIImplementing.CurrentBatch
+
+	// E2ERound was incremented on entry to E2E_VERIFY; record against it directly.
+	batch.E2EEvals = append(batch.E2EEvals, EvalRecord{
+		Round:      batch.E2ERound,
+		Verdict:    in.Verdict,
+		EvalReport: in.EvalReport,
+	})
+
+	toCommit := (in.Verdict == "PASS" && batch.E2ERound >= cfg.E2E.MinRounds) ||
+		(in.Verdict == "FAIL" && batch.E2ERound >= cfg.E2E.MaxRounds)
+	if toCommit {
+		if in.Verdict == "FAIL" {
+			batch.E2EForceAccepted = true
+		}
+		s.State = StateCommit
+		return nil
+	}
+	// Below min (PASS) or below max (FAIL) — remediate and re-verify.
+	s.State = StateE2ERemediate
+	return nil
+}
+
+func advanceUIFromE2ERemediate(s *ForgeState) error {
+	batch := s.UIImplementing.CurrentBatch
+	batch.E2ERound++ // re-entering the e2e loop
+	s.State = StateE2EVerify
 	return nil
 }
 
