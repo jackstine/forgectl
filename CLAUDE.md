@@ -11,9 +11,19 @@ Spec-driven development harness. Compiles planning documents into production cod
 - [toml] (https://context7.com/burntsushi/toml)
 
 
+## Agent Handoffs
+
+When an agent generates a file to be handed off to the next step, the agent must register that file with forgectl rather than just leaving it on disk:
+
+```bash
+forgectl <command> file_name.md
+```
+
+Registering the file makes forgectl aware that a handoff is pending, so the next `forgectl advance` tells the operator (or next agent) that there is a file provided by the agent which needs to be reviewed before the workflow can move forward. This closes the gap where an agent's output can be silently passed over between phases.
+
 ## Skills
 
-Do not update skill files (`skills/`) until the forgectl binary has been built and the specs are implemented. Skills consume forgectl — updating them before the tool exists creates a chicken-and-egg problem. Build forgectl first, then update skills to match.
+Do not update skill files (`skills/`) until implementation planning has begun. Skills consume forgectl — updating them before the work is even planned creates a chicken-and-egg problem. Once a phase reaches implementation planning, its skill may be drafted and committed alongside the plan.
 
 ## Build
 
@@ -40,3 +50,5 @@ Update schema docs when JSON structures change — fields added/removed/renamed 
 - `forgectl/state/validate.go` — what forgectl accepts and rejects
 - `forgectl/specs/` — intended behavior
 - Diagrams and schema docs are derived — they follow the code and specs, not lead them.
+
+

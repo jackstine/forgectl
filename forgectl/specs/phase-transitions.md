@@ -5,7 +5,9 @@
 
 ## Context
 
-The forgectl scaffold is a Go CLI tool (built with Cobra) that manages the full software development lifecycle through four sequential phases — specifying, generate_planning_queue, planning, and implementing — backed by a single JSON state file (`forgectl-state.json`). State names (ORIENT, EVALUATE, etc.) are reused across phases with phase-specific behavior; the `phase` field determines which states are valid and how they behave.
+The forgectl scaffold is a Go CLI tool (built with Cobra) that manages the full software development lifecycle through sequential phases — specifying, generate_planning_queue, planning, and an implementation phase — backed by a single JSON state file (`forgectl-state.json`). State names (ORIENT, EVALUATE, etc.) are reused across phases with phase-specific behavior; the `phase` field determines which states are valid and how they behave.
+
+The implementation phase is one of two phases selected per plan: `implementing` (code-only batches) or `ui_implementing` (code batches plus per-batch QA and e2e verification loops). Each plan carries a `kind` field — `code` (default) or `ui` — and the planning→implementation phase shift routes to `implementing` when `kind` is `code` and to `ui_implementing` when `kind` is `ui`. Both consume the same plan.json and share the same DONE/phase-shift exit behavior; references below to "the implementation phase" apply to whichever of the two a plan's `kind` selects.
 
 Between phases, a PHASE_SHIFT state acts as a hard stop — the user is told to refresh their context before proceeding. This prevents stale context from carrying over between fundamentally different activities. PHASE_SHIFT also fires at domain boundaries within the same phase, because switching domains means switching codebases.
 
@@ -19,8 +21,9 @@ The scaffold can be initialized at specifying, planning, or implementing — all
 
 ## Depends On
 - **spec-reconciliation** — COMPLETE triggers the specifying→generate_planning_queue phase shift.
-- **plan-production** — ACCEPT or DONE triggers planning→implementing phase shift (depending on `plan_all_before_implementing`).
+- **plan-production** — ACCEPT or DONE triggers the planning→implementation phase shift (depending on `plan_all_before_implementing`).
 - **batch-implementation** — DONE triggers implementing→planning phase shift when `plan_all_before_implementing: false` and plans remain.
+- **ui-batch-implementation** — DONE triggers ui_implementing→planning phase shift when `plan_all_before_implementing: false` and plans remain; entered from planning when the plan's `kind` is `ui`.
 - **state-persistence** — reads and writes the state file.
 
 ## Integration Points
@@ -28,9 +31,10 @@ The scaffold can be initialized at specifying, planning, or implementing — all
 | Spec | Relationship |
 |------|-------------|
 | spec-reconciliation | COMPLETE → PHASE_SHIFT (specifying → generate_planning_queue) |
-| plan-production | Receives the plans queue when generate_planning_queue→planning advances; ACCEPT → PHASE_SHIFT (planning → implementing) when `plan_all_before_implementing: false`; DONE → PHASE_SHIFT when `true` |
-| batch-implementation | Receives validated plan.json when planning→implementing advances; DONE → PHASE_SHIFT (implementing → planning) when `plan_all_before_implementing: false` and plans remain; DONE → PHASE_SHIFT (implementing → implementing) when `true` and plans remain |
-| session-init | Plan queue schema (same validation) reused at generate_planning_queue→planning shift |
+| plan-production | Receives the plans queue when generate_planning_queue→planning advances; ACCEPT → PHASE_SHIFT (planning → implementation) when `plan_all_before_implementing: false`; DONE → PHASE_SHIFT when `true` |
+| batch-implementation | Receives validated plan.json when planning→implementing advances (plan `kind: code`); DONE → PHASE_SHIFT (implementing → planning) when `plan_all_before_implementing: false` and plans remain; DONE → PHASE_SHIFT (implementing → next implementation phase) when `true` and plans remain |
+| ui-batch-implementation | Receives validated plan.json when planning→ui_implementing advances (plan `kind: ui`); DONE → PHASE_SHIFT (ui_implementing → planning) when `plan_all_before_implementing: false` and plans remain; DONE → PHASE_SHIFT (ui_implementing → next implementation phase) when `true` and plans remain |
+| session-init | Plan queue schema (same validation, including the `kind` routing field) reused at generate_planning_queue→planning shift |
 
 ---
 
@@ -44,10 +48,12 @@ The scaffold can be initialized at specifying, planning, or implementing — all
 |-------------|-------|
 | specifying → generate_planning_queue | `--from <path>` (optional). If provided, skips generate_planning_queue entirely and transitions directly to planning ORIENT. |
 | generate_planning_queue → planning | `--from <path>` (optional). If provided, uses the override file instead of the auto-generated `<state_dir>/plan-queue.json`. |
-| planning → implementing | (no additional flags) |
+| planning → implementing (plan `kind: code`) | (no additional flags) |
+| planning → ui_implementing (plan `kind: ui`) | (no additional flags) |
 | planning → planning (domain boundary) | (no additional flags) |
 | implementing → planning | (no additional flags) |
-| implementing → implementing (domain boundary) | (no additional flags) |
+| ui_implementing → planning | (no additional flags) |
+| implementing/ui_implementing → implementing/ui_implementing (domain boundary) | (no additional flags) |
 
 The `--guided` / `--no-guided` flags are accepted at phase shifts and update `config.general.user_guided` before the transition proceeds.
 
@@ -110,7 +116,7 @@ From:    generate_planning_queue → planning
 Advance to continue.
 ```
 
-**Entering PHASE_SHIFT** (planning → implementing):
+**Entering PHASE_SHIFT** (planning → implementing, plan `kind: code`):
 
 ```
 State:   PHASE_SHIFT
@@ -118,6 +124,20 @@ From:    planning → implementing
 Plan:    Service Configuration
 Domain:  launcher
 File:    launcher/.forgectl_workspace/implementation_plan/plan.json
+
+Stop and refresh your context, please.
+When ready, run: forgectl advance
+```
+
+**Entering PHASE_SHIFT** (planning → ui_implementing, plan `kind: ui`):
+
+```
+State:   PHASE_SHIFT
+From:    planning → ui_implementing
+Plan:    Portal Dashboard
+Domain:  portal
+Kind:    ui
+File:    portal/.forgectl_workspace/ui_plan/plan.json
 
 Stop and refresh your context, please.
 When ready, run: forgectl advance
@@ -142,6 +162,18 @@ State:   PHASE_SHIFT
 From:    implementing → planning
 Completed: launcher — 5/5 items passed (3 batches)
 Next:      portal — Portal Implementation Plan
+
+Stop and refresh your context, please.
+When ready, run: forgectl advance
+```
+
+**Entering PHASE_SHIFT** (ui_implementing → planning, `plan_all_before_implementing: false`):
+
+```
+State:   PHASE_SHIFT
+From:    ui_implementing → planning
+Completed: portal — 4/4 items passed (2 batches; code 5, qa 4, e2e 6 rounds)
+Next:      reports — Reports Implementation Plan
 
 Stop and refresh your context, please.
 When ready, run: forgectl advance
@@ -208,6 +240,7 @@ On entry, the scaffold:
 2. For each domain, produce a plan entry:
    - `name`: `"<Domain> Implementation Plan"` (domain name capitalized).
    - `domain`: the domain name.
+   - `kind`: `"code"` (the default). The architect sets `"ui"` during REFINE for domains that need the QA and e2e verification loops.
    - `file`: `<domain>/.forgectl_workspace/implementation_plan/plan.json`.
    - `specs`: all completed spec file paths for this domain.
    - `spec_commits`: deduplicated list of all `commit_hashes` from the domain's completed specs.
@@ -253,12 +286,12 @@ Advancing from PHASE_SHIFT:
 2. If validation fails: print errors. State remains PHASE_SHIFT.
 3. If validation passes: same steps as auto-generation step 4.
 
-### Planning → Implementing
+### Planning → Implementation (implementing or ui_implementing)
 
-The trigger depends on `plan_all_before_implementing`:
+The target phase is selected by the plan's `kind`: `code` (default) routes to `implementing`, `ui` routes to `ui_implementing`. The trigger depends on `plan_all_before_implementing`:
 
 - **`false` (default):** PHASE_SHIFT entered after each plan ACCEPT. The remaining plans stay in the planning queue.
-- **`true`:** PHASE_SHIFT entered after planning DONE (all plans complete). All completed plans are copied to the implementing plan queue.
+- **`true`:** PHASE_SHIFT entered after planning DONE (all plans complete). All completed plans are copied to the implementation plan queue, each retaining its `kind`.
 
 #### Entering PHASE_SHIFT
 When `false`: the architect advances from planning ACCEPT, and the scaffold transitions to PHASE_SHIFT.
@@ -273,10 +306,10 @@ No `--from` needed — the plan.json path is already known from the current or f
 4. If validation passes:
    - Add `passes: "pending"` and `rounds: 0` to every item.
    - Write the updated plan.json.
-   - Set `phase` to `"implementing"`.
+   - Set `phase` to `"implementing"` when the plan's `kind` is `code`, or `"ui_implementing"` when `kind` is `ui`. For `ui_implementing`, the required `ui_implementing.app.*` and `ui_implementing.e2e.*` config keys must be non-empty; if any is empty, print errors and remain at PHASE_SHIFT.
    - Set `state` to `ORIENT`.
    - Print the ORIENT action description with initialization summary.
-   - When `true`: populate `implementing.plan_queue` from remaining completed plans.
+   - When `true`: populate the implementation plan queue from remaining completed plans.
 
 ### Planning → Planning (Domain Boundary)
 
@@ -290,12 +323,12 @@ The architect advances from ACCEPT with plans remaining in the queue.
 2. Set `state` to `ORIENT`.
 3. Print the planning ORIENT action description.
 
-### Implementing → Planning
+### Implementation → Planning
 
-Only when `plan_all_before_implementing: false`. After implementing DONE for a domain, if plans remain in the planning queue, a PHASE_SHIFT returns to planning.
+Only when `plan_all_before_implementing: false`. After the implementation phase (implementing or ui_implementing) reaches DONE for a domain, if plans remain in the planning queue, a PHASE_SHIFT returns to planning. The behavior is identical whichever implementation phase the domain used.
 
 #### Entering PHASE_SHIFT
-The architect advances from implementing DONE with plans remaining in the planning queue.
+The architect advances from the implementation phase's DONE with plans remaining in the planning queue.
 
 #### Advancing from PHASE_SHIFT
 1. Set `phase` to `"planning"`.
@@ -303,18 +336,19 @@ The architect advances from implementing DONE with plans remaining in the planni
 3. Set `state` to `ORIENT`.
 4. Print the planning ORIENT action description.
 
-### Implementing → Implementing (Domain Boundary)
+### Implementation → Implementation (Domain Boundary)
 
-Only when `plan_all_before_implementing: true`. After implementing DONE for a domain, if plans remain in the implementing plan queue, a PHASE_SHIFT fires between domains within the implementing phase.
+Only when `plan_all_before_implementing: true`. After the implementation phase reaches DONE for a domain, if plans remain in the implementation plan queue, a PHASE_SHIFT fires between domains. The target phase of the next domain is selected by the next plan's `kind` — `code` → `implementing`, `ui` → `ui_implementing` — so a single all-planning-first run can interleave code and UI domains.
 
 #### Entering PHASE_SHIFT
-The architect advances from implementing DONE with plans remaining in the implementing plan queue.
+The architect advances from the implementation phase's DONE with plans remaining in the implementation plan queue.
 
 #### Advancing from PHASE_SHIFT
-1. Pull next plan from the implementing plan queue.
+1. Pull next plan from the implementation plan queue.
 2. Read and validate plan.json. Mutate items (add `passes`/`rounds`).
-3. Set `state` to `ORIENT`.
-4. Print the ORIENT action description with initialization summary.
+3. Set `phase` to `"implementing"` (next plan `kind: code`) or `"ui_implementing"` (next plan `kind: ui`). For `ui_implementing`, validate the required `ui_implementing.app.*` and `ui_implementing.e2e.*` config keys are non-empty.
+4. Set `state` to `ORIENT`.
+5. Print the ORIENT action description with initialization summary.
 
 ---
 
@@ -330,6 +364,7 @@ The architect advances from implementing DONE with plans remaining in the implem
 8. **Interleaved mode (default).** When `plan_all_before_implementing: false`, each domain is planned then implemented before the next domain begins. Implementing DONE returns to planning if plans remain.
 9. **All-planning-first mode.** When `plan_all_before_implementing: true`, all domains are planned with PHASE_SHIFT between each domain, then all domains are implemented with PHASE_SHIFT between each domain.
 10. **One plan per domain.** Each domain has exactly one plan in the queue. No domain appears more than once.
+11. **Kind selects the implementation phase.** The planning→implementation phase shift sets `phase` to `implementing` when the plan's `kind` is `code` (or absent) and to `ui_implementing` when `kind` is `ui`. A plan's `kind` is carried unchanged from the plan queue through planning into the implementation plan queue.
 
 ---
 
@@ -366,6 +401,14 @@ The architect advances from implementing DONE with plans remaining in the implem
 - **Scenario:** Advance from planning→implementing PHASE_SHIFT with invalid plan.json.
   - **Expected:** Validation errors printed. State remains PHASE_SHIFT.
   - **Rationale:** The implementing phase requires a structurally valid plan; errors caught here prevent failures during batch selection.
+
+- **Scenario:** A plan with `kind: ui` reaches the planning→implementation PHASE_SHIFT.
+  - **Expected:** The shift sets `phase` to `ui_implementing`. If the required `ui_implementing.app.*`/`ui_implementing.e2e.*` config keys are non-empty, the phase enters ORIENT; otherwise errors are printed and the state remains PHASE_SHIFT.
+  - **Rationale:** UI domains need the QA/e2e loops, which require app-launch and test-runner config; missing config is caught at the boundary, not mid-phase.
+
+- **Scenario:** `plan_all_before_implementing: true`, two domains with `kind: code` and `kind: ui` respectively.
+  - **Expected:** Both planned (with a planning→planning domain-boundary shift between them), then implemented in queue order — the code domain via `implementing`, the UI domain via `ui_implementing`, with an implementation→implementation domain-boundary shift between them that re-routes by the next plan's `kind`.
+  - **Rationale:** A single all-planning-first run interleaves code and UI domains; `kind` is read at each implementation entry.
 
 - **Scenario:** `--guided` provided at PHASE_SHIFT advance.
   - **Expected:** `config.general.user_guided` updated before the phase transition proceeds.
@@ -465,6 +508,36 @@ The architect advances from implementing DONE with plans remaining in the implem
 - **When:** `advance`
 - **Then:** Errors printed. State remains PHASE_SHIFT.
 
+### planning→ui_implementing routing on kind: ui
+- **Verifies:** `kind` routes the implementation phase shift.
+- **Given:** PHASE_SHIFT (planning→implementation), active plan `kind: ui`, valid plan.json, required UI config keys non-empty.
+- **When:** `advance`
+- **Then:** `phase: "ui_implementing"`, `state: "ORIENT"`. plan.json items mutated.
+
+### planning→ui_implementing rejects missing UI config
+- **Verifies:** UI config validated at the routing boundary.
+- **Given:** PHASE_SHIFT (planning→implementation), active plan `kind: ui`, `ui_implementing.e2e.test_command` empty.
+- **When:** `advance`
+- **Then:** Errors printed naming the missing key. State remains PHASE_SHIFT.
+
+### planning→implementing routing on kind: code (default)
+- **Verifies:** Absent/`code` kind routes to implementing.
+- **Given:** PHASE_SHIFT (planning→implementation), active plan with no `kind` field.
+- **When:** `advance`
+- **Then:** `phase: "implementing"`, `state: "ORIENT"`.
+
+### all-planning-first interleaves code and ui domains by kind
+- **Verifies:** Invariant 11 across a domain boundary.
+- **Given:** `plan_all_before_implementing: true`, implementation plan queue `[{kind: code}, {kind: ui}]`.
+- **When:** First domain reaches DONE and the architect advances through the domain-boundary PHASE_SHIFT.
+- **Then:** First domain used `implementing`; after the boundary shift, `phase: "ui_implementing"` for the second domain.
+
+### ui_implementing→planning transition (interleaved mode)
+- **Verifies:** ui_implementing DONE returns to planning when plans remain.
+- **Given:** ui_implementing DONE, `plan_all_before_implementing: false`, planning queue has 1 plan.
+- **When:** `advance`
+- **Then:** PHASE_SHIFT entered (`ui_implementing → planning`). After advancing: `phase: "planning"`, `state: "ORIENT"`.
+
 ### implementing→planning transition (interleaved mode)
 - **Verifies:** Implementing DONE returns to planning when plans remain.
 - **Given:** Implementing DONE, `plan_all_before_implementing: false`, planning queue has 1 plan remaining.
@@ -538,7 +611,8 @@ The architect advances from implementing DONE with plans remaining in the implem
 - generate_planning_queue phase: auto-generates plan queue, writes to `<state_dir>/plan-queue.json`, architect reviews/reorders before planning
 - `--from` override at specifying PHASE_SHIFT to skip generate_planning_queue entirely
 - `--from` override at generate_planning_queue PHASE_SHIFT for last-chance plan queue replacement
-- Plan validation and mutation at planning→implementing boundary
-- Interleaved mode (`plan_all_before_implementing: false`): plan-implement-plan-implement per domain with implementing→planning transitions
-- All-planning-first mode (`plan_all_before_implementing: true`): all planning with domain-boundary PHASE_SHIFTs, then all implementing with domain-boundary PHASE_SHIFTs
+- Plan validation and mutation at planning→implementation boundary
+- Plan `kind` routing: planning→implementing (`code`) vs planning→ui_implementing (`ui`), with UI config validated at the boundary
+- Interleaved mode (`plan_all_before_implementing: false`): plan-implement-plan-implement per domain with implementation→planning transitions, for both implementing and ui_implementing
+- All-planning-first mode (`plan_all_before_implementing: true`): all planning with domain-boundary PHASE_SHIFTs, then all implementation with domain-boundary PHASE_SHIFTs that re-route by `kind`
 - Full lifecycle integration across phase and domain boundaries

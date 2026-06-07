@@ -13,7 +13,7 @@ The `init` command has two modes of operation:
 
 All configuration is read from `.forgectl/config` at init time and locked into the state file. CLI flags on `init` are `--from` and `--phase`. See `docs/configurations.md` for the full configuration reference.
 
-Sessions can begin at any of three phases — specifying, planning, or implementing — allowing users to skip earlier phases when inputs already exist. The generate_planning_queue phase cannot be initialized directly; it requires a completed specifying phase.
+Sessions can begin at any of four phases — specifying, planning, implementing, or ui_implementing — allowing users to skip earlier phases when inputs already exist. The implementing and ui_implementing phases take the same plan.json input; they differ only in the verification loops each runs. The generate_planning_queue phase cannot be initialized directly; it requires a completed specifying phase.
 
 ## Depends On
 - **state-persistence** — provides the write mechanism and file layout for the state file.
@@ -27,6 +27,7 @@ Sessions can begin at any of three phases — specifying, planning, or implement
 | spec-lifecycle | Consumes the spec queue populated during specifying init |
 | plan-production | Consumes the plan queue populated during planning init |
 | batch-implementation | Consumes the plan.json validated during implementing init |
+| ui-batch-implementation | Consumes the plan.json validated during ui_implementing init; init validates the required `ui_implementing.app.*` and `ui_implementing.e2e.*` config keys |
 | state-persistence | State file schema defines the structure created here; `session_id` stored at root |
 | activity-logging | `session_id` generated here; `[logs]` config validated here; pruning triggered here |
 | reverse-engineering | Consumes the init input (concept + domains) populated during reverse_engineering init |
@@ -42,7 +43,7 @@ Sessions can begin at any of three phases — specifying, planning, or implement
 | Command | Flags | Description |
 |---------|-------|-------------|
 | `init` | *(none)* | Bootstrap `.forgectl/` and default config if absent; exit after scaffolding with no state file created |
-| `init` | `--from <path>` (required), `--phase specifying\|planning\|implementing` (default: specifying) | Initialize state file from validated input and project config |
+| `init` | `--from <path>` (required), `--phase specifying\|planning\|implementing\|ui_implementing` (default: specifying) | Initialize state file from validated input and project config |
 
 All other configuration is read from `.forgectl/config`.
 
@@ -85,6 +86,7 @@ No additional fields are permitted.
     {
       "name": "Protocols Implementation Plan",
       "domain": "protocols",
+      "kind": "code",
       "file": "protocols/.forgectl_workspace/implementation_plan/plan.json",
       "specs": [
         "protocols/ws1/specs/ws1-message-contract.md",
@@ -102,16 +104,21 @@ No additional fields are permitted.
 | `plans` | array | yes | Ordered list of plans to generate and implement |
 | `plans[].name` | string | yes | Display name for the plan |
 | `plans[].domain` | string | yes | Domain grouping |
+| `plans[].kind` | string | no | Implementation target: `code` (default, routes to the implementing phase) or `ui` (routes to the ui_implementing phase) |
 | `plans[].file` | string | yes | Target path for plan.json relative to project root |
 | `plans[].specs` | string[] | yes | Spec file paths to study; may be empty array |
 | `plans[].spec_commits` | string[] | yes | Git commit hashes associated with specs for viewing diffs; may be empty array |
 | `plans[].code_search_roots` | string[] | yes | Directory roots for codebase exploration; may be empty array |
 
-No additional fields are permitted.
+`kind` accepts only `code` or `ui`; any other value is rejected. An absent `kind` defaults to `code`. No other additional fields are permitted.
 
 #### Plan.json Input File (`--phase implementing`)
 
 A `plan.json` file conforming to the schema defined in `PLAN_FORMAT.md`. The scaffold validates the full plan structure during init and adds `passes` and `rounds` fields to each item.
+
+#### Plan.json Input File (`--phase ui_implementing`)
+
+The same `plan.json` schema as `--phase implementing`. In addition to validating the plan structure and adding `passes` and `rounds` fields, init validates that the required `ui_implementing` config keys are present and non-empty: `ui_implementing.app.launch_command`, `ui_implementing.app.url`, `ui_implementing.e2e.test_command`, and `ui_implementing.e2e.test_dir`. See ui-batch-implementation for the verification loops these configure.
 
 ### Outputs
 
@@ -133,8 +140,10 @@ The scaffold exits with a non-zero code on validation failure.
 | Config constraint violation (e.g., eval.min_rounds > eval.max_rounds, invalid commit_strategy, nested domain paths) | Error listing violations. Exit code 1. | Invalid configuration |
 | `init` called with `--from` when state file already exists | Error: "State file already exists. Delete it to reinitialize." Exit code 1. | Prevents accidental loss of in-progress state |
 | `--from` file fails schema validation | Error listing violations. Prints full valid schema. Exit code 1. | User needs to see what's wrong |
-| `--phase` not one of the three valid values | Error: "--phase must be specifying, planning, or implementing." Exit code 1. | Invalid phase |
+| `--phase` not one of the four valid values | Error: "--phase must be specifying, planning, implementing, or ui_implementing." Exit code 1. | Invalid phase |
 | `--phase generate_planning_queue` | Error: "generate_planning_queue requires a completed specifying phase. Use --phase specifying instead." Exit code 1. | Cannot initialize mid-lifecycle phase directly |
+| `--phase ui_implementing` with any of `ui_implementing.app.launch_command`, `ui_implementing.app.url`, `ui_implementing.e2e.test_command`, `ui_implementing.e2e.test_dir` empty | Error naming each missing key. Exit code 1. | The QA and e2e loops require a launchable app and a test runner |
+| Plan queue entry `kind` is a value other than `code` or `ui` | Error naming the offending entry and value. Exit code 1. | Only the two defined implementation targets are routable |
 
 ---
 
@@ -164,7 +173,7 @@ The scaffold exits with a non-zero code on validation failure.
 
 #### Preconditions
 - `--from` is provided.
-- `--phase` is one of `specifying`, `planning`, `implementing` (default: `specifying`). `generate_planning_queue` is not valid.
+- `--phase` is one of `specifying`, `planning`, `implementing`, `ui_implementing` (default: `specifying`). `generate_planning_queue` is not valid.
 - No state file exists at the configured `state_dir` location.
 
 (`.forgectl/` and `.forgectl/config` need not pre-exist — configuration scaffolding creates them when absent.)
@@ -183,6 +192,7 @@ The scaffold exits with a non-zero code on validation failure.
    - For `--phase specifying`: create state file with phase `specifying`, state ORIENT, spec queue populated.
    - For `--phase planning`: create state file with phase `planning`, state ORIENT, plan queue populated.
    - For `--phase implementing`: validate plan.json, add `passes: "pending"` and `rounds: 0` to items, create state file with phase `implementing`, state ORIENT.
+   - For `--phase ui_implementing`: validate that the required `ui_implementing.app.*` and `ui_implementing.e2e.*` config keys are non-empty; validate plan.json, add `passes: "pending"` and `rounds: 0` to items; create state file with phase `ui_implementing`, state ORIENT.
 9. If `config.logs.enabled` is true:
    - Run log pruning (delete files exceeding `logs.retention_days` and `logs.max_files`). See activity-logging spec.
    - Create the session log file at `~/.forgectl/logs/<phase>-<session_id_prefix>.jsonl`.
@@ -215,7 +225,7 @@ The `init` command accepts only two flags:
 | Flag | Default | Description |
 |------|---------|-------------|
 | `--from <path>` | none (required) | Path to input file (schema varies by `--phase`) |
-| `--phase` | specifying | Starting phase: `specifying`, `planning`, `implementing` |
+| `--phase` | specifying | Starting phase: `specifying`, `planning`, `implementing`, `ui_implementing` |
 
 The optional `[[domains]]` section in `.forgectl/config` declares known domains:
 
@@ -236,6 +246,7 @@ The `commit_strategy` per phase is validated at init:
 | `specifying.commit_strategy` | string | `all-specs` | One of: `strict`, `all-specs`, `scoped`, `tracked`, `all` |
 | `planning.commit_strategy` | string | `strict` | One of: `strict`, `all-specs`, `scoped`, `tracked`, `all` |
 | `implementing.commit_strategy` | string | `scoped` | One of: `strict`, `all-specs`, `scoped`, `tracked`, `all` |
+| `ui_implementing.commit_strategy` | string | `scoped` | One of: `strict`, `all-specs`, `scoped`, `tracked`, `all` |
 
 The `[logs]` section in `.forgectl/config` is validated at init:
 
@@ -327,6 +338,24 @@ The `[logs]` section in `.forgectl/config` is validated at init:
 - **When:** `forgectl init --phase implementing --from plan.json`
 - **Then:** `phase: "implementing"`, `state: "ORIENT"`. plan.json items have `passes` and `rounds`.
 
+### Init at ui_implementing phase
+- **Verifies:** Phase selection with `--phase ui_implementing`, plan.json mutation, and UI config validation.
+- **Given:** Valid `.forgectl/config` with non-empty `ui_implementing.app.launch_command`, `ui_implementing.app.url`, `ui_implementing.e2e.test_command`, `ui_implementing.e2e.test_dir`.
+- **When:** `forgectl init --phase ui_implementing --from plan.json`
+- **Then:** `phase: "ui_implementing"`, `state: "ORIENT"`. plan.json items have `passes` and `rounds`.
+
+### Init at ui_implementing rejects missing required UI config
+- **Verifies:** UI config validation at init.
+- **Given:** `ui_implementing.e2e.test_command` empty.
+- **When:** `forgectl init --phase ui_implementing --from plan.json`
+- **Then:** Exit code 1 naming the missing key.
+
+### Init rejects plan queue entry with invalid kind
+- **Verifies:** `kind` value validation.
+- **Given:** Plan queue with an entry whose `kind` is `"frontend"`.
+- **When:** `forgectl init --phase planning --from plans-queue.json`
+- **Then:** Exit code 1 naming the offending entry and value.
+
 ### Init creates .forgectl and default config when none exists
 - **Verifies:** Scaffolding bootstrap during init.
 - **Given:** No `.forgectl/` in current directory or any ancestor; a valid `--from` file.
@@ -373,8 +402,10 @@ The `[logs]` section in `.forgectl/config` is validated at init:
 
 ## Implements
 - Scaffold-only invocation (`forgectl init` with no flags) that creates `.forgectl/` and default config when absent, then exits without creating a state file
-- Phase-selectable init (`--phase specifying|planning|implementing`)
+- Phase-selectable init (`--phase specifying|planning|implementing|ui_implementing`)
 - Input validation for spec queue, plan queue, and plan.json schemas
+- Plan queue `kind` routing field (`code`/`ui`) validated at init
+- UI config validation (`ui_implementing.app.*`, `ui_implementing.e2e.*`) at ui_implementing init
 - Project root discovery via `.forgectl/` directory walk
 - Config read from `.forgectl/config` (TOML) with defaults
 - Phase-scoped config locked into state file at init

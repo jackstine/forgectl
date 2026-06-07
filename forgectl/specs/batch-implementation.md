@@ -20,7 +20,7 @@ Layers enforce a coarse ordering (all layer N items must be terminal before laye
 |------|-------------|
 | plan.json | Planning produces it; implementing consumes and mutates it (adding `passes` and `rounds` fields) |
 | Implementation evaluator prompt (`evaluators/impl-eval.md`, embedded in binary) | Full instructions for the implementation evaluation sub-agent: what to check, report format, verdict rules |
-| phase-transitions | DONE → PHASE_SHIFT when plans remain (implementing → planning when `plan_all_before_implementing: false`, implementing → implementing when `true`) |
+| phase-transitions | DONE → PHASE_SHIFT when plans remain (implementing → planning when `plan_all_before_implementing: false`; implementing → the next domain's implementation phase, routed by that plan's `kind` to `implementing` or `ui_implementing`, at a domain boundary when `true`) |
 
 ---
 
@@ -663,7 +663,7 @@ ORIENT → IMPLEMENT(1) → IMPLEMENT(2) → ... → EVALUATE
 | COMMIT | more batches or layers | ORIENT | — |
 | COMMIT | all layers complete | DONE | — |
 | DONE | `plan_all_before_implementing: false`, planning queue non-empty | PHASE_SHIFT | PHASE_SHIFT (implementing → planning). Return to planning for next domain. |
-| DONE | `plan_all_before_implementing: true`, implementing plan queue non-empty | PHASE_SHIFT | PHASE_SHIFT (implementing → implementing, domain boundary). Pull next plan. |
+| DONE | `plan_all_before_implementing: true`, implementing plan queue non-empty | PHASE_SHIFT | PHASE_SHIFT (implementing → next implementation phase, domain boundary). Pull next plan; route to `implementing` or `ui_implementing` by that plan's `kind`. |
 | DONE | no plans remaining | _(terminal)_ | Session complete. |
 
 ### Item `passes` Transitions
@@ -767,8 +767,8 @@ When `enable_commits` is `true`, the engineer runs `forgectl advance --message <
   - **Rationale:** Interleaved mode returns to planning for the next domain.
 
 - **Scenario:** All layers complete, `plan_all_before_implementing: true`, implementing plan queue has plans remaining.
-  - **Expected:** COMMIT → DONE → PHASE_SHIFT (implementing → implementing, next domain).
-  - **Rationale:** All-planning-first mode continues implementing the next domain's plan.
+  - **Expected:** COMMIT → DONE → PHASE_SHIFT (implementing → next implementation phase, next domain). The next domain enters `implementing` or `ui_implementing` per its plan's `kind`.
+  - **Rationale:** All-planning-first mode continues with the next domain's plan, routing by `kind`.
 
 - **Scenario:** `eval` called outside EVALUATE.
   - **Expected:** Error.
