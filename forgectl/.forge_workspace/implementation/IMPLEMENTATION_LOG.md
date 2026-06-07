@@ -12,3 +12,10 @@ Log of implementation updates across sessions. Add a new entry after each unit o
 - **Batch:** 1/6
 - **Eval Rounds:** 1
 - **Notes:** Added PhaseUIImplementing + five QA/e2e state constants; added plan-queue `kind` field with code/ui/absent validation; embedded the ui-qa/ui-e2e evaluator prompts. Stray untracked artifacts (.playwright-mcp/, index.png, docs/diagrams/html/) left uncommitted — not part of this work.
+
+### 2026-06-07 — L0 Type & Config Foundations: Batch 2 (types.config)
+- **Errors:** None
+- **All Tests Pass:** Yes
+- **Batch:** 2/6
+- **Eval Rounds:** 1
+- **Notes:** Added UIImplementingConfig (UIAppConfig, UIE2EConfig embedding EvalConfig, plus code-eval/qa/e2e loops), wired it into ForgeConfig, and added the DefaultForgeConfig defaults via a shared defaultUILoopEvalConfig helper. Required app/e2e string keys default empty (validated at phase boundary).

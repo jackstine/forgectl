@@ -135,6 +135,35 @@ type ImplementingConfig struct {
 	Eval           EvalConfig `json:"eval"`
 }
 
+// UIAppConfig describes how the QA loop reaches the running application.
+// LaunchCommand and URL are required (validated at the phase boundary, not defaulted).
+type UIAppConfig struct {
+	LaunchCommand       string `json:"launch_command"`
+	URL                 string `json:"url"`
+	ReadyTimeoutSeconds int    `json:"ready_timeout_seconds"`
+}
+
+// UIE2EConfig configures the e2e verification loop. It embeds EvalConfig (so the
+// loop carries its own round budget / model / eval_mode) and adds the authored
+// suite's run command and directory. TestCommand and TestDir are required
+// (validated at the phase boundary, not defaulted).
+type UIE2EConfig struct {
+	EvalConfig         // embedded: min/max rounds, model, type, count, eval_mode
+	TestCommand string `json:"test_command"`
+	TestDir     string `json:"test_dir"`
+}
+
+// UIImplementingConfig configures the ui_implementing phase. The code-eval (Eval),
+// QA, and e2e (E2E) loops each carry independent round budgets and eval modes.
+type UIImplementingConfig struct {
+	Batch          int         `json:"batch"`
+	CommitStrategy string      `json:"commit_strategy"`
+	App            UIAppConfig `json:"app"`
+	Eval           EvalConfig  `json:"eval"` // code-eval loop
+	QA             EvalConfig  `json:"qa"`   // QA loop
+	E2E            UIE2EConfig `json:"e2e"`  // e2e verification loop
+}
+
 // REReconcileConfig configures the reverse_engineering reconciliation loop.
 type REReconcileConfig struct {
 	MinRounds       int         `json:"min_rounds"`
@@ -180,16 +209,32 @@ type GeneralConfig struct {
 // ForgeConfig is the full project configuration loaded from .forgectl/config.
 // It is locked into ForgeState at init time so all commands use consistent settings.
 type ForgeConfig struct {
-	General      GeneralConfig      `json:"general"`
-	Domains      []DomainConfig     `json:"domains,omitempty"`
-	Specifying   SpecifyingConfig   `json:"specifying"`
-	Planning     PlanningConfig     `json:"planning"`
-	Implementing ImplementingConfig `json:"implementing"`
+	General        GeneralConfig        `json:"general"`
+	Domains        []DomainConfig       `json:"domains,omitempty"`
+	Specifying     SpecifyingConfig     `json:"specifying"`
+	Planning       PlanningConfig       `json:"planning"`
+	Implementing   ImplementingConfig   `json:"implementing"`
+	UIImplementing UIImplementingConfig `json:"ui_implementing"`
 
 	ReverseEngineering ReverseEngineeringConfig `json:"reverse_engineering"`
 
 	Paths PathsConfig `json:"paths"`
 	Logs  LogsConfig  `json:"logs"`
+}
+
+// defaultUILoopEvalConfig returns the shared default round budget used by each
+// of the ui_implementing phase's three loops (code-eval, QA, e2e).
+func defaultUILoopEvalConfig() EvalConfig {
+	return EvalConfig{
+		MinRounds: 1,
+		MaxRounds: 3,
+		AgentConfig: AgentConfig{
+			Model: "opus",
+			Type:  "eval",
+			Count: 1,
+		},
+		EvalMode: "report",
+	}
 }
 
 // DefaultForgeConfig returns a ForgeConfig with all spec-defined default values applied.
@@ -278,6 +323,22 @@ func DefaultForgeConfig() ForgeConfig {
 					Count: 1,
 				},
 				EvalMode: "report",
+			},
+		},
+		UIImplementing: UIImplementingConfig{
+			Batch:          1,
+			CommitStrategy: "scoped",
+			App: UIAppConfig{
+				// LaunchCommand and URL are required and validated at the phase
+				// boundary; only the timeout has a sensible default here.
+				ReadyTimeoutSeconds: 30,
+			},
+			Eval: defaultUILoopEvalConfig(),
+			QA:   defaultUILoopEvalConfig(),
+			E2E: UIE2EConfig{
+				EvalConfig: defaultUILoopEvalConfig(),
+				// TestCommand and TestDir are required and validated at the
+				// phase boundary, so they default empty.
 			},
 		},
 		ReverseEngineering: ReverseEngineeringConfig{

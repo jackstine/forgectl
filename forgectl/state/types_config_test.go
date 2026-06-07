@@ -260,3 +260,124 @@ func TestDefaultForgeConfigValues(t *testing.T) {
 		t.Errorf("logs.max_files: got %d, want 50", cfg.Logs.MaxFiles)
 	}
 }
+
+// Functional: DefaultForgeConfig populates the ui_implementing block with batch=1,
+// commit_strategy=scoped, app.ready_timeout_seconds=30, and each of the three
+// loops (eval/qa/e2e) with min=1, max=3, model=opus, eval_mode=report. The
+// required string keys (app.launch_command/url, e2e.test_command/test_dir) default
+// empty because they are validated at the phase boundary, not defaulted.
+func TestDefaultUIImplementingConfigValues(t *testing.T) {
+	ui := DefaultForgeConfig().UIImplementing
+
+	if ui.Batch != 1 {
+		t.Errorf("ui_implementing.batch: got %d, want 1", ui.Batch)
+	}
+	if ui.CommitStrategy != "scoped" {
+		t.Errorf("ui_implementing.commit_strategy: got %q, want %q", ui.CommitStrategy, "scoped")
+	}
+	if ui.App.ReadyTimeoutSeconds != 30 {
+		t.Errorf("ui_implementing.app.ready_timeout_seconds: got %d, want 30", ui.App.ReadyTimeoutSeconds)
+	}
+	if ui.App.LaunchCommand != "" || ui.App.URL != "" {
+		t.Errorf("ui_implementing.app required keys must default empty, got launch_command=%q url=%q", ui.App.LaunchCommand, ui.App.URL)
+	}
+	if ui.E2E.TestCommand != "" || ui.E2E.TestDir != "" {
+		t.Errorf("ui_implementing.e2e required keys must default empty, got test_command=%q test_dir=%q", ui.E2E.TestCommand, ui.E2E.TestDir)
+	}
+
+	loops := map[string]EvalConfig{
+		"eval": ui.Eval,
+		"qa":   ui.QA,
+		"e2e":  ui.E2E.EvalConfig,
+	}
+	for name, loop := range loops {
+		if loop.MinRounds != 1 {
+			t.Errorf("ui_implementing.%s.min_rounds: got %d, want 1", name, loop.MinRounds)
+		}
+		if loop.MaxRounds != 3 {
+			t.Errorf("ui_implementing.%s.max_rounds: got %d, want 3", name, loop.MaxRounds)
+		}
+		if loop.Model != "opus" {
+			t.Errorf("ui_implementing.%s.model: got %q, want opus", name, loop.Model)
+		}
+		if loop.EvalMode != "report" {
+			t.Errorf("ui_implementing.%s.eval_mode: got %q, want report", name, loop.EvalMode)
+		}
+	}
+}
+
+// Functional: UIImplementingConfig marshals and unmarshals to JSON with app/eval/qa/e2e
+// nested under ui_implementing, round fields promoted at each loop level (via embedded
+// EvalConfig), and the e2e test_command/test_dir alongside its round fields.
+func TestUIImplementingConfigJSONRoundTrip(t *testing.T) {
+	original := UIImplementingConfig{
+		Batch:          2,
+		CommitStrategy: "scoped",
+		App: UIAppConfig{
+			LaunchCommand:       "npm run dev",
+			URL:                 "http://localhost:3000",
+			ReadyTimeoutSeconds: 45,
+		},
+		Eval: EvalConfig{MinRounds: 1, MaxRounds: 3, AgentConfig: AgentConfig{Model: "opus", Type: "eval", Count: 1}, EvalMode: "report"},
+		QA:   EvalConfig{MinRounds: 2, MaxRounds: 4, AgentConfig: AgentConfig{Model: "sonnet", Type: "eval", Count: 1}, EvalMode: "direct"},
+		E2E: UIE2EConfig{
+			EvalConfig:  EvalConfig{MinRounds: 1, MaxRounds: 2, AgentConfig: AgentConfig{Model: "opus", Type: "eval", Count: 1}, EvalMode: "report"},
+			TestCommand: "npx playwright test",
+			TestDir:     "e2e/",
+		},
+	}
+
+	data, err := json.Marshal(struct {
+		UIImplementing UIImplementingConfig `json:"ui_implementing"`
+	}{original})
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+
+	// Verify the JSON shape: app/eval/qa/e2e nested, round fields promoted on each loop.
+	var raw map[string]any
+	if err := json.Unmarshal(data, &raw); err != nil {
+		t.Fatalf("unmarshal raw: %v", err)
+	}
+	ui, ok := raw["ui_implementing"].(map[string]any)
+	if !ok {
+		t.Fatal("ui_implementing is not an object")
+	}
+	for _, key := range []string{"app", "eval", "qa", "e2e"} {
+		if _, ok := ui[key].(map[string]any); !ok {
+			t.Errorf("ui_implementing.%s missing or not an object", key)
+		}
+	}
+	qa := ui["qa"].(map[string]any)
+	if _, ok := qa["min_rounds"]; !ok {
+		t.Error("ui_implementing.qa.min_rounds must be promoted to the loop level")
+	}
+	if _, ok := qa["model"]; !ok {
+		t.Error("ui_implementing.qa.model must be promoted (embedded AgentConfig)")
+	}
+	e2e := ui["e2e"].(map[string]any)
+	if _, ok := e2e["test_command"]; !ok {
+		t.Error("ui_implementing.e2e.test_command missing")
+	}
+	if _, ok := e2e["min_rounds"]; !ok {
+		t.Error("ui_implementing.e2e.min_rounds must be promoted alongside test_command")
+	}
+
+	// Round-trip back into the struct.
+	var decoded struct {
+		UIImplementing UIImplementingConfig `json:"ui_implementing"`
+	}
+	if err := json.Unmarshal(data, &decoded); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	got := decoded.UIImplementing
+	if got.App.URL != original.App.URL {
+		t.Errorf("app.url: got %q, want %q", got.App.URL, original.App.URL)
+	}
+	if got.QA.MinRounds != original.QA.MinRounds || got.QA.EvalMode != original.QA.EvalMode {
+		t.Errorf("qa round-trip mismatch: got %+v", got.QA)
+	}
+	if got.E2E.TestDir != original.E2E.TestDir || got.E2E.MaxRounds != original.E2E.MaxRounds {
+		t.Errorf("e2e round-trip mismatch: got %+v", got.E2E)
+	}
+}
