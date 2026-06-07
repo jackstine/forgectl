@@ -1,0 +1,510 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>forgectl — Specifying Phase</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600;700&family=Archivo+Expanded:wght@600;700;800;900&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet" />
+<link rel="stylesheet" href="forge.css" />
+<style>
+  .eval-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+    gap: 10px 20px;
+    margin-top: 16px;
+  }
+  .eval-dim {
+    display: flex;
+    align-items: baseline;
+    gap: 10px;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 12.5px;
+    color: var(--muted);
+  }
+  .eval-dim .n {
+    font-size: 10px;
+    letter-spacing: .12em;
+    color: var(--ember-hot);
+    font-weight: 700;
+    min-width: 22px;
+    flex: none;
+  }
+  .spec-file {
+    list-style: none;
+    margin-top: 16px;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+  .spec-file li {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 12.5px;
+    color: var(--text);
+    background: var(--iron);
+    border: 1px solid var(--line);
+    border-radius: 7px;
+    padding: 7px 13px;
+  }
+  .spec-file li .indent {
+    color: var(--muted-2);
+    margin-right: 8px;
+  }
+  .spec-file li .hl {
+    color: var(--spark);
+  }
+  .spec-file li .sub {
+    color: var(--muted);
+  }
+  .panel-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 20px;
+    margin-bottom: 22px;
+  }
+  @media (max-width: 760px) {
+    .panel-grid { grid-template-columns: 1fr; }
+  }
+</style>
+</head>
+<body>
+<div class="grain"></div>
+
+<div class="wrap">
+  <header>
+    <a class="crumb" href="index.html">← Workflow Atlas</a>
+    <span class="kicker"><span class="dot"></span> Phase 01 · Heat</span>
+    <h1 class="page-title">Specifying</h1>
+    <p class="lede">
+      Permanent behavioral <strong>contracts</strong>. Each spec in the queue is oriented, drafted, and
+      put through an adversarial <strong>11-dimension evaluation</strong> loop by an AI sub-agent.
+      Cross-spec reconciliation validates dependencies and symmetry before a single commit at
+      <code>COMPLETE</code>.
+    </p>
+    <div class="meta-row">
+      <span class="chip"><b>Role</b> Systems Architect</span>
+      <span class="chip"><b>Input</b> spec-queue.json</span>
+      <span class="chip"><b>Output</b> specs/*.md</span>
+      <span class="chip"><b>Eval</b> 11-dimension review</span>
+    </div>
+  </header>
+
+  <main class="pipeline">
+
+    <!-- INITIALIZATION -->
+    <div class="section-head" data-reveal>Initialization</div>
+
+    <section class="station" data-station>
+      <div class="node-marker">①</div>
+      <article class="card">
+        <div class="card-head">
+          <div class="reveal">
+            <div class="phase-label">Command</div>
+            <div class="phase-title">forgectl init</div>
+          </div>
+          <div class="io reveal">
+            <div class="ln"><span class="tag">flag</span><span class="val">--phase specifying</span></div>
+            <div class="ln"><span class="tag">flag</span><span class="val">--from spec-queue.json</span></div>
+            <div class="ln"><span class="tag">opt</span><span class="val">--guided</span></div>
+          </div>
+        </div>
+        <p class="desc reveal">
+          Bootstraps the specifying state machine. Config keys read from
+          <code>.forgectl/config</code>: <code>batch</code>, <code>eval.max_rounds</code>,
+          <code>eval.min_rounds</code>. Pass <code>--guided</code> to enable user checkpoints
+          before each spec is drafted.
+        </p>
+        <div class="track-label reveal">Produces</div>
+        <div class="track reveal">
+          <span class="state">forgectl-state.json</span>
+          <span class="arrow">→</span>
+          <span class="state">queue loaded</span>
+          <span class="arrow">→</span>
+          <span class="state terminal">ORIENT</span>
+        </div>
+      </article>
+    </section>
+
+    <!-- PER-SPEC LOOP -->
+    <div class="section-head" data-reveal>Per-Spec Loop — repeats for each spec in queue</div>
+
+    <section class="station" data-station>
+      <div class="node-marker">②</div>
+      <article class="card">
+        <div class="card-head">
+          <div class="reveal">
+            <div class="phase-label">State</div>
+            <div class="phase-title">ORIENT</div>
+            <div class="role">Action: <b>forgectl advance</b></div>
+          </div>
+        </div>
+        <p class="desc reveal">
+          Read planning sources referenced by the spec. Review existing specs in the project.
+          Understand the domain landscape. If <code>--guided</code>: discuss scope with user.
+        </p>
+        <div class="track-label reveal">Transitions to</div>
+        <div class="track reveal">
+          <span class="state terminal">ORIENT</span>
+          <span class="arrow">→</span>
+          <span class="state">SELECT</span>
+        </div>
+      </article>
+    </section>
+
+    <section class="station" data-station>
+      <div class="node-marker">③</div>
+      <article class="card">
+        <div class="card-head">
+          <div class="reveal">
+            <div class="phase-label">State</div>
+            <div class="phase-title">SELECT</div>
+            <div class="role">Action: <b>forgectl advance</b></div>
+          </div>
+        </div>
+        <p class="desc reveal">
+          Pull next spec from the queue. Display: name, domain, topic, file path.
+          Display: planning sources &amp; dependencies.
+        </p>
+        <div class="track-label reveal">Transitions to</div>
+        <div class="track reveal">
+          <span class="state">SELECT</span>
+          <span class="arrow">→</span>
+          <span class="state">DRAFT</span>
+        </div>
+      </article>
+    </section>
+
+    <section class="station" data-station>
+      <div class="node-marker">④</div>
+      <article class="card">
+        <div class="card-head">
+          <div class="reveal">
+            <div class="phase-label">State</div>
+            <div class="phase-title">DRAFT</div>
+            <div class="role">Action: <b>forgectl advance [--file &lt;path&gt;]</b></div>
+          </div>
+          <div class="io reveal">
+            <div class="ln"><span class="tag">out</span><span class="val out">specs/*.md</span></div>
+          </div>
+        </div>
+        <p class="desc reveal">
+          Write the spec file following <code>spec-format.md</code>. The spec is a permanent
+          behavioral contract covering interface, behavior, configuration, observability, invariants,
+          edge cases, and testing criteria.
+        </p>
+        <div class="track-label reveal">Transitions to</div>
+        <div class="track reveal">
+          <span class="state">DRAFT</span>
+          <span class="arrow">→</span>
+          <span class="state eval">EVALUATE</span>
+        </div>
+      </article>
+    </section>
+
+    <!-- Spec file structure panel -->
+    <div class="shift" data-station>
+      <div class="shift-inner reveal" style="border-radius:12px; padding:16px 20px; flex-direction:column; align-items:flex-start; gap:6px;">
+        <span class="ps" style="font-size:10px; letter-spacing:.18em;">SPEC FILE STRUCTURE</span>
+        <span style="color:var(--muted); font-size:11px;">Written at DRAFT · follows spec-format.md</span>
+      </div>
+    </div>
+
+    <div data-reveal style="margin-bottom:22px; padding-left:80px;">
+      <div class="panel accent">
+        <div class="panel-title"><span class="n">#</span> Spec File Headings</div>
+        <ul class="spec-file">
+          <li><span class="hl"># Title</span></li>
+          <li><span class="indent">##</span><span class="hl">Topic of Concern</span></li>
+          <li><span class="indent">##</span><span class="hl">Context</span></li>
+          <li><span class="indent">##</span><span class="hl">Depends On</span></li>
+          <li><span class="indent">##</span><span class="hl">Integration Points</span></li>
+          <li><span class="indent">##</span><span class="hl">Interface</span> <span class="sub">→ Inputs / Outputs / Rejection</span></li>
+          <li><span class="indent">##</span><span class="hl">Behavior</span> <span class="sub">→ Preconditions / Steps / Postconditions / Error Handling</span></li>
+          <li><span class="indent">##</span><span class="hl">Configuration</span></li>
+          <li><span class="indent">##</span><span class="hl">Observability</span></li>
+          <li><span class="indent">##</span><span class="hl">Invariants</span></li>
+          <li><span class="indent">##</span><span class="hl">Edge Cases</span></li>
+          <li><span class="indent">##</span><span class="hl">Testing Criteria</span></li>
+          <li><span class="indent">##</span><span class="hl">Implements</span></li>
+        </ul>
+      </div>
+    </div>
+
+    <!-- EVALUATION LOOP -->
+    <div class="section-head" data-reveal>Evaluation Loop — specifying.eval.min_rounds .. max_rounds</div>
+
+    <section class="station" data-station>
+      <div class="node-marker">⑤</div>
+      <article class="card">
+        <div class="card-head">
+          <div class="reveal">
+            <div class="phase-label">State</div>
+            <div class="phase-title">EVALUATE</div>
+            <div class="role">Action: <b>forgectl advance --verdict PASS|FAIL --eval-report &lt;path&gt;</b></div>
+          </div>
+          <div class="io reveal">
+            <div class="ln"><span class="tag">out</span><span class="val out">&lt;domain&gt;/specs/.eval/batch-N-rN.md</span></div>
+          </div>
+        </div>
+        <p class="desc reveal">
+          Spawn an Opus sub-agent to review the spec batch against <strong>11 evaluation dimensions</strong>.
+          Output is a structured eval report. Verdict drives the branch below.
+        </p>
+        <div class="track-label reveal">Verdict branch</div>
+        <div class="track reveal">
+          <span class="state eval">EVALUATE</span>
+          <span class="arrow">→</span>
+        </div>
+        <div class="branch reveal" style="margin-top:6px;">
+          <div class="bln">
+            <span class="verdict pass">PASS ≥min_rounds</span>
+            <span class="arrow">→</span>
+            <span class="state terminal">ACCEPT</span>
+          </div>
+          <div class="bln">
+            <span class="verdict fail">FAIL &lt;max_rounds</span>
+            <span class="arrow">→</span>
+            <span class="state loop">REFINE</span>
+            <span class="arrow loopback">⟲</span>
+            <span class="state eval">EVALUATE</span>
+          </div>
+        </div>
+      </article>
+    </section>
+
+    <section class="station" data-station>
+      <div class="node-marker">⑥</div>
+      <article class="card">
+        <div class="card-head">
+          <div class="reveal">
+            <div class="phase-label">State · Loop</div>
+            <div class="phase-title">REFINE</div>
+            <div class="role">Action: <b>forgectl advance</b></div>
+          </div>
+        </div>
+        <p class="desc reveal">
+          Fix deficiencies identified in the eval report. Address all flagged dimensions before
+          re-entering EVALUATE.
+        </p>
+        <div class="track-label reveal">Loop-back</div>
+        <div class="track reveal">
+          <span class="state loop">REFINE</span>
+          <span class="arrow loopback">⟲</span>
+          <span class="state eval">EVALUATE</span>
+        </div>
+      </article>
+    </section>
+
+    <!-- 11 evaluation dimensions panel -->
+    <div data-reveal style="margin-bottom:22px; padding-left:80px;">
+      <div class="panel accent">
+        <div class="panel-title"><span class="n">11</span> Evaluation Dimensions</div>
+        <div class="eval-grid">
+          <div class="eval-dim"><span class="n">01</span>Behavior coverage</div>
+          <div class="eval-dim"><span class="n">02</span>Error handling</div>
+          <div class="eval-dim"><span class="n">03</span>Rejection cases</div>
+          <div class="eval-dim"><span class="n">04</span>Interface (inputs/outputs)</div>
+          <div class="eval-dim"><span class="n">05</span>Configuration</div>
+          <div class="eval-dim"><span class="n">06</span>Observability / logging</div>
+          <div class="eval-dim"><span class="n">07</span>Integration points</div>
+          <div class="eval-dim"><span class="n">08</span>Invariants</div>
+          <div class="eval-dim"><span class="n">09</span>Edge cases</div>
+          <div class="eval-dim"><span class="n">10</span>Testing criteria</div>
+          <div class="eval-dim"><span class="n">11</span>Dependencies &amp; format</div>
+        </div>
+      </div>
+    </div>
+
+    <section class="station" data-station>
+      <div class="node-marker">⑦</div>
+      <article class="card">
+        <div class="card-head">
+          <div class="reveal">
+            <div class="phase-label">State · Terminal (per-spec)</div>
+            <div class="phase-title">ACCEPT</div>
+            <div class="role">Action: <b>forgectl advance</b></div>
+          </div>
+        </div>
+        <p class="desc reveal">
+          Spec finalized. <strong>No commit here</strong> — the single specifying commit occurs at
+          <code>COMPLETE</code>. From here the queue branches.
+        </p>
+        <div class="track-label reveal">Queue branch</div>
+        <div class="branch reveal">
+          <div class="bln">
+            <span class="verdict pass">more specs</span>
+            <span class="arrow loopback">⟲</span>
+            <span class="state terminal">ORIENT</span>
+            <span style="color:var(--muted); font-size:11px;">(next spec)</span>
+          </div>
+          <div class="bln">
+            <span class="verdict fail">queue empty</span>
+            <span class="arrow">→</span>
+            <span class="state gate">DONE</span>
+            <span class="arrow">→</span>
+            reconciliation
+          </div>
+        </div>
+      </article>
+    </section>
+
+    <!-- RECONCILIATION -->
+    <div class="section-head" data-reveal>Reconciliation — cross-spec consistency</div>
+
+    <section class="station" data-station>
+      <div class="node-marker">⑧</div>
+      <article class="card">
+        <div class="card-head">
+          <div class="reveal">
+            <div class="phase-label">State</div>
+            <div class="phase-title">RECONCILE</div>
+            <div class="role">Action: <b>forgectl advance</b></div>
+          </div>
+        </div>
+        <p class="desc reveal">
+          Cross-validate <strong>all specs across all domains</strong>:
+          <code>Depends On</code> refs point to existing specs;
+          Integration Points are symmetric;
+          no circular cross-domain dependencies;
+          naming consistency across all specs.
+        </p>
+        <div class="track-label reveal">Transitions to</div>
+        <div class="track reveal">
+          <span class="state gate">RECONCILE</span>
+          <span class="arrow">→</span>
+          <span class="state eval">RECONCILE_EVAL</span>
+        </div>
+      </article>
+    </section>
+
+    <section class="station" data-station>
+      <div class="node-marker">⑨</div>
+      <article class="card">
+        <div class="card-head">
+          <div class="reveal">
+            <div class="phase-label">State · Eval</div>
+            <div class="phase-title">RECONCILE_EVAL</div>
+            <div class="role">Action: <b>forgectl advance --verdict PASS|FAIL --eval-report &lt;path&gt;</b></div>
+          </div>
+          <div class="io reveal">
+            <div class="ln"><span class="tag">config</span><span class="val">reconciliation.min_rounds (def: 0)</span></div>
+            <div class="ln"><span class="tag">config</span><span class="val">reconciliation.max_rounds (def: 3)</span></div>
+          </div>
+        </div>
+        <p class="desc reveal">
+          Reconciliation evaluation bounded by
+          <code>specifying.reconciliation.min_rounds</code> and
+          <code>specifying.reconciliation.max_rounds</code> from config.
+        </p>
+        <div class="track-label reveal">Verdict branch</div>
+        <div class="track reveal">
+          <span class="state eval">RECONCILE_EVAL</span>
+          <span class="arrow">→</span>
+        </div>
+        <div class="branch reveal" style="margin-top:6px;">
+          <div class="bln">
+            <span class="verdict pass">PASS</span>
+            <span class="arrow">→</span>
+            <span class="state gate">RECONCILE_REVIEW</span>
+            <span class="arrow">→</span>
+            accept
+            <span class="arrow">→</span>
+            <span class="state terminal">COMPLETE</span>
+          </div>
+          <div class="bln">
+            <span class="verdict fail">FAIL</span>
+            <span class="arrow">→</span>
+            <span class="state gate">RECONCILE_REVIEW</span>
+            <span class="arrow loopback">⟲</span>
+            <span class="state gate">RECONCILE</span>
+            <span style="color:var(--muted); font-size:11px;">(another pass)</span>
+          </div>
+        </div>
+      </article>
+    </section>
+
+    <section class="station" data-station>
+      <div class="node-marker">⑩</div>
+      <article class="card">
+        <div class="card-head">
+          <div class="reveal">
+            <div class="phase-label">State · Gate</div>
+            <div class="phase-title">RECONCILE_REVIEW</div>
+          </div>
+        </div>
+        <p class="desc reveal">
+          Human or agent review of reconciliation results. On accept → <code>COMPLETE</code>.
+          On reject → loop back to <code>RECONCILE</code> for another pass.
+        </p>
+        <div class="track-label reveal">Outcome</div>
+        <div class="branch reveal">
+          <div class="bln">
+            <span class="verdict pass">accept</span>
+            <span class="arrow">→</span>
+            <span class="state terminal">COMPLETE</span>
+          </div>
+          <div class="bln">
+            <span class="verdict fail">reject</span>
+            <span class="arrow loopback">⟲</span>
+            <span class="state gate">RECONCILE</span>
+          </div>
+        </div>
+      </article>
+    </section>
+
+    <section class="station" data-station>
+      <div class="node-marker">✓</div>
+      <article class="card">
+        <div class="card-head">
+          <div class="reveal">
+            <div class="phase-label">State · Terminal</div>
+            <div class="phase-title">COMPLETE</div>
+            <div class="role">Action: <b>forgectl advance [--message &lt;msg&gt;]</b></div>
+          </div>
+          <div class="io reveal">
+            <div class="ln"><span class="tag">out</span><span class="val out">git commit (specs)</span></div>
+          </div>
+        </div>
+        <p class="desc reveal">
+          The <strong>single specifying commit</strong> — all accepted specs committed together.
+          <code>--message</code> required when <code>enable_commits: true</code> in config.
+          Phase ends; PHASE_SHIFT fires.
+        </p>
+        <div class="track-label reveal">Terminal</div>
+        <div class="track reveal">
+          <span class="state terminal">COMPLETE</span>
+          <span class="arrow">→</span>
+          <span class="state gate">PHASE_SHIFT</span>
+        </div>
+      </article>
+    </section>
+
+    <!-- PHASE SHIFT -->
+    <div class="shift" data-station>
+      <div class="shift-inner reveal">
+        <span class="ps">PHASE_SHIFT</span>
+        → generate_planning_queue
+        <span style="color:var(--muted-2)">— or</span>
+        <span class="route">advance --from plan-queue.json → Planning directly</span>
+      </div>
+    </div>
+
+  </main>
+
+  <footer>
+    <span>forgectl · docs/diagrams/01-specifying-phase</span>
+    <span><a href="index.html">← workflow index</a></span>
+  </footer>
+</div>
+
+<script>
+  const io = new IntersectionObserver((entries)=>{
+    entries.forEach(e=>{ if(e.isIntersecting){ e.target.classList.add('lit');
+      e.target.querySelectorAll('.reveal').forEach((el,i)=>{el.style.animationDelay=(i*70)+'ms';});
+      io.unobserve(e.target);} });
+  }, { threshold:0.14, rootMargin:'0px 0px -8% 0px' });
+  document.querySelectorAll('[data-station],[data-reveal]').forEach(s=>io.observe(s));
+</script>
+</body>
+</html>

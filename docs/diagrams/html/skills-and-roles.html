@@ -1,0 +1,615 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>forgectl — Skills &amp; Roles</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600;700&family=Archivo+Expanded:wght@600;700;800;900&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet" />
+<link rel="stylesheet" href="forge.css" />
+<style>
+  .skills-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(520px, 1fr));
+    gap: 20px;
+    padding: 8px 0 20px;
+  }
+  @media (max-width: 600px) {
+    .skills-grid { grid-template-columns: 1fr; }
+  }
+  .cap-list {
+    list-style: none;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    margin: 0;
+    padding: 0;
+  }
+  .cap-list li {
+    font-size: 13.5px;
+    color: var(--muted);
+    display: flex;
+    gap: 10px;
+    align-items: flex-start;
+    line-height: 1.45;
+  }
+  .cap-list li::before {
+    content: '—';
+    color: var(--ember-hot);
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px;
+    flex: none;
+    margin-top: 2px;
+  }
+  .cap-list li strong { color: var(--text); font-weight: 600; }
+  .cap-list.constraints li::before { color: var(--fail); }
+  .cap-list.refs li::before { color: var(--steel); }
+  .sub-label {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 10.5px;
+    letter-spacing: .24em;
+    text-transform: uppercase;
+    color: var(--muted-2);
+    margin: 18px 0 10px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+  .sub-label::after { content:''; flex:1; height:1px; background: var(--line); }
+  .skill-phase-link {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11.5px;
+    color: var(--muted);
+    text-decoration: none;
+    border: 1px solid var(--line);
+    background: var(--surface);
+    padding: 5px 12px;
+    border-radius: 100px;
+    margin-top: 16px;
+    transition: all .25s;
+  }
+  .skill-phase-link:hover { color: var(--ember-hot); border-color: var(--ember); transform: translateX(-3px); }
+  .role-chip {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px;
+    color: var(--ember-hot);
+    background: rgba(255,90,31,0.08);
+    border: 1px solid rgba(255,90,31,0.28);
+    padding: 4px 11px;
+    border-radius: 7px;
+    letter-spacing: .04em;
+  }
+  .role-chip.steel {
+    color: var(--steel);
+    background: rgba(95,168,211,0.08);
+    border-color: rgba(95,168,211,0.28);
+  }
+  .mono-tree {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 12.5px;
+    color: var(--muted);
+    line-height: 1.9;
+    background: var(--iron);
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    padding: 20px 24px;
+    overflow-x: auto;
+  }
+  .mono-tree .dir  { color: var(--text); }
+  .mono-tree .link { color: var(--ember-hot); }
+  .mono-tree .comment { color: var(--muted-2); }
+  .workflow-flow {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 5px;
+    margin: 6px 0 2px;
+  }
+  .panel-sub {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11.5px;
+    color: var(--muted-2);
+    margin-bottom: 18px;
+    letter-spacing: .03em;
+  }
+  .panel-sub .phase-tag {
+    color: var(--ember-hot);
+    font-weight: 700;
+  }
+  .panel-sub .file-tag {
+    color: var(--steel);
+  }
+</style>
+</head>
+<body>
+<div class="grain"></div>
+
+<div class="wrap">
+  <header>
+    <a class="crumb" href="index.html">← Workflow Atlas</a>
+    <span class="kicker"><span class="dot"></span> Reference · Agents</span>
+    <h1 class="page-title">Skills &amp; Roles</h1>
+    <p class="lede">
+      Each skill defines a specialized AI agent role with specific <strong>capabilities</strong>,
+      <strong>constraints</strong>, and <strong>workflow knowledge</strong>.
+      Skills are loaded via <code>.claude/skills/</code> symlink and drive every phase
+      of the forgectl pipeline.
+    </p>
+    <div class="meta-row">
+      <span class="chip"><b>Systems Architect</b></span>
+      <span class="chip"><b>Systems Architect</b> <span style="color:var(--muted-2);margin-left:2px">(Spectician)</span></span>
+      <span class="chip"><b>Staff Engineer</b></span>
+      <span class="chip"><b>Senior Software Engineer</b></span>
+      <span class="chip"><b>Senior Software Engineer (UI)</b></span>
+    </div>
+  </header>
+
+  <!-- ═══ SKILLS ARCHITECTURE ══════════════════════════════════════════════ -->
+  <div class="section-head" data-reveal>Architecture</div>
+
+  <div class="panel accent" data-reveal>
+    <div class="panel-title">Skills Architecture</div>
+    <p class="desc reveal" style="margin-bottom:18px;">
+      Skills live under <code>skills/</code> and are symlinked into <code>.claude/skills/</code>
+      so Claude Code can load them. Commands follow the same pattern via <code>.claude/commands/</code>.
+    </p>
+    <div class="reveal">
+      <div class="mono-tree">
+<span class="dir">.claude/</span>
+├── <span class="link">commands</span> -&gt; ../commands/
+│   └── meta/
+│       ├── <span class="comment">prompt-structure.md</span>
+│       ├── <span class="comment">gen-prompt-from-discussion.md</span>
+│       └── <span class="comment">start-discussion-to-gen-prompt.md</span>
+│
+└── <span class="link">skills</span> -&gt; ../skills/
+    ├── planner/                  <span class="comment">← Skill 1: Systems Architect (pre-spec)</span>
+    ├── specs/                    <span class="comment">← Skill 2: Systems Architect (specifying)</span>
+    ├── implementation_planning/  <span class="comment">← Skill 3: Staff Engineer (planning)</span>
+    ├── implement_from_specs/     <span class="comment">← Skill 5: Senior Engineer (no scaffold)</span>
+    └── implementation/           <span class="comment">← Skill 4: Senior Engineer (implementing)</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- ═══ WORKFLOW SELECTION ════════════════════════════════════════════════ -->
+  <div class="section-head" data-reveal>Workflow Selection Guide</div>
+
+  <div class="panel steel" data-reveal>
+    <div class="panel-title">Workflow Selection</div>
+    <p class="desc reveal" style="margin-bottom:18px;">
+      Start here to choose the right skill for your situation.
+    </p>
+    <div class="reveal">
+      <div class="mono-tree">
+                    Do you have specs?
+                          │
+                 ┌────────┴────────┐
+                 │                 │
+                NO                YES
+                 │                 │
+                 ▼                 │
+           Use PLANNER         Do you need
+           skill first         a full plan?
+                 │                 │
+                 ▼            ┌────┴────┐
+           Then SPECS         │         │
+           skill             YES        NO
+                 │            │         │
+                 ▼            ▼         ▼
+          Then choose:   Use full    Use IMPLEMENT
+                         pipeline:   FROM SPECS
+                         │           (skill 5)
+                         ▼
+                    SPECS (skill 2)
+                         │
+                         ▼
+                    IMPL PLANNING (skill 3)
+                         │
+                         ▼
+                    IMPLEMENTATION (skill 4)
+      </div>
+    </div>
+  </div>
+
+  <!-- ═══ ROLES ══════════════════════════════════════════════════════════════ -->
+  <div class="section-head" data-reveal>Roles</div>
+
+  <div class="skills-grid">
+
+    <!-- ──────────────── SKILL 1: PLANNER ──────────────── -->
+    <div class="panel accent" data-reveal>
+      <div class="panel-title">
+        <span class="n">01</span>
+        Planner
+        <span class="role-chip">Systems Architect</span>
+      </div>
+      <div class="panel-sub reveal">
+        <span class="phase-tag">Phase: Pre-specifying (standalone)</span>
+        &nbsp;·&nbsp;
+        <span class="file-tag">skills/planner/SKILL.md</span>
+      </div>
+
+      <div class="reveal">
+        <div class="sub-label">Purpose</div>
+        <ul class="cap-list">
+          <li>Research, discuss, and produce planning documents before specifying begins</li>
+          <li>Does <strong>NOT</strong> use the forgectl scaffold — standalone workflow</li>
+        </ul>
+      </div>
+
+      <div class="reveal">
+        <div class="sub-label">Workspace</div>
+        <div class="mono-tree" style="font-size:11.5px;padding:14px 18px;">
+.workspace/
+├── SPEC_MANIFEST.md        <span class="comment">← Index of all specs (source of truth)</span>
+├── planning/
+│   ├── &lt;domain&gt;/
+│   │   ├── diagrams/
+│   │   ├── concepts/
+│   │   └── VIEW_MANIFEST.md
+│   ├── diagrams/           <span class="comment">← Shared diagrams</span>
+│   └── implementation-planning/
+│       ├── implementation-stack.md
+│       └── implementation-phases.md
+└── tabled/                 <span class="comment">← Deferred plans</span>
+        </div>
+      </div>
+
+      <div class="reveal">
+        <div class="sub-label">Output format</div>
+        <ul class="cap-list">
+          <li><strong># Title</strong></li>
+          <li><strong>## Topic of Concern</strong></li>
+          <li><strong>## Context</strong></li>
+          <li><strong>## Proposal</strong></li>
+          <li><strong>## Domain</strong></li>
+          <li><strong>## Depends On</strong></li>
+          <li><strong>## Open Questions</strong></li>
+        </ul>
+      </div>
+
+      <div class="reveal">
+        <div class="sub-label">Constraints</div>
+        <ul class="cap-list constraints">
+          <li>Plans are technology-<strong>AGNOSTIC</strong></li>
+          <li>Never modifies specs directly</li>
+          <li>Maintains <code>SPEC_MANIFEST.md</code> as source of truth</li>
+        </ul>
+      </div>
+
+      <div class="reveal">
+        <div class="sub-label">References</div>
+        <ul class="cap-list refs">
+          <li><code>discussion-before-writing.md</code></li>
+          <li><code>gap-analysis.md</code></li>
+          <li><code>strategic-reassessment.md</code></li>
+          <li><code>cross-plan-consistency.md</code></li>
+          <li><code>schema-and-contract-definition.md</code></li>
+          <li><code>resolving-open-questions.md</code></li>
+        </ul>
+      </div>
+    </div>
+
+    <!-- ──────────────── SKILL 2: SPECS ──────────────── -->
+    <div class="panel accent" data-reveal>
+      <div class="panel-title">
+        <span class="n">02</span>
+        Specs
+        <span class="role-chip">Systems Architect</span>
+      </div>
+      <div class="panel-sub reveal">
+        <span class="phase-tag">Phase: Specifying</span>
+        &nbsp;·&nbsp;
+        <span class="file-tag">skills/specs/SKILL.md</span>
+        &nbsp;·&nbsp; uses forgectl scaffold
+      </div>
+
+      <div class="reveal">
+        <div class="sub-label">4 Supported Workflows</div>
+        <ul class="cap-list">
+          <li>
+            <strong>1. Generate From Plan</strong> (primary — uses forgectl)<br />
+            <span style="margin-left:0;display:block;margin-top:4px;">
+              <div class="workflow-flow">
+                <span class="state" style="font-size:11px;padding:5px 9px;">Search</span>
+                <span class="arrow">→</span>
+                <span class="state" style="font-size:11px;padding:5px 9px;">Init</span>
+                <span class="arrow">→</span>
+                <span class="state" style="font-size:11px;padding:5px 9px;">Loop per spec</span>
+                <span class="arrow">→</span>
+                <span class="state" style="font-size:11px;padding:5px 9px;">Reconcile</span>
+              </div>
+              <div class="workflow-flow" style="margin-top:4px;">
+                <span class="state" style="font-size:11px;padding:5px 9px;">ORIENT</span>
+                <span class="arrow">→</span>
+                <span class="state" style="font-size:11px;padding:5px 9px;">SELECT</span>
+                <span class="arrow">→</span>
+                <span class="state" style="font-size:11px;padding:5px 9px;">DRAFT</span>
+                <span class="arrow">→</span>
+                <span class="state eval" style="font-size:11px;padding:5px 9px;">EVALUATE</span>
+                <span class="arrow loopback">⇄</span>
+                <span class="state loop" style="font-size:11px;padding:5px 9px;">REFINE</span>
+                <span class="arrow">→</span>
+                <span class="state terminal" style="font-size:11px;padding:5px 9px;">ACCEPT</span>
+              </div>
+            </span>
+          </li>
+          <li>
+            <strong>2. Split Existing Spec</strong> — uses <code>merge-specs.md</code> methodology; when a spec covers multiple topics of concern
+          </li>
+          <li>
+            <strong>3. Review Spec Corpus</strong> — uses <code>cross-specification-review.md</code>; spawns 4–5 parallel sub-agents by concern area; finds contradictions, ambiguities, gaps, stale refs
+          </li>
+          <li>
+            <strong>4. Propagate Design Change</strong> — uses <code>cross-cutting-changes.md</code>; when a design decision cascades across multiple specs
+          </li>
+        </ul>
+      </div>
+
+      <div class="reveal">
+        <div class="sub-label">Key Principles</div>
+        <ul class="cap-list">
+          <li>Topic of Concern: one sentence, no "and"</li>
+          <li>Declarative voice: "the system does…" not "should…"</li>
+          <li>No open questions in specs</li>
+          <li>Technology-aware, not technology-coupled</li>
+          <li>Specs are <strong>permanent contracts</strong></li>
+        </ul>
+      </div>
+
+      <div class="reveal">
+        <div class="sub-label">Common Eval Findings to Avoid</div>
+        <ul class="cap-list constraints">
+          <li>Phantom Observability Entries</li>
+          <li>Unverifiable Invariants</li>
+          <li>Untested Invariants</li>
+          <li>Internal Architecture as Invariants</li>
+          <li>Silent Omissions</li>
+        </ul>
+      </div>
+
+      <div class="reveal">
+        <div class="sub-label">References</div>
+        <ul class="cap-list refs">
+          <li><code>spec-format.md</code></li>
+          <li><code>topic-of-concern.md</code></li>
+          <li><code>search-specs-for-specifying.md</code></li>
+          <li><code>merge-specs.md</code></li>
+          <li><code>cross-specification-review.md</code></li>
+          <li><code>cross-cutting-changes.md</code></li>
+          <li><code>forgectl-state-schema.md</code></li>
+          <li><code>forgectl-state-example.json</code></li>
+        </ul>
+      </div>
+
+      <a class="skill-phase-link reveal" href="specifying.html">← Open the Specifying state machine</a>
+    </div>
+
+    <!-- ──────────────── SKILL 3: IMPLEMENTATION PLANNING ──────────────── -->
+    <div class="panel accent" data-reveal>
+      <div class="panel-title">
+        <span class="n">03</span>
+        Implementation Planning
+        <span class="role-chip">Staff Engineer</span>
+      </div>
+      <div class="panel-sub reveal">
+        <span class="phase-tag">Phase: Planning</span>
+        &nbsp;·&nbsp;
+        <span class="file-tag">skills/implementation_planning/SKILL.md</span>
+        &nbsp;·&nbsp; uses forgectl scaffold
+      </div>
+
+      <div class="reveal">
+        <div class="sub-label">Purpose</div>
+        <ul class="cap-list">
+          <li>Generate <strong>validated implementation plans</strong> from completed specs</li>
+          <li>Studies specs, existing code, and packages before drafting any plan</li>
+        </ul>
+      </div>
+
+      <div class="reveal">
+        <div class="sub-label">Workflow</div>
+        <div class="workflow-flow">
+          <span class="state" style="font-size:11px;padding:5px 9px;">ORIENT</span>
+          <span class="arrow">→</span>
+          <span class="state" style="font-size:11px;padding:5px 9px;">STUDY_SPECS</span>
+          <span class="arrow">→</span>
+          <span class="state" style="font-size:11px;padding:5px 9px;">STUDY_CODE</span>
+          <span class="arrow">→</span>
+          <span class="state" style="font-size:11px;padding:5px 9px;">STUDY_PACKAGES</span>
+          <span class="arrow">→</span>
+          <span class="state" style="font-size:11px;padding:5px 9px;">REVIEW</span>
+          <span class="arrow">→</span>
+          <span class="state" style="font-size:11px;padding:5px 9px;">DRAFT</span>
+          <span class="arrow">→</span>
+          <span class="state" style="font-size:11px;padding:5px 9px;">VALIDATE</span>
+          <span class="arrow">→</span>
+          <span class="state eval" style="font-size:11px;padding:5px 9px;">EVALUATE</span>
+          <span class="arrow loopback">⇄</span>
+          <span class="state loop" style="font-size:11px;padding:5px 9px;">REFINE</span>
+          <span class="arrow">→</span>
+          <span class="state terminal" style="font-size:11px;padding:5px 9px;">ACCEPT</span>
+          <span class="arrow">→</span>
+          <span class="state gate" style="font-size:11px;padding:5px 9px;">PHASE_SHIFT</span>
+        </div>
+      </div>
+
+      <div class="reveal">
+        <div class="sub-label">Produces</div>
+        <div class="mono-tree" style="font-size:11.5px;padding:14px 18px;">
+&lt;domain&gt;/.forge_workspace/implementation_plan/
+├── plan.json       <span class="comment">(structured manifest)</span>
+└── notes/          <span class="comment">(per-package implementation guidance)</span>
+    ├── &lt;pkg-a&gt;.md
+    └── &lt;pkg-b&gt;.md
+        </div>
+      </div>
+
+      <div class="reveal">
+        <div class="sub-label">References</div>
+        <ul class="cap-list refs">
+          <li><code>plan-format.json</code></li>
+          <li><code>plan-queue-format.md</code> / <code>.json</code></li>
+          <li><code>creating-plan-queue.md</code></li>
+          <li><code>planning-navigation.md</code></li>
+        </ul>
+      </div>
+
+      <a class="skill-phase-link reveal" href="planning.html">← Open the Planning state machine</a>
+    </div>
+
+    <!-- ──────────────── SKILL 4: IMPLEMENTATION ──────────────── -->
+    <div class="panel accent" data-reveal>
+      <div class="panel-title">
+        <span class="n">04</span>
+        Implementation
+        <span class="role-chip">Senior Software Engineer</span>
+      </div>
+      <div class="panel-sub reveal">
+        <span class="phase-tag">Phase: Implementing (full scaffold)</span>
+        &nbsp;·&nbsp;
+        <span class="file-tag">skills/implementation/SKILL.md</span>
+        &nbsp;·&nbsp; uses forgectl scaffold
+      </div>
+
+      <div class="reveal">
+        <div class="sub-label">Purpose</div>
+        <ul class="cap-list">
+          <li>Execute implementation items with <strong>evaluation checkpoints</strong></li>
+          <li>Default code path for <code>kind: code</code> plans</li>
+        </ul>
+      </div>
+
+      <div class="reveal">
+        <div class="sub-label">Workflow</div>
+        <div class="workflow-flow">
+          <span class="state" style="font-size:11px;padding:5px 9px;">ORIENT</span>
+          <span class="arrow">→</span>
+          <span class="state" style="font-size:11px;padding:5px 9px;">IMPLEMENT <span class="sub">per item</span></span>
+          <span class="arrow">→</span>
+          <span class="state eval" style="font-size:11px;padding:5px 9px;">EVALUATE</span>
+          <span class="arrow">→</span>
+          <span class="state" style="font-size:11px;padding:5px 9px;">COMMIT</span>
+          <span class="arrow">→</span>
+          <span class="state terminal" style="font-size:11px;padding:5px 9px;">DONE</span>
+        </div>
+        <div style="margin-top:6px;font-family:'JetBrains Mono',monospace;font-size:11px;color:var(--muted-2);">
+          ORIENT (next batch) loops back until queue drains
+        </div>
+      </div>
+
+      <div class="reveal">
+        <div class="sub-label">Tracks progress in</div>
+        <ul class="cap-list">
+          <li><code>{domain}/.workspace/implementation/IMPLEMENTATION_LOG.md</code></li>
+        </ul>
+      </div>
+
+      <div class="reveal">
+        <div class="sub-label">Sub-agent patterns</div>
+        <ul class="cap-list">
+          <li>Codebase search — confirm feature doesn't already exist</li>
+          <li>Build/test operations — ONE sub-agent per invocation</li>
+          <li>Evaluation — spawned for <code>forgectl eval</code></li>
+          <li>Document updates — <code>IMPLEMENTATION_LOG</code>, <code>CLAUDE.md</code></li>
+        </ul>
+      </div>
+
+      <div class="reveal">
+        <div class="sub-label">References</div>
+        <ul class="cap-list refs">
+          <li><code>forgectl-workflow.md</code></li>
+          <li><code>git-commit-guidelines.md</code></li>
+          <li><code>subagent-usage.md</code></li>
+          <li><code>implementation_log_format.md</code></li>
+        </ul>
+      </div>
+
+      <a class="skill-phase-link reveal" href="implementing.html">← Open the Implementing state machine</a>
+    </div>
+
+    <!-- ──────────────── SKILL 5: IMPLEMENT FROM SPECS ──────────────── -->
+    <div class="panel steel" data-reveal>
+      <div class="panel-title">
+        <span class="n" style="color:var(--steel);">05</span>
+        Implement From Specs
+        <span class="role-chip steel">Senior Software Engineer</span>
+      </div>
+      <div class="panel-sub reveal">
+        <span style="color:var(--steel);font-weight:700;">Phase: Standalone — does NOT use forgectl</span>
+        &nbsp;·&nbsp;
+        <span class="file-tag">skills/implement_from_specs/SKILL.md</span>
+      </div>
+
+      <div class="reveal">
+        <div class="sub-label">Purpose</div>
+        <ul class="cap-list">
+          <li>Quick implementation when specs already exist</li>
+          <li><strong>Bypasses</strong> the full planning phase entirely</li>
+        </ul>
+      </div>
+
+      <div class="reveal">
+        <div class="sub-label">Workflow (4 steps)</div>
+        <ul class="cap-list">
+          <li>
+            <strong>1. Orient</strong> — Read specs, check log, study code
+          </li>
+          <li>
+            <strong>2. Implement</strong> — Code completely; no stubs
+          </li>
+          <li>
+            <strong>3. Validate</strong> — Run tests, diagnose failures
+          </li>
+          <li>
+            <strong>4. Record</strong> — Log entry + git commit
+          </li>
+        </ul>
+      </div>
+
+      <div class="reveal">
+        <div class="sub-label">Tracks progress in</div>
+        <ul class="cap-list">
+          <li><code>{domain}/.workspace/implement-from-specs/IMPLEMENTATION_LOG.md</code></li>
+        </ul>
+      </div>
+
+      <div class="reveal">
+        <div class="sub-label">References</div>
+        <ul class="cap-list refs">
+          <li><code>git-commit-guidelines.md</code></li>
+          <li><code>subagent-usage.md</code></li>
+          <li><code>implementation-log-format.md</code></li>
+        </ul>
+      </div>
+
+      <div class="reveal" style="margin-top:16px;">
+        <div style="font-family:'JetBrains Mono',monospace;font-size:11px;color:var(--muted-2);background:var(--iron);border:1px solid var(--line);border-radius:8px;padding:10px 14px;">
+          Use when: specs exist · plan already understood · no scaffold needed
+        </div>
+      </div>
+    </div>
+
+  </div><!-- /.skills-grid -->
+
+  <footer>
+    <span>forgectl · docs/diagrams/05-skills-and-roles</span>
+    <span><a href="index.html">← workflow index</a></span>
+  </footer>
+</div>
+
+<script>
+  const io = new IntersectionObserver((entries)=>{
+    entries.forEach(e=>{ if(e.isIntersecting){ e.target.classList.add('lit');
+      e.target.querySelectorAll('.reveal').forEach((el,i)=>{el.style.animationDelay=(i*70)+'ms';});
+      io.unobserve(e.target);} });
+  }, { threshold:0.14, rootMargin:'0px 0px -8% 0px' });
+  document.querySelectorAll('[data-station],[data-reveal]').forEach(s=>io.observe(s));
+</script>
+</body>
+</html>

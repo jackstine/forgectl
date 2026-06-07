@@ -1,0 +1,531 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>forgectl — Data Flow &amp; Artifact Map</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600;700&family=Archivo+Expanded:wght@600;700;800;900&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet" />
+<link rel="stylesheet" href="forge.css" />
+<style>
+  .io-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 20px;
+    margin-top: 20px;
+  }
+  @media (max-width: 640px) {
+    .io-grid { grid-template-columns: 1fr; }
+  }
+  .io-col-head {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 10px;
+    letter-spacing: 0.28em;
+    text-transform: uppercase;
+    color: var(--muted-2);
+    margin-bottom: 10px;
+  }
+  .artifact-list {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 12px;
+  }
+  .artifact-list .arow {
+    display: flex;
+    align-items: flex-start;
+    gap: 8px;
+    flex-wrap: wrap;
+  }
+  .artifact-list .note {
+    color: var(--muted-2);
+    font-size: 11px;
+    padding-left: 4px;
+  }
+  .path-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 12px;
+    margin-top: 6px;
+  }
+  .path-table th {
+    text-align: left;
+    color: var(--muted-2);
+    font-size: 10px;
+    letter-spacing: 0.2em;
+    text-transform: uppercase;
+    padding: 6px 10px;
+    border-bottom: 1px solid var(--line);
+  }
+  .path-table td {
+    padding: 7px 10px;
+    border-bottom: 1px solid var(--line-soft);
+    color: var(--muted);
+    vertical-align: top;
+  }
+  .path-table td:first-child { color: var(--spark); }
+  .path-table tr:last-child td { border-bottom: none; }
+  .json-block {
+    background: var(--iron);
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    padding: 16px 18px;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11.5px;
+    color: var(--muted);
+    margin-top: 14px;
+    line-height: 1.7;
+  }
+  .json-block .k  { color: var(--steel); }
+  .json-block .v  { color: var(--spark); }
+  .json-block .c  { color: var(--muted-2); }
+  .json-block .em { color: var(--ember-hot); }
+</style>
+</head>
+<body>
+<div class="grain"></div>
+
+<div class="wrap">
+  <header>
+    <a class="crumb" href="index.html">← Workflow Atlas</a>
+    <span class="kicker"><span class="dot"></span> Reference · Artifacts</span>
+    <h1 class="page-title">Data Flow</h1>
+    <p class="lede">
+      What each phase <strong>consumes</strong> and <strong>produces</strong>, and how artifacts flow
+      from planning docs to production code — from <code>spec-queue.json</code> through
+      <code>plan.json</code> to committed source and permanent Playwright tests.
+    </p>
+    <div class="meta-row">
+      <span class="chip"><b>spec-queue.json</b></span>
+      <span class="chip"><b>specs/*.md</b></span>
+      <span class="chip"><b>plan-queue.json</b></span>
+      <span class="chip"><b>plan.json</b></span>
+      <span class="chip"><b>evals/*.md</b></span>
+      <span class="chip"><b>IMPLEMENTATION_LOG.md</b></span>
+      <span class="chip steel"><b>forgectl-state.json</b></span>
+    </div>
+  </header>
+
+  <main class="pipeline">
+
+    <!-- ── ORIGIN ── -->
+    <section class="station" data-station>
+      <div class="node-marker">0</div>
+      <article class="card steel">
+        <div class="card-head">
+          <div class="reveal">
+            <div class="phase-label">Origin</div>
+            <div class="phase-title">User / Planner</div>
+            <div class="role">Planning docs · Architecture decisions</div>
+          </div>
+          <div class="io reveal">
+            <div class="ln"><span class="tag">out</span><span class="val out">.forge_workspace/planning/</span></div>
+            <div class="ln"><span class="tag">out</span><span class="val out">spec-queue.json</span></div>
+          </div>
+        </div>
+        <p class="desc reveal">
+          The operator seeds the workspace with planning documents and a
+          <code>spec-queue.json</code> that lists every spec to be authored.
+          These are the only human-authored inputs the workflow requires.
+        </p>
+        <div class="track-label reveal">Planning workspace layout</div>
+        <div class="artifact-list reveal">
+          <div class="arow"><span class="val">.forge_workspace/planning/&lt;domain&gt;/concepts/*.md</span><span class="note">Architecture concepts</span></div>
+          <div class="arow"><span class="val">.forge_workspace/planning/&lt;domain&gt;/diagrams/*.md</span><span class="note">System diagrams</span></div>
+          <div class="arow"><span class="val">.forge_workspace/planning/implementation-planning/implementation-stack.md</span><span class="note">Tech stack decisions</span></div>
+          <div class="arow"><span class="val">.forge_workspace/planning/implementation-planning/implementation-phases.md</span><span class="note">Phased delivery plan</span></div>
+          <div class="arow"><span class="val">.forge_workspace/planning/SPEC_MANIFEST.md</span><span class="note">Master spec index</span></div>
+        </div>
+      </article>
+    </section>
+
+    <div class="shift" data-station>
+      <div class="shift-inner reveal">
+        <span class="ps">consumed by</span> → Phase 1: Specifying
+      </div>
+    </div>
+
+    <!-- ── PHASE 1: SPECIFYING ── -->
+    <section class="station" data-station>
+      <div class="node-marker">1</div>
+      <article class="card">
+        <div class="card-head">
+          <div class="reveal">
+            <div class="phase-label">Phase 01 — Heat</div>
+            <div class="phase-title">Specifying</div>
+            <div class="role">Role: <b>Systems Architect</b></div>
+          </div>
+          <div class="io reveal">
+            <div class="ln"><span class="tag">in</span><span class="val">spec-queue.json</span></div>
+            <div class="ln"><span class="tag">in</span><span class="val">planning docs (read-only)</span></div>
+            <div class="ln"><span class="tag">out</span><span class="val out">&lt;domain&gt;/specs/*.md</span></div>
+            <div class="ln"><span class="tag">out</span><span class="val out">specs/.eval/batch-N-rM.md</span></div>
+            <div class="ln"><span class="tag">out</span><span class="val out">forgectl-state.json</span></div>
+          </div>
+        </div>
+        <p class="desc reveal">
+          Reads <code>spec-queue.json</code> to know which specs to author. Each spec is drafted then
+          put through an adversarial 11-dimension review. Cross-spec
+          <strong>reconciliation</strong> validates dependencies before a single commit at
+          <code>COMPLETE</code>.
+        </p>
+        <div class="track-label reveal">spec-queue.json shape</div>
+        <div class="json-block reveal">
+          <span class="c">// spec-queue.json — consumed by Phase 1</span><br/>
+          {<br/>
+          &nbsp;&nbsp;<span class="k">"specs"</span>: [{<br/>
+          &nbsp;&nbsp;&nbsp;&nbsp;<span class="k">"name"</span>: <span class="v">"auth-sessions"</span>,<br/>
+          &nbsp;&nbsp;&nbsp;&nbsp;<span class="k">"domain"</span>: <span class="v">"api"</span>,<br/>
+          &nbsp;&nbsp;&nbsp;&nbsp;<span class="k">"topic"</span>: <span class="v">"..."</span>,<br/>
+          &nbsp;&nbsp;&nbsp;&nbsp;<span class="k">"file"</span>: <span class="v">"api/specs/auth-sessions.md"</span>,<br/>
+          &nbsp;&nbsp;&nbsp;&nbsp;<span class="k">"planning_sources"</span>: [<span class="v">"..."</span>],<br/>
+          &nbsp;&nbsp;&nbsp;&nbsp;<span class="k">"depends_on"</span>: [<span class="v">"..."</span>]<br/>
+          &nbsp;&nbsp;}]<br/>
+          }
+        </div>
+        <div class="track-label reveal">outputs</div>
+        <div class="artifact-list reveal">
+          <div class="arow"><span class="val out">&lt;domain&gt;/specs/&lt;spec-a&gt;.md</span><span class="note">Authored behavioral contracts</span></div>
+          <div class="arow"><span class="val out">&lt;domain&gt;/specs/.eval/batch-1-r1.md</span><span class="note">Evaluation round reports</span></div>
+          <div class="arow"><span class="val out">.forgectl/state/forgectl-state.json</span><span class="note">Updated after each state transition</span></div>
+        </div>
+      </article>
+    </section>
+
+    <div class="shift" data-station>
+      <div class="shift-inner reveal">
+        <span class="ps">PHASE_SHIFT</span> → generate_planning_queue
+        <span style="color:var(--muted-2)">— or</span>
+        <span class="route">advance --from plan-queue.json</span>
+      </div>
+    </div>
+
+    <!-- ── PHASE 2: GENERATE PLANNING QUEUE ── -->
+    <section class="station cool" data-station>
+      <div class="node-marker">2</div>
+      <article class="card steel">
+        <div class="card-head">
+          <div class="reveal">
+            <div class="phase-label">Phase 02 — Sort</div>
+            <div class="phase-title">Generate Planning Queue</div>
+            <div class="role">Auto-generated, then architect-reviewed</div>
+          </div>
+          <div class="io reveal">
+            <div class="ln"><span class="tag">in</span><span class="val">completed specs (from state)</span></div>
+            <div class="ln"><span class="tag">in</span><span class="val">OR --from override (skips phase)</span></div>
+            <div class="ln"><span class="tag">out</span><span class="val out">.forgectl/state/plan-queue.json</span></div>
+            <div class="ln"><span class="tag">out</span><span class="val out">forgectl-state.json</span></div>
+          </div>
+        </div>
+        <p class="desc reveal">
+          Auto-generates <code>plan-queue.json</code> from completed spec data in state.
+          The architect reorders and edits before planning begins. The critical
+          <code>kind</code> field set here (<code>"code"</code> or <code>"ui"</code>)
+          <strong>routes which implementation phase is entered</strong> later.
+        </p>
+        <div class="track-label reveal">plan-queue.json shape</div>
+        <div class="json-block reveal">
+          <span class="c">// plan-queue.json — produced by Phase 2, consumed by Phase 3</span><br/>
+          {<br/>
+          &nbsp;&nbsp;<span class="k">"plans"</span>: [{<br/>
+          &nbsp;&nbsp;&nbsp;&nbsp;<span class="k">"name"</span>: <span class="v">"auth-layer"</span>,<br/>
+          &nbsp;&nbsp;&nbsp;&nbsp;<span class="k">"domain"</span>: <span class="v">"api"</span>,<br/>
+          &nbsp;&nbsp;&nbsp;&nbsp;<span class="k">"kind"</span>: <span class="em">"code"</span> <span class="c">| <span class="em">"ui"</span>  ← routes 4a vs 4b</span>,<br/>
+          &nbsp;&nbsp;&nbsp;&nbsp;<span class="k">"file"</span>: <span class="v">"..."</span>,<br/>
+          &nbsp;&nbsp;&nbsp;&nbsp;<span class="k">"specs"</span>: [<span class="v">"auth-sessions.md"</span>],<br/>
+          &nbsp;&nbsp;&nbsp;&nbsp;<span class="k">"spec_commits"</span>: [<span class="v">"abc123"</span>],<br/>
+          &nbsp;&nbsp;&nbsp;&nbsp;<span class="k">"code_search_roots"</span>: [<span class="v">"internal/"</span>]<br/>
+          &nbsp;&nbsp;}]<br/>
+          }
+        </div>
+      </article>
+    </section>
+
+    <div class="shift" data-station>
+      <div class="shift-inner reveal">
+        <span class="ps">PHASE_SHIFT</span> → planning
+        <span style="color:var(--muted-2)">— or</span>
+        <span class="route">advance --from &lt;path&gt;</span>
+      </div>
+    </div>
+
+    <!-- ── PHASE 3: PLANNING ── -->
+    <section class="station" data-station>
+      <div class="node-marker">3</div>
+      <article class="card">
+        <div class="card-head">
+          <div class="reveal">
+            <div class="phase-label">Phase 03 — Draw</div>
+            <div class="phase-title">Planning</div>
+            <div class="role">Role: <b>Staff Engineer</b></div>
+          </div>
+          <div class="io reveal">
+            <div class="ln"><span class="tag">in</span><span class="val">plan-queue.json</span></div>
+            <div class="ln"><span class="tag">in</span><span class="val">specs/*.md (read-only)</span></div>
+            <div class="ln"><span class="tag">in</span><span class="val">source code (read-only)</span></div>
+            <div class="ln"><span class="tag">in</span><span class="val">package manifests (read-only)</span></div>
+            <div class="ln"><span class="tag">in</span><span class="val">evaluators/plan-eval.md (binary)</span></div>
+            <div class="ln"><span class="tag">out</span><span class="val out">implementation_plan/plan.json</span></div>
+            <div class="ln"><span class="tag">out</span><span class="val out">implementation_plan/notes/*.md</span></div>
+            <div class="ln"><span class="tag">out</span><span class="val out">implementation_plan/evals/round-N.md</span></div>
+            <div class="ln"><span class="tag">out</span><span class="val out">forgectl-state.json</span></div>
+          </div>
+        </div>
+        <p class="desc reveal">
+          Studies specs, existing code, and packages before drafting an executable plan.
+          Each plan carries <code>kind: "code"</code> or <code>kind: "ui"</code> —
+          the field that <strong>routes the next phase shift</strong> to the matching
+          implementation variant. <code>kind</code> passes through planning unchanged.
+        </p>
+        <div class="track-label reveal">plan.json workspace layout</div>
+        <div class="artifact-list reveal">
+          <div class="arow"><span class="val out">&lt;domain&gt;/.forge_workspace/implementation_plan/plan.json</span></div>
+          <div class="arow"><span class="val out">&lt;domain&gt;/.forge_workspace/implementation_plan/notes/&lt;pkg-a&gt;.md</span></div>
+          <div class="arow"><span class="val out">&lt;domain&gt;/.forge_workspace/implementation_plan/evals/round-1.md</span></div>
+          <div class="arow"><span class="val out">&lt;domain&gt;/.forge_workspace/implementation_plan/evals/round-2.md</span></div>
+        </div>
+      </article>
+    </section>
+
+    <div class="shift" data-station>
+      <div class="shift-inner reveal">
+        <span class="ps">PHASE_SHIFT</span>
+        <span style="color:var(--muted-2)">routed by kind:</span>
+        <span class="route"><span class="k">kind: code</span> → implementing</span>
+        <span class="route"><span class="k">kind: ui</span> → ui_implementing</span>
+      </div>
+    </div>
+
+    <!-- ── PHASE 4a: IMPLEMENTING ── -->
+    <section class="station" data-station>
+      <div class="node-marker">4a</div>
+      <article class="card">
+        <div class="card-head">
+          <div class="reveal">
+            <div class="phase-label">Phase 04a — Forge · kind: code</div>
+            <div class="phase-title">Implementing</div>
+            <div class="role">Role: <b>Senior Software Engineer</b></div>
+          </div>
+          <div class="io reveal">
+            <div class="ln"><span class="tag">in</span><span class="val">plan.json (passes: pending, rounds: 0)</span></div>
+            <div class="ln"><span class="tag">in</span><span class="val">specs/*.md (read-only)</span></div>
+            <div class="ln"><span class="tag">in</span><span class="val">notes/*.md (read-only)</span></div>
+            <div class="ln"><span class="tag">in</span><span class="val">evaluators/impl-eval.md (binary)</span></div>
+            <div class="ln"><span class="tag">in</span><span class="val">source code (read/write)</span></div>
+            <div class="ln"><span class="tag">out</span><span class="val out">production code (plan item files)</span></div>
+            <div class="ln"><span class="tag">out</span><span class="val out">evals/batch-N-round-M.md</span></div>
+            <div class="ln"><span class="tag">out</span><span class="val out">implementation/IMPLEMENTATION_LOG.md</span></div>
+            <div class="ln"><span class="tag">out</span><span class="val out">plan.json (passes + rounds updated)</span></div>
+            <div class="ln"><span class="tag">out</span><span class="val out">forgectl-state.json</span></div>
+          </div>
+        </div>
+        <p class="desc reveal">
+          Implements each batch item, evaluates against <code>impl-eval.md</code>, and commits.
+          <strong>FAIL re-enters</strong> implement at round 2+; more batches loop back until the
+          queue drains. <code>plan.json</code> items are mutated with
+          <code>passes: "passed" | "failed"</code> and an incremented <code>rounds</code> count.
+        </p>
+        <div class="track-label reveal">plan.json mutation</div>
+        <div class="json-block reveal">
+          <span class="c">// plan.json — added by PHASE_SHIFT, updated during implementing</span><br/>
+          items[N].{<br/>
+          &nbsp;&nbsp;<span class="k">"passes"</span>: <span class="em">"pending"</span> → <span class="v">"passed"</span> | <span class="v">"failed"</span>,<br/>
+          &nbsp;&nbsp;<span class="k">"rounds"</span>: <span class="em">0</span> → <span class="v">N</span> <span class="c">// incremented each eval round</span><br/>
+          }
+        </div>
+        <div class="track-label reveal">output workspace layout</div>
+        <div class="artifact-list reveal">
+          <div class="arow"><span class="val out">production code (files listed in plan items)</span></div>
+          <div class="arow"><span class="val out">&lt;domain&gt;/.forge_workspace/implementation_plan/evals/batch-1-round-1.md</span></div>
+          <div class="arow"><span class="val out">&lt;domain&gt;/.forge_workspace/implementation/IMPLEMENTATION_LOG.md</span></div>
+        </div>
+      </article>
+    </section>
+
+    <!-- ── PHASE 4b: UI_IMPLEMENTING ── -->
+    <section class="station" data-station>
+      <div class="node-marker">4b</div>
+      <article class="card">
+        <div class="card-head">
+          <div class="reveal">
+            <div class="phase-label">Phase 04b — Forge + Quench · kind: ui</div>
+            <div class="phase-title">UI Implementing</div>
+            <div class="role">Role: <b>Senior Software Engineer (UI)</b></div>
+          </div>
+          <div class="io reveal">
+            <div class="ln"><span class="tag">in</span><span class="val">plan.json (passes: pending, rounds: 0)</span></div>
+            <div class="ln"><span class="tag">in</span><span class="val">ui_implementing config (launch_command, url, e2e.test_command)</span></div>
+            <div class="ln"><span class="tag">in</span><span class="val">evaluators/impl-eval.md (binary)</span></div>
+            <div class="ln"><span class="tag">in</span><span class="val">evaluators/ui-qa-eval.md (binary)</span></div>
+            <div class="ln"><span class="tag">in</span><span class="val">evaluators/ui-e2e-eval.md (binary)</span></div>
+            <div class="ln"><span class="tag">in</span><span class="val">running app via Playwright MCP</span></div>
+            <div class="ln"><span class="tag">in</span><span class="val">source code (read/write)</span></div>
+            <div class="ln"><span class="tag">out</span><span class="val out">UI production code</span></div>
+            <div class="ln"><span class="tag">out</span><span class="val out">ui_plan/evals/batch-N-round-M.md</span></div>
+            <div class="ln"><span class="tag">out</span><span class="val out">ui_plan/qa/batch-N-steps.json</span></div>
+            <div class="ln"><span class="tag">out</span><span class="val out">ui_plan/qa/batch-N-round-M.md</span></div>
+            <div class="ln"><span class="tag">out</span><span class="val out">ui_plan/qa/batch-N-round-M-*.png</span></div>
+            <div class="ln"><span class="tag">out</span><span class="val out">ui_plan/e2e/batch-N-round-M.md</span></div>
+            <div class="ln"><span class="tag">out</span><span class="val out">e2e.test_dir/*.spec.ts (permanent)</span></div>
+            <div class="ln"><span class="tag">out</span><span class="val out">plan.json (passes + rounds updated)</span></div>
+            <div class="ln"><span class="tag">out</span><span class="val out">forgectl-state.json</span></div>
+          </div>
+        </div>
+        <p class="desc reveal">
+          Reuses the implementing spine, then inserts <strong>two extra verification loops</strong>
+          between code eval and commit. A <code>passed</code> item means all three loops passed within budget;
+          <code>failed</code> means at least one loop was forced. <code>rounds</code> counts
+          eval + QA + e2e rounds combined. Authored <code>*.spec.ts</code> files are
+          <strong>permanent assets</strong> written to the project's e2e test directory.
+        </p>
+        <div class="track-label reveal">Three gates per batch</div>
+        <div class="track reveal">
+          <span class="state eval">CODE EVAL</span><span class="arrow">→</span>
+          <span class="state gate">QA</span>
+          <span class="arrow loopback">⟲</span>
+          <span class="state loop">UI_REFINE</span><span class="arrow">→</span>
+          <span class="state gate">E2E</span>
+          <span class="arrow loopback">⟲</span>
+          <span class="state loop">E2E_REMEDIATE</span><span class="arrow">→</span>
+          <span class="state">COMMIT</span>
+        </div>
+        <div class="track-label reveal">QA → E2E contract</div>
+        <div class="artifact-list reveal">
+          <div class="arow"><span class="val out">ui_plan/qa/batch-N-steps.json</span><span class="note">Step list authored during QA; drives e2e test authoring</span></div>
+          <div class="arow"><span class="val out">ui_plan/qa/batch-N-round-M-*.png</span><span class="note">Screenshot evidence captured via Playwright MCP</span></div>
+          <div class="arow"><span class="val out">e2e.test_dir/*.spec.ts</span><span class="note">Playwright tests — authored once, permanent project assets</span></div>
+        </div>
+      </article>
+    </section>
+
+    <div class="shift" data-station>
+      <div class="shift-inner reveal">
+        <span class="ps">PHASE_SHIFT</span> → planning (next domain) <span style="color:var(--muted-2)">if plans remain · domain boundaries re-route by kind</span>
+      </div>
+    </div>
+
+  </main>
+
+  <!-- ── REFERENCE PANELS ── -->
+
+  <div class="section-head" data-reveal>State &amp; Config Files</div>
+
+  <div class="panel accent" data-reveal style="margin-bottom: 20px;">
+    <div class="panel-title">forgectl-state.json</div>
+    <p class="desc reveal" style="margin-top:0; margin-bottom:16px;">
+      Persistent across all phases. Written atomically
+      (tmpfile → backup → rename). Config nested under <code>"config"</code>
+      mirrors TOML structure. Path: <code>.forgectl/state/forgectl-state.json</code>.
+    </p>
+    <div class="json-block reveal">
+      {<br/>
+      &nbsp;&nbsp;<span class="k">"phase"</span>: <span class="v">"specifying | generate_planning_queue | planning | implementing | ui_implementing"</span>,<br/>
+      &nbsp;&nbsp;<span class="k">"state"</span>: <span class="v">"&lt;current state&gt;"</span>,<br/>
+      &nbsp;&nbsp;<span class="k">"started_at_phase"</span>: <span class="v">"specifying | planning | implementing | ui_implementing"</span>,<br/>
+      &nbsp;&nbsp;<span class="k">"config"</span>: {<br/>
+      &nbsp;&nbsp;&nbsp;&nbsp;<span class="k">"specifying"</span>: { <span class="k">"batch"</span>: N, <span class="k">"eval"</span>: { <span class="c">...</span> } },<br/>
+      &nbsp;&nbsp;&nbsp;&nbsp;<span class="k">"planning"</span>: { <span class="k">"batch"</span>: N, <span class="k">"eval"</span>: { <span class="c">...</span> } },<br/>
+      &nbsp;&nbsp;&nbsp;&nbsp;<span class="k">"implementing"</span>: { <span class="k">"batch"</span>: N, <span class="k">"eval"</span>: { <span class="c">...</span> } },<br/>
+      &nbsp;&nbsp;&nbsp;&nbsp;<span class="k">"ui_implementing"</span>: {<br/>
+      &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="k">"batch"</span>: N, <span class="k">"commit_strategy"</span>: <span class="v">"..."</span>,<br/>
+      &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="k">"app"</span>: { <span class="k">"launch_command"</span>, <span class="k">"url"</span>, <span class="k">"ready_timeout_seconds"</span> },<br/>
+      &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="k">"eval"</span>: { <span class="c">...</span> }, <span class="k">"qa"</span>: { <span class="c">...</span> },<br/>
+      &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="k">"e2e"</span>: { <span class="c">...</span>, <span class="k">"test_command"</span>, <span class="k">"test_dir"</span> }<br/>
+      &nbsp;&nbsp;&nbsp;&nbsp;},<br/>
+      &nbsp;&nbsp;&nbsp;&nbsp;<span class="k">"general"</span>: { <span class="k">"enable_commits"</span>: bool, <span class="k">"user_guided"</span>: bool }<br/>
+      &nbsp;&nbsp;},<br/>
+      &nbsp;&nbsp;<span class="k">"specifying"</span>: { <span class="c">... phase data ...</span> },<br/>
+      &nbsp;&nbsp;<span class="k">"planning"</span>: { <span class="c">... phase data ...</span> },<br/>
+      &nbsp;&nbsp;<span class="k">"implementing"</span>: { <span class="c">... phase data ...</span> }<br/>
+      }
+    </div>
+  </div>
+
+  <div class="section-head" data-reveal>plan.json Full Structure</div>
+
+  <div class="panel" data-reveal style="margin-bottom: 20px;">
+    <div class="panel-title">plan.json</div>
+    <p class="desc reveal" style="margin-top:0; margin-bottom:16px;">
+      Lives at <code>&lt;domain&gt;/.forge_workspace/implementation_plan/plan.json</code>.
+      Produced by Planning; mutated by PHASE_SHIFT (adds <code>passes</code> and <code>rounds</code>
+      to every item) and updated throughout implementation as items complete.
+    </p>
+    <div class="json-block reveal">
+      {<br/>
+      &nbsp;&nbsp;<span class="k">"context"</span>: { <span class="k">"domain"</span>: <span class="v">"api"</span>, <span class="k">"module"</span>: <span class="v">"github.com/org/api"</span> },<br/><br/>
+      &nbsp;&nbsp;<span class="k">"refs"</span>: [{ <span class="k">"id"</span>: <span class="v">"notes-config"</span>, <span class="k">"path"</span>: <span class="v">"notes/config.md"</span> }],<br/><br/>
+      &nbsp;&nbsp;<span class="k">"layers"</span>: [<br/>
+      &nbsp;&nbsp;&nbsp;&nbsp;{ <span class="k">"id"</span>: <span class="v">"L0"</span>, <span class="k">"name"</span>: <span class="v">"Foundation"</span>, <span class="k">"items"</span>: [<span class="v">"config.types"</span>] },<br/>
+      &nbsp;&nbsp;&nbsp;&nbsp;{ <span class="k">"id"</span>: <span class="v">"L1"</span>, <span class="k">"name"</span>: <span class="v">"Core Logic"</span>, <span class="k">"items"</span>: [<span class="v">"auth.middleware"</span>] }<br/>
+      &nbsp;&nbsp;],<br/><br/>
+      &nbsp;&nbsp;<span class="k">"items"</span>: [{<br/>
+      &nbsp;&nbsp;&nbsp;&nbsp;<span class="k">"id"</span>: <span class="v">"config.types"</span>, <span class="k">"name"</span>: <span class="v">"Configuration types"</span>,<br/>
+      &nbsp;&nbsp;&nbsp;&nbsp;<span class="k">"description"</span>: <span class="v">"Go structs for service config"</span>,<br/>
+      &nbsp;&nbsp;&nbsp;&nbsp;<span class="k">"depends_on"</span>: [], <span class="k">"steps"</span>: [<span class="v">"Create types.go"</span>],<br/>
+      &nbsp;&nbsp;&nbsp;&nbsp;<span class="k">"files"</span>: [<span class="v">"internal/config/types.go"</span>],<br/>
+      &nbsp;&nbsp;&nbsp;&nbsp;<span class="k">"specs"</span>: [<span class="v">"service-configuration.md"</span>],<br/>
+      &nbsp;&nbsp;&nbsp;&nbsp;<span class="k">"refs"</span>: [<span class="v">"notes/config.md"</span>],<br/>
+      &nbsp;&nbsp;&nbsp;&nbsp;<span class="k">"tests"</span>: [{ <span class="k">"category"</span>: <span class="v">"functional"</span>, <span class="k">"description"</span>: <span class="v">"loads valid"</span> }],<br/>
+      &nbsp;&nbsp;&nbsp;&nbsp;<span class="em">"passes"</span>: <span class="v">"pending"</span>, <span class="c">// added by PHASE_SHIFT → "passed" | "failed"</span><br/>
+      &nbsp;&nbsp;&nbsp;&nbsp;<span class="em">"rounds"</span>: <span class="v">0</span>         <span class="c">// incremented each eval</span><br/>
+      &nbsp;&nbsp;}]<br/>
+      }
+    </div>
+  </div>
+
+  <div class="section-head" data-reveal>Path Resolution Rules</div>
+
+  <div class="panel steel" data-reveal style="margin-bottom: 90px;">
+    <div class="panel-title">Path Resolution</div>
+    <p class="desc reveal" style="margin-top:0; margin-bottom:16px;">
+      Paths in <code>plan.json</code> are resolved relative to different roots.
+      The validation gate resolves all paths before allowing <code>EVALUATE</code> —
+      <code>refs[].path</code> and <code>items[].refs</code> must point to existing files on disk.
+    </p>
+    <table class="path-table reveal">
+      <thead>
+        <tr>
+          <th>Field</th>
+          <th>Resolved relative to</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>refs[].path</td>
+          <td>plan.json directory (&lt;domain&gt;/&lt;ws&gt;/implementation_plan/)</td>
+        </tr>
+        <tr>
+          <td>items[].refs (notes files)</td>
+          <td>plan.json directory</td>
+        </tr>
+        <tr>
+          <td>items[].specs (spec files)</td>
+          <td>project root</td>
+        </tr>
+        <tr>
+          <td>items[].files (source files)</td>
+          <td>project root</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <footer>
+    <span>forgectl · docs/diagrams/08-data-flow</span>
+    <span><a href="index.html">← workflow index</a></span>
+  </footer>
+</div>
+
+<script>
+  const io = new IntersectionObserver((entries)=>{
+    entries.forEach(e=>{ if(e.isIntersecting){ e.target.classList.add('lit');
+      e.target.querySelectorAll('.reveal').forEach((el,i)=>{el.style.animationDelay=(i*70)+'ms';});
+      io.unobserve(e.target);} });
+  }, { threshold:0.14, rootMargin:'0px 0px -8% 0px' });
+  document.querySelectorAll('[data-station],[data-reveal]').forEach(s=>io.observe(s));
+</script>
+</body>
+</html>

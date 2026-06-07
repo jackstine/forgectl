@@ -1,0 +1,479 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>forgectl — Reverse Engineering Phase</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600;700&family=Archivo+Expanded:wght@600;700;800;900&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet" />
+<link rel="stylesheet" href="forge.css" />
+<style>
+  .cmd-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 12px;
+    margin-top: 8px;
+  }
+  .cmd-table th {
+    text-align: left;
+    color: var(--muted-2);
+    letter-spacing: .18em;
+    text-transform: uppercase;
+    font-size: 10px;
+    font-weight: 500;
+    padding: 0 14px 10px 0;
+    border-bottom: 1px solid var(--line);
+  }
+  .cmd-table td {
+    padding: 10px 14px 10px 0;
+    border-bottom: 1px solid var(--line-soft);
+    color: var(--muted);
+    vertical-align: top;
+  }
+  .cmd-table td:first-child { color: var(--steel); }
+  .cmd-table td:nth-child(2) { color: var(--spark); }
+  .cmd-table tr:last-child td { border-bottom: none; }
+
+  .tracking-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+    gap: 10px;
+    margin-top: 12px;
+  }
+  .track-field {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    background: var(--iron);
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    padding: 10px 13px;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11.5px;
+  }
+  .track-field .tf-name { color: var(--steel); font-size: 10.5px; letter-spacing: .08em; }
+  .track-field .tf-desc { color: var(--muted); font-size: 11px; }
+</style>
+</head>
+<body>
+<div class="grain"></div>
+
+<div class="wrap">
+  <header>
+    <a class="crumb" href="index.html">← Workflow Atlas</a>
+    <span class="kicker steel"><span class="dot"></span> Inverse Flow · Specs from Code</span>
+    <h1 class="page-title">Reverse Engineering</h1>
+    <p class="lede">
+      The <strong>inverse of the specifying phase</strong> — specs are extracted FROM existing code,
+      not authored from planning documents. The Go CLI drives the entire workflow: it emits action
+      output telling the orchestrating agent what to do at each state, but <strong>invokes no subprocess
+      and writes no specs itself</strong>. The agent reads code; forgectl sequences the states.
+    </p>
+    <div class="meta-row">
+      <span class="chip steel"><b>Role</b> Systems Architect (inverse)</span>
+      <span class="chip"><b>Input</b> reverse-engineering-init.json <b style="color:var(--muted)">{ concept, domains[] }</b></span>
+      <span class="chip"><b>Output</b> <span style="color:var(--steel)">&lt;domain&gt;/specs/*.md</span> derived from code</span>
+      <span class="chip"><b>State file</b> .forgectl/state/forgectl-state.json</span>
+    </div>
+  </header>
+
+  <main class="pipeline">
+
+    <!-- INIT CONTRACT -->
+    <div class="section-head" data-reveal>Init Contract</div>
+
+    <div data-reveal style="margin-bottom: 28px;">
+      <div class="panel steel">
+        <div class="panel-title" style="color:var(--steel);">Init Input</div>
+        <p class="desc" style="margin-top:0; margin-bottom:18px;">
+          The phase is bootstrapped from <code>reverse-engineering-init.json</code>. The
+          <strong>concept</strong> defines the work scope (what codebase area to reverse-engineer);
+          <strong>domains[]</strong> is an ordered list driving both the analysis loop and the
+          reconcile loop. The queue file path is fixed by convention — no <code>--file</code>
+          flag is accepted in <code>QUEUE</code>.
+        </p>
+        <div class="track">
+          <span class="state gate">concept</span>
+          <span class="arrow">·</span>
+          <span class="state gate">domains[]</span>
+          <span class="arrow">→</span>
+          <span class="state gate">ORIENT</span>
+          <span class="arrow">→</span>
+          <span class="state gate">domain index = 1</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- PHASE 1: PER-DOMAIN ANALYSIS LOOP -->
+    <div class="section-head" data-reveal>Per-Domain Analysis Loop</div>
+
+    <section class="station cool" data-station>
+      <div class="node-marker">A</div>
+      <article class="card steel">
+        <div class="card-head">
+          <div class="reveal">
+            <div class="phase-label">Loop A — For each domain, in init order</div>
+            <div class="phase-title">Analysis</div>
+            <div class="role">Role: <b>Systems Architect (inverse)</b></div>
+          </div>
+          <div class="io reveal">
+            <div class="ln"><span class="tag">in</span><span class="val">&lt;domain&gt;/specs/</span></div>
+            <div class="ln"><span class="tag">in</span><span class="val">codebase (read-only)</span></div>
+            <div class="ln"><span class="tag">out</span><span class="val out">reverse-engineering-queue.json</span></div>
+          </div>
+        </div>
+        <p class="desc reveal">
+          For each domain (in <code>init order</code>), the agent surveys existing specs, identifies
+          code behavior not yet covered, decomposes it into spec topics, then writes queue entries.
+          A <strong>single shared queue file</strong> accumulates entries across all domains at
+          <code>.forgectl/state/reverse-engineering-queue.json</code>. After all domains are queued
+          the loop exits and execution begins.
+        </p>
+
+        <div class="track-label reveal">States — per domain</div>
+        <div class="track reveal">
+          <span class="state gate">SURVEY</span>
+          <span class="arrow">→</span>
+          <span class="state gate">GAP_ANALYSIS</span>
+          <span class="arrow">→</span>
+          <span class="state gate">DECOMPOSE</span>
+          <span class="arrow">→</span>
+          <span class="state gate">QUEUE</span>
+          <span class="arrow loopback">⟲</span>
+          <span class="state loop">SURVEY <span class="sub">next domain</span></span>
+        </div>
+
+        <div class="branch reveal" style="margin-top: 18px;">
+          <div class="bln">
+            <span class="state gate">SURVEY</span>
+            read existing specs in <code>&lt;domain&gt;/specs/</code>
+          </div>
+          <div class="bln">
+            <span class="state gate">GAP_ANALYSIS</span>
+            find code behavior not covered by a spec; assign topic of concern
+          </div>
+          <div class="bln">
+            <span class="state gate">DECOMPOSE</span>
+            synthesize specs to create/update; define topic, file, roots, depends_on
+          </div>
+          <div class="bln">
+            <span class="state gate">QUEUE</span>
+            write/append entries to the single queue file at the fixed path
+          </div>
+        </div>
+
+        <div class="track-label reveal" style="margin-top:22px;">Loop transition</div>
+        <div class="track reveal">
+          <span class="state gate">QUEUE</span>
+          <span class="arrow">→</span>
+          <span class="state loop">SURVEY <span class="sub">domain += 1</span></span>
+          <span style="color:var(--muted-2); font-family:'JetBrains Mono',monospace; font-size:12px; padding:0 6px;">until all domains queued</span>
+          <span class="arrow">→</span>
+          <span class="state terminal">EXECUTE_REVERSE_ENGINEER</span>
+        </div>
+      </article>
+    </section>
+
+    <!-- PHASE 2: PER-ITEM EXECUTION LOOP -->
+    <div class="section-head" data-reveal>Per-Item Execution Loop</div>
+
+    <section class="station cool" data-station>
+      <div class="node-marker">B</div>
+      <article class="card steel">
+        <div class="card-head">
+          <div class="reveal">
+            <div class="phase-label">Loop B — Across all queued items, in queue order</div>
+            <div class="phase-title">Execution</div>
+            <div class="role">Role: <b>Systems Architect (inverse)</b></div>
+          </div>
+          <div class="io reveal">
+            <div class="ln"><span class="tag">in</span><span class="val">reverse-engineering-queue.json</span></div>
+            <div class="ln"><span class="tag">in</span><span class="val">code_search_roots (per item)</span></div>
+            <div class="ln"><span class="tag">out</span><span class="val out">&lt;domain&gt;/specs/*.md</span></div>
+          </div>
+        </div>
+        <p class="desc reveal">
+          Items are processed in queue order. Each item is a <strong>single-pass spec write</strong> —
+          no draft, no eval, no refine cycle per spec. The agent reads code under
+          <code>code_search_roots</code> and writes the final spec directly.
+          A <code>POST_REVERSE_ENGINEER</code> checkpoint clears context before the next item.
+          Adversarial evaluation happens only at reconcile, not here.
+        </p>
+
+        <div class="track-label reveal">States — per item</div>
+        <div class="track reveal">
+          <span class="state gate">EXECUTE_REVERSE_ENGINEER <span class="sub">item N</span></span>
+          <span class="arrow">→</span>
+          <span class="state gate">POST_REVERSE_ENGINEER <span class="sub">item N</span></span>
+          <span class="arrow loopback">⟲</span>
+          <span class="state loop">EXECUTE_REVERSE_ENGINEER <span class="sub">item N+1</span></span>
+        </div>
+
+        <div class="branch reveal" style="margin-top: 18px;">
+          <div class="bln">
+            <span class="state gate">EXECUTE</span>
+            write the final spec for one item from code under its <code>code_search_roots</code> — single pass
+          </div>
+          <div class="bln">
+            <span class="state gate">POST</span>
+            STOP / clear-context checkpoint; agent re-initializes before next item
+          </div>
+        </div>
+
+        <div class="track-label reveal" style="margin-top:22px;">Edge cases</div>
+        <div class="branch reveal">
+          <div class="bln">
+            <span class="verdict fail">ERROR</span>
+            empty queue on loop entry → <code>"Queue contains zero entries."</code>
+          </div>
+          <div class="bln">
+            <span class="verdict pass">SKIP</span>
+            agent writes no file for an item → item skipped silently; no failure state entered
+          </div>
+          <div class="bln" style="color: var(--muted);">
+            <span class="state gate" style="font-size:10.5px;padding:4px 8px;">mkdir</span>
+            <code>specs/</code> directory is created (if absent) before each item's action output
+          </div>
+        </div>
+
+        <div class="track-label reveal" style="margin-top:22px;">Last item transition</div>
+        <div class="track reveal">
+          <span class="state gate">POST_REVERSE_ENGINEER <span class="sub">last item</span></span>
+          <span class="arrow">→</span>
+          <span class="state eval">RECONCILE <span class="sub">domain 1, round 1</span></span>
+        </div>
+      </article>
+    </section>
+
+    <!-- PHASE 3: PER-DOMAIN RECONCILIATION LOOP -->
+    <div class="section-head" data-reveal>Per-Domain Reconciliation Loop</div>
+
+    <section class="station cool" data-station>
+      <div class="node-marker">C</div>
+      <article class="card steel">
+        <div class="card-head">
+          <div class="reveal">
+            <div class="phase-label">Loop C — For each domain, same order as analysis</div>
+            <div class="phase-title">Reconciliation</div>
+            <div class="role">Role: <b>Systems Architect (inverse)</b></div>
+          </div>
+          <div class="io reveal">
+            <div class="ln"><span class="tag">in</span><span class="val">&lt;domain&gt;/specs/*.md</span></div>
+            <div class="ln"><span class="tag">eval</span><span class="val">reconcile-eval prompt</span></div>
+            <div class="ln"><span class="tag">out</span><span class="val out">staged git changes</span></div>
+          </div>
+        </div>
+        <p class="desc reveal">
+          Specs are wired together domain-by-domain. <strong>RECONCILE</strong> fills in
+          <code>Depends On</code> from <code>depends_on</code> fields and validates symmetric
+          Integration Points, then stages git changes.
+          <strong>RECONCILE_EVAL</strong> runs adversarial review; PASS advances, FAIL loops back
+          with <code>round += 1</code>. An optional <strong>colleague review</strong> gate sits
+          between eval and the domain-transition state. Round resets to 1 on each new domain.
+          When all domains are reconciled the phase terminates at <span class="state terminal" style="display:inline-block;padding:2px 7px;font-size:11px;">DONE</span>.
+        </p>
+
+        <div class="track-label reveal">Per-domain reconcile states</div>
+        <div class="track reveal">
+          <span class="state eval">RECONCILE</span>
+          <span class="arrow">→</span>
+          <span class="state eval">RECONCILE_EVAL</span>
+          <span class="arrow loopback">⟲</span>
+          <span class="state loop">RECONCILE <span class="sub">round += 1</span></span>
+        </div>
+
+        <div class="track-label reveal" style="margin-top:22px;">Eval verdict fork</div>
+        <div class="branch reveal">
+          <div class="bln">
+            <span class="verdict pass">PASS ≥ min_rounds</span>
+            or <span class="verdict fail">FAIL ≥ max_rounds</span>
+            → advance out of the retry loop
+          </div>
+          <div class="bln">
+            <span class="verdict fail">FAIL &lt; max_rounds</span>
+            or <span class="verdict pass">PASS &lt; min_rounds</span>
+            → <span class="state loop">RECONCILE</span> (round N)
+          </div>
+        </div>
+
+        <div class="track-label reveal" style="margin-top:22px;">Colleague review gate (optional)</div>
+        <div class="track reveal">
+          <span class="state eval">RECONCILE_EVAL <span class="sub">passed</span></span>
+          <span class="arrow">→</span>
+          <span style="font-family:'JetBrains Mono',monospace;font-size:12px;color:var(--muted-2);padding:0 4px;">colleague_review?</span>
+        </div>
+        <div class="branch reveal" style="margin-top:10px;">
+          <div class="bln">
+            <span class="verdict pass">enabled</span>
+            → <span class="state gate">COLLEAGUE_REVIEW</span>
+            → <span class="state gate">RECONCILE_ADVANCE</span>
+          </div>
+          <div class="bln">
+            <span class="verdict pass">disabled <span style="color:var(--muted-2)">(default)</span></span>
+            → <span class="state gate">RECONCILE_ADVANCE</span>
+          </div>
+        </div>
+
+        <div class="track-label reveal" style="margin-top:22px;">Domain transition</div>
+        <div class="track reveal">
+          <span class="state gate">RECONCILE_ADVANCE</span>
+          <span class="arrow loopback">⟲</span>
+          <span class="state eval">RECONCILE <span class="sub">next domain, round = 1</span></span>
+          <span style="color:var(--muted-2); font-family:'JetBrains Mono',monospace; font-size:12px; padding:0 6px;">until all domains reconciled</span>
+          <span class="arrow">→</span>
+          <span class="state terminal">DONE</span>
+        </div>
+      </article>
+    </section>
+
+    <!-- STATE-GATED COMMANDS -->
+    <div class="section-head" data-reveal>State-Gated Commands</div>
+
+    <div data-reveal style="margin-bottom: 28px;">
+      <div class="panel steel">
+        <div class="panel-title" style="color:var(--steel);">CLI Commands</div>
+        <p class="desc" style="margin-top:0; margin-bottom:18px;">
+          The Go CLI enforces which commands are valid in each state. These three commands have
+          hard state guards — invoking them outside their allowed state returns an error.
+        </p>
+        <table class="cmd-table">
+          <thead>
+            <tr>
+              <th>Command</th>
+              <th>Active State</th>
+              <th>Purpose</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>forgectl add-domain</td>
+              <td>QUEUE only</td>
+              <td>Append a domain to the init list; does NOT re-run analysis</td>
+            </tr>
+            <tr>
+              <td>forgectl eval</td>
+              <td>RECONCILE_EVAL only</td>
+              <td>Output embedded reconcile-eval prompt for the eval sub-agents</td>
+            </tr>
+            <tr>
+              <td>forgectl advance</td>
+              <td>QUEUE: no --file</td>
+              <td>Queue path is fixed; <code>--file</code> is rejected in QUEUE state</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- STATE FILE TRACKING -->
+    <div class="section-head" data-reveal>State File Tracking</div>
+
+    <div data-reveal style="margin-bottom: 60px;">
+      <div class="panel steel">
+        <div class="panel-title" style="color:var(--steel);">Tracked Fields — .forgectl/state/forgectl-state.json</div>
+        <p class="desc" style="margin-top:0; margin-bottom:18px;">
+          The state file persists all runtime indexes and flags that drive the two nested loops
+          and the reconcile round counter.
+        </p>
+        <div class="tracking-grid">
+          <div class="track-field">
+            <span class="tf-name">current_state</span>
+            <span class="tf-desc">Active state machine state</span>
+          </div>
+          <div class="track-field">
+            <span class="tf-name">domain_index</span>
+            <span class="tf-desc">Drives both analysis loop and reconcile loop</span>
+          </div>
+          <div class="track-field">
+            <span class="tf-name">domain_count</span>
+            <span class="tf-desc">Total number of domains from init</span>
+          </div>
+          <div class="track-field">
+            <span class="tf-name">execute_item_index</span>
+            <span class="tf-desc">Drives EXECUTE → POST loop (per-item)</span>
+          </div>
+          <div class="track-field">
+            <span class="tf-name">reconcile_round</span>
+            <span class="tf-desc">Current reconcile round; resets to 1 per domain</span>
+          </div>
+          <div class="track-field">
+            <span class="tf-name">queue_file_path</span>
+            <span class="tf-desc">Set on first QUEUE advance; fixed convention</span>
+          </div>
+          <div class="track-field">
+            <span class="tf-name">queue_file_hash</span>
+            <span class="tf-desc">Content hash for change detection on subsequent QUEUE advances</span>
+          </div>
+          <div class="track-field">
+            <span class="tf-name">colleague_review</span>
+            <span class="tf-desc">Enabled flag (disabled by default)</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+  </main>
+
+  <!-- LEGEND -->
+  <section class="legend" data-station>
+    <h3>Key</h3>
+    <div class="legend-grid">
+      <div class="leg-item reveal">
+        <div class="sw"><span class="state gate" style="padding:5px 9px;font-size:10px">GATE</span></div>
+        <div class="txt"><b>Analysis / Execution state</b>Steel-blue gate states; forgectl emits action output, agent acts</div>
+      </div>
+      <div class="leg-item reveal">
+        <div class="sw"><span class="state eval" style="padding:5px 9px;font-size:10px">EVAL</span></div>
+        <div class="txt"><b>RECONCILE / RECONCILE_EVAL</b>Adversarial sub-agent review against reconcile dimensions</div>
+      </div>
+      <div class="leg-item reveal">
+        <div class="sw"><span class="state loop" style="padding:5px 9px;font-size:10px">LOOP</span></div>
+        <div class="txt"><b>REFINE / next domain</b>Loop-back transitions; domain index or round increments</div>
+      </div>
+      <div class="leg-item reveal">
+        <div class="sw"><span class="state terminal" style="padding:5px 9px;font-size:10px">DONE</span></div>
+        <div class="txt"><b>Terminal state</b>All domains reconciled; phase complete</div>
+      </div>
+      <div class="leg-item reveal">
+        <div class="sw"><span class="arrow loopback" style="font-size:18px">⟲</span></div>
+        <div class="txt"><b>Loop back</b>Domain loop (analysis + reconcile) or reconcile round retry</div>
+      </div>
+      <div class="leg-item reveal">
+        <div class="sw" style="padding-top:3px">
+          <span style="font-family:'JetBrains Mono';font-size:9px;letter-spacing:.1em;color:var(--steel);border:1px solid rgba(95,168,211,0.3);background:rgba(95,168,211,0.06);border-radius:4px;padding:2px 6px;">STEEL</span>
+        </div>
+        <div class="txt"><b>Inverse palette</b>Steel-blue accent signals "cool / inverse" — specs from code</div>
+      </div>
+      <div class="leg-item reveal">
+        <div class="sw" style="padding-top:3px">
+          <span style="font-family:'JetBrains Mono';font-size:9px;color:var(--ok);border:1px solid rgba(107,194,138,0.3);background:rgba(107,194,138,0.1);border-radius:4px;padding:2px 6px;">PASS</span>
+        </div>
+        <div class="txt"><b>PASS / FAIL</b>Reconcile eval verdict via <code>forgectl advance --verdict</code></div>
+      </div>
+      <div class="leg-item reveal">
+        <div class="sw" style="padding-top:3px">
+          <span style="font-family:'JetBrains Mono';font-size:10px;color:var(--muted);border:1px solid var(--line);background:var(--iron);border-radius:5px;padding:2px 7px;">min/max</span>
+        </div>
+        <div class="txt"><b>Round bounds</b><code>reverse_engineering.reconcile.min_rounds</code> / <code>max_rounds</code></div>
+      </div>
+    </div>
+  </section>
+
+  <footer>
+    <span>forgectl · docs/diagrams/09-reverse-engineering-phase</span>
+    <span><a href="index.html">← workflow index</a></span>
+  </footer>
+</div>
+
+<script>
+  const io = new IntersectionObserver((entries)=>{
+    entries.forEach(e=>{ if(e.isIntersecting){ e.target.classList.add('lit');
+      e.target.querySelectorAll('.reveal').forEach((el,i)=>{el.style.animationDelay=(i*70)+'ms';});
+      io.unobserve(e.target);} });
+  }, { threshold:0.14, rootMargin:'0px 0px -8% 0px' });
+  document.querySelectorAll('[data-station],[data-reveal]').forEach(s=>io.observe(s));
+</script>
+</body>
+</html>

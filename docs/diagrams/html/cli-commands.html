@@ -1,0 +1,798 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>forgectl — CLI Commands</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600;700&family=Archivo+Expanded:wght@600;700;800;900&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet" />
+<link rel="stylesheet" href="forge.css" />
+<style>
+  .cmd-grid {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 20px;
+    padding-bottom: 60px;
+  }
+  .flag-grid {
+    display: grid;
+    grid-template-columns: max-content 1fr;
+    gap: 6px 20px;
+    margin: 14px 0;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 12.5px;
+    align-items: baseline;
+  }
+  .flag-name {
+    color: var(--ember-hot);
+    white-space: nowrap;
+    font-weight: 500;
+  }
+  .flag-name.optional {
+    color: var(--muted);
+  }
+  .flag-name.toggle {
+    color: var(--steel);
+  }
+  .flag-desc {
+    color: var(--muted);
+    line-height: 1.55;
+  }
+  .flag-desc b {
+    color: var(--text);
+    font-weight: 500;
+  }
+  .flag-group-label {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 10px;
+    letter-spacing: .22em;
+    text-transform: uppercase;
+    color: var(--muted-2);
+    margin: 18px 0 8px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+  .flag-group-label::after {
+    content: '';
+    flex: 1;
+    height: 1px;
+    background: var(--line-soft);
+  }
+  .code-block {
+    background: var(--iron);
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    padding: 14px 18px;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 12.5px;
+    color: var(--text);
+    margin: 14px 0 4px;
+    overflow-x: auto;
+    line-height: 1.7;
+  }
+  .code-block .prompt {
+    color: var(--muted-2);
+    user-select: none;
+  }
+  .code-block .cmd {
+    color: var(--ember-hot);
+  }
+  .code-block .flag {
+    color: var(--steel);
+  }
+  .code-block .val {
+    color: var(--spark);
+  }
+  .code-block .comment {
+    color: var(--muted-2);
+  }
+  .state-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 12px;
+    margin: 14px 0;
+  }
+  .state-table th {
+    text-align: left;
+    color: var(--muted-2);
+    font-size: 10px;
+    letter-spacing: .18em;
+    text-transform: uppercase;
+    padding: 6px 12px 8px;
+    border-bottom: 1px solid var(--line);
+  }
+  .state-table td {
+    padding: 7px 12px;
+    border-bottom: 1px solid var(--line-soft);
+    vertical-align: top;
+    color: var(--muted);
+    line-height: 1.5;
+  }
+  .state-table td:first-child {
+    color: var(--text);
+    white-space: nowrap;
+    font-weight: 500;
+  }
+  .state-table td .phase-tag {
+    font-size: 10px;
+    letter-spacing: .14em;
+    color: var(--muted-2);
+    font-weight: 400;
+  }
+  .state-table tr:last-child td {
+    border-bottom: none;
+  }
+  .two-actor {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 16px;
+    margin: 14px 0;
+  }
+  @media (max-width: 640px) {
+    .two-actor { grid-template-columns: 1fr; }
+    .flag-grid { grid-template-columns: 1fr; gap: 2px 0; }
+    .flag-name { margin-top: 10px; }
+  }
+  .actor-box {
+    background: var(--iron);
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    padding: 16px 18px;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 12px;
+  }
+  .actor-box .actor-label {
+    font-size: 10px;
+    letter-spacing: .22em;
+    text-transform: uppercase;
+    color: var(--ember-hot);
+    margin-bottom: 10px;
+  }
+  .actor-box.steel .actor-label {
+    color: var(--steel);
+  }
+  .actor-box ul {
+    list-style: none;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+  }
+  .actor-box li {
+    color: var(--muted);
+    display: flex;
+    align-items: baseline;
+    gap: 8px;
+  }
+  .actor-box li::before {
+    content: '·';
+    color: var(--muted-2);
+    flex: none;
+  }
+  .actor-box li code {
+    color: var(--ember-hot);
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.9em;
+  }
+  .actor-box.steel li code {
+    color: var(--steel);
+  }
+  .actor-box li b {
+    color: var(--text);
+    font-weight: 500;
+  }
+  .output-note {
+    display: flex;
+    align-items: flex-start;
+    gap: 10px;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 12px;
+    color: var(--muted);
+    margin-top: 14px;
+    padding: 10px 14px;
+    background: var(--iron);
+    border: 1px solid var(--line);
+    border-radius: 8px;
+  }
+  .output-note .out-tag {
+    color: var(--spark);
+    font-size: 10px;
+    letter-spacing: .14em;
+    text-transform: uppercase;
+    flex: none;
+    margin-top: 1px;
+  }
+  .config-block {
+    background: var(--iron);
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    padding: 14px 18px;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 12px;
+    color: var(--muted);
+    margin: 10px 0;
+    line-height: 1.8;
+  }
+  .config-block .ck { color: var(--steel); }
+  .config-block .cv { color: var(--spark); }
+  .config-block .ch { color: var(--muted-2); }
+  .config-block .cs { color: var(--ember-hot); font-weight: 700; }
+  .phase-input-grid {
+    display: grid;
+    grid-template-columns: max-content 1fr;
+    gap: 5px 16px;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 12px;
+    margin: 10px 0;
+    align-items: baseline;
+  }
+  .phase-input-grid .pk { color: var(--ember-hot); }
+  .phase-input-grid .pv { color: var(--text); }
+  .phase-input-grid .pv .note { color: var(--muted); font-size: 11px; }
+</style>
+</head>
+<body>
+<div class="grain"></div>
+
+<div class="wrap">
+  <header>
+    <a class="crumb" href="index.html">← Workflow Atlas</a>
+    <span class="kicker"><span class="dot"></span> Reference · CLI</span>
+    <h1 class="page-title">CLI Commands</h1>
+    <p class="lede">
+      The <strong>forgectl command tree</strong> — Go binary, Cobra framework; drives a
+      JSON-backed state machine at <code>.forgectl/state/forgectl-state.json</code>.
+      Every phase transition, evaluation verdict, and artifact handoff flows through this interface.
+    </p>
+    <div class="meta-row">
+      <span class="chip"><b>Binary</b> forgectl</span>
+      <span class="chip"><b>Framework</b> Cobra</span>
+      <span class="chip"><b>State</b> forgectl-state.json</span>
+      <span class="chip"><b>init</b></span>
+      <span class="chip"><b>advance</b></span>
+      <span class="chip"><b>status</b></span>
+      <span class="chip"><b>eval</b></span>
+      <span class="chip"><b>handoff</b></span>
+      <span class="chip"><b>add-queue-item</b></span>
+      <span class="chip"><b>set-roots</b></span>
+    </div>
+  </header>
+
+  <main>
+
+    <!-- INIT -->
+    <div class="section-head">Commands</div>
+
+    <div class="cmd-grid">
+
+      <!-- init -->
+      <div class="panel accent" data-reveal>
+        <div class="panel-title">
+          <span class="n">forgectl init</span>
+          Initialize a new session
+        </div>
+        <div class="reveal">
+          <p class="desc">Bootstrap a state machine for a given phase. Reads all configuration from <code>.forgectl/config</code> (TOML). Creates <code>.forgectl/state/forgectl-state.json</code>.</p>
+
+          <div class="flag-group-label">Required flags</div>
+          <div class="flag-grid">
+            <span class="flag-name">--from &lt;path&gt;</span>
+            <span class="flag-desc">Input file — <b>spec-queue.json</b>, <b>plan-queue.json</b>, or <b>plan.json</b> depending on phase</span>
+            <span class="flag-name">--phase &lt;str&gt;</span>
+            <span class="flag-desc">Phase name: <b>specifying</b> · <b>planning</b> · <b>implementing</b> · <b>ui_implementing</b></span>
+          </div>
+
+          <div class="flag-group-label">Optional flags</div>
+          <div class="flag-grid">
+            <span class="flag-name optional">--guided</span>
+            <span class="flag-desc">Enable guided mode (user checkpoints at each state)</span>
+            <span class="flag-name optional">--no-guided</span>
+            <span class="flag-desc">Disable guided mode</span>
+          </div>
+        </div>
+
+        <div class="reveal">
+          <div class="flag-group-label">Input by phase</div>
+          <div class="phase-input-grid">
+            <span class="pk">specifying</span>
+            <span class="pv">spec-queue.json</span>
+            <span class="pk">planning</span>
+            <span class="pv">plan-queue.json</span>
+            <span class="pk">implementing</span>
+            <span class="pv">plan.json</span>
+            <span class="pk">ui_implementing</span>
+            <span class="pv">plan.json <span class="note">(+ requires ui_implementing.app.* and ui_implementing.e2e.* config, non-empty)</span></span>
+          </div>
+        </div>
+
+        <div class="reveal">
+          <div class="flag-group-label">Config (.forgectl/config — TOML)</div>
+          <div class="config-block">
+<span class="ch"># Phase-scoped configuration example</span>
+[<span class="cs">specifying</span>]
+<span class="ck">batch</span> = <span class="cv">1</span>
+  [<span class="cs">specifying.eval</span>]
+  <span class="ck">min_rounds</span> = <span class="cv">1</span>
+  <span class="ck">max_rounds</span> = <span class="cv">3</span>
+
+[<span class="cs">general</span>]
+<span class="ck">enable_commits</span> = <span class="cv">false</span></div>
+        </div>
+
+        <div class="reveal">
+          <div class="flag-group-label">Example invocations</div>
+          <div class="code-block">
+<span class="prompt">$ </span><span class="cmd">forgectl init</span> <span class="flag">--phase</span> <span class="val">specifying</span> <span class="flag">--from</span> <span class="val">spec-queue.json</span>
+<span class="prompt">$ </span><span class="cmd">forgectl init</span> <span class="flag">--phase</span> <span class="val">planning</span> <span class="flag">--from</span> <span class="val">plan-queue.json</span> <span class="flag">--guided</span>
+<span class="prompt">$ </span><span class="cmd">forgectl init</span> <span class="flag">--phase</span> <span class="val">implementing</span> <span class="flag">--from</span> <span class="val">plan.json</span>
+<span class="prompt">$ </span><span class="cmd">forgectl init</span> <span class="flag">--phase</span> <span class="val">ui_implementing</span> <span class="flag">--from</span> <span class="val">plan.json</span></div>
+        </div>
+
+        <div class="output-note reveal">
+          <span class="out-tag">output</span>
+          <span>State initialized — <code>.forgectl/state/forgectl-state.json</code> written</span>
+        </div>
+      </div>
+
+      <!-- advance -->
+      <div class="panel accent" data-reveal>
+        <div class="panel-title">
+          <span class="n">forgectl advance</span>
+          Transition to next state
+        </div>
+        <div class="reveal">
+          <p class="desc">The primary driver. Reads the current state, validates any flags required for that state, and mutates <code>forgectl-state.json</code>. Flags are context-dependent — the valid set changes with the current state.</p>
+        </div>
+
+        <div class="reveal">
+          <div class="flag-group-label">State-dependent flags</div>
+          <table class="state-table">
+            <thead>
+              <tr>
+                <th>Current state</th>
+                <th>Valid flags</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>ORIENT</td>
+                <td>(none required)</td>
+              </tr>
+              <tr>
+                <td>SELECT</td>
+                <td>(none required)</td>
+              </tr>
+              <tr>
+                <td>DRAFT</td>
+                <td><code>--file &lt;path&gt;</code> override output path (spec only)</td>
+              </tr>
+              <tr>
+                <td>EVALUATE</td>
+                <td><code>--verdict PASS|FAIL</code> &nbsp; <code>--eval-report &lt;path&gt;</code> (if report mode)</td>
+              </tr>
+              <tr>
+                <td>REFINE</td>
+                <td>(none required)</td>
+              </tr>
+              <tr>
+                <td>ACCEPT</td>
+                <td><code>--message</code> (planning, if enable_commits)</td>
+              </tr>
+              <tr>
+                <td>IMPLEMENT</td>
+                <td><code>--message</code> (first round, if enable_commits)</td>
+              </tr>
+              <tr>
+                <td>COMMIT</td>
+                <td><code>--message</code> (if enable_commits)</td>
+              </tr>
+              <tr>
+                <td>QA_TEST <span class="phase-tag">(ui)</span></td>
+                <td><code>--verdict PASS|FAIL</code> &nbsp; <code>--eval-report &lt;path&gt;</code> (if qa report mode)</td>
+              </tr>
+              <tr>
+                <td>UI_REFINE <span class="phase-tag">(ui)</span></td>
+                <td>(none required)</td>
+              </tr>
+              <tr>
+                <td>E2E_AUTHOR <span class="phase-tag">(ui)</span></td>
+                <td>(none required)</td>
+              </tr>
+              <tr>
+                <td>E2E_VERIFY <span class="phase-tag">(ui)</span></td>
+                <td><code>--verdict PASS|FAIL</code> &nbsp; <code>--eval-report &lt;path&gt;</code> (if e2e report mode)</td>
+              </tr>
+              <tr>
+                <td>E2E_REMEDIATE <span class="phase-tag">(ui)</span></td>
+                <td>(none required)</td>
+              </tr>
+              <tr>
+                <td>RECONCILE</td>
+                <td>(none required)</td>
+              </tr>
+              <tr>
+                <td>RECONCILE_EVAL</td>
+                <td><code>--verdict PASS|FAIL</code> &nbsp; <code>--eval-report &lt;path&gt;</code></td>
+              </tr>
+              <tr>
+                <td>RECONCILE_REVIEW</td>
+                <td>(none required)</td>
+              </tr>
+              <tr>
+                <td>COMPLETE</td>
+                <td><code>--message</code> (specifying, if enable_commits)</td>
+              </tr>
+              <tr>
+                <td>PHASE_SHIFT</td>
+                <td><code>--from &lt;path&gt;</code> (specifying or gen_plan_q)</td>
+              </tr>
+              <tr>
+                <td>SELF_REVIEW</td>
+                <td>(none required)</td>
+              </tr>
+              <tr>
+                <td>STUDY_*</td>
+                <td>(none required)</td>
+              </tr>
+              <tr>
+                <td>REVIEW</td>
+                <td>(none required)</td>
+              </tr>
+              <tr>
+                <td>VALIDATE</td>
+                <td>(none required)</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+        <div class="reveal">
+          <div class="flag-group-label">Mode toggles (any state)</div>
+          <div class="flag-grid">
+            <span class="flag-name toggle">--guided</span>
+            <span class="flag-desc">Enable guided mode</span>
+            <span class="flag-name toggle">--no-guided</span>
+            <span class="flag-desc">Disable guided mode</span>
+          </div>
+        </div>
+
+        <div class="reveal">
+          <div class="flag-group-label">State transitions (examples)</div>
+          <div class="track-label">Evaluate verdict flow</div>
+          <div class="track">
+            <span class="state eval">EVALUATE</span>
+            <span class="arrow">→</span>
+            <span class="state terminal">ACCEPT</span>
+            <span class="arrow" style="color:var(--muted-2);margin:0 4px">or</span>
+            <span class="state loop">REFINE</span>
+          </div>
+          <div class="track-label" style="margin-top:18px">UI gate verdicts</div>
+          <div class="track">
+            <span class="state gate">QA_TEST</span>
+            <span class="arrow">→</span>
+            <span class="state terminal">E2E_AUTHOR</span>
+            <span class="arrow" style="color:var(--muted-2);margin:0 4px">or</span>
+            <span class="state loop">UI_REFINE</span>
+          </div>
+          <div class="track" style="margin-top:8px">
+            <span class="state gate">E2E_VERIFY</span>
+            <span class="arrow">→</span>
+            <span class="state terminal">COMMIT</span>
+            <span class="arrow" style="color:var(--muted-2);margin:0 4px">or</span>
+            <span class="state loop">E2E_REMEDIATE</span>
+          </div>
+          <div class="track-label" style="margin-top:18px">Phase shift</div>
+          <div class="track">
+            <span class="state gate">PHASE_SHIFT</span>
+            <span class="arrow">→</span>
+            <span class="state">next phase init</span>
+            <span style="font-family:'JetBrains Mono',monospace;font-size:12px;color:var(--muted);margin-left:6px">via --from &lt;path&gt;</span>
+          </div>
+        </div>
+
+        <div class="reveal">
+          <div class="flag-group-label">Example invocations</div>
+          <div class="code-block">
+<span class="prompt">$ </span><span class="cmd">forgectl advance</span>                                        <span class="comment"># ORIENT, SELECT, REFINE, etc.</span>
+<span class="prompt">$ </span><span class="cmd">forgectl advance</span> <span class="flag">--verdict</span> <span class="val">PASS</span>                           <span class="comment"># from EVALUATE</span>
+<span class="prompt">$ </span><span class="cmd">forgectl advance</span> <span class="flag">--verdict</span> <span class="val">FAIL</span> <span class="flag">--eval-report</span> <span class="val">report.md</span>  <span class="comment"># from EVALUATE with report</span>
+<span class="prompt">$ </span><span class="cmd">forgectl advance</span> <span class="flag">--verdict</span> <span class="val">PASS</span>                           <span class="comment"># from QA_TEST or E2E_VERIFY</span>
+<span class="prompt">$ </span><span class="cmd">forgectl advance</span> <span class="flag">--from</span> <span class="val">plan-queue.json</span>                  <span class="comment"># from PHASE_SHIFT</span>
+<span class="prompt">$ </span><span class="cmd">forgectl advance</span> <span class="flag">--message</span> <span class="val">"feat: add auth module"</span>         <span class="comment"># from COMMIT (enable_commits)</span>
+<span class="prompt">$ </span><span class="cmd">forgectl advance</span> <span class="flag">--guided</span>                                  <span class="comment"># toggle guided mode on</span></div>
+        </div>
+
+        <div class="output-note reveal">
+          <span class="out-tag">output</span>
+          <span>Updated state + formatted status showing current position and next action</span>
+        </div>
+      </div>
+
+      <!-- status -->
+      <div class="panel accent" data-reveal>
+        <div class="panel-title">
+          <span class="n">forgectl status</span>
+          Print current state with action guidance
+        </div>
+        <div class="reveal">
+          <p class="desc">Human-readable snapshot of the current session. No state mutation. Inherits <code>--dir</code> from the root command.</p>
+
+          <div class="flag-group-label">Flags</div>
+          <div class="flag-grid">
+            <span class="flag-name optional">(none)</span>
+            <span class="flag-desc">No additional flags beyond the root <code>--dir</code></span>
+          </div>
+        </div>
+
+        <div class="reveal">
+          <div class="flag-group-label">Example invocations</div>
+          <div class="code-block">
+<span class="prompt">$ </span><span class="cmd">forgectl status</span></div>
+        </div>
+
+        <div class="output-note reveal">
+          <span class="out-tag">output</span>
+          <span>Human-readable status, next action, overview</span>
+        </div>
+      </div>
+
+      <!-- eval -->
+      <div class="panel accent" data-reveal>
+        <div class="panel-title">
+          <span class="n">forgectl eval</span>
+          Output evaluation context for sub-agent
+        </div>
+        <div class="reveal">
+          <p class="desc">Dumps the full context needed by the AI evaluator sub-agent. Valid in <code>EVALUATE</code>; also <code>QA_TEST</code> and <code>E2E_VERIFY</code> when in <code>ui_implementing</code>. No additional flags.</p>
+        </div>
+
+        <div class="reveal">
+          <div class="flag-group-label">Valid states</div>
+          <div class="track">
+            <span class="state eval">EVALUATE</span>
+            <span class="arrow" style="color:var(--muted-2)">all phases</span>
+            <span class="state gate" style="margin-left:10px">QA_TEST</span>
+            <span class="arrow" style="color:var(--muted-2)">ui_implementing</span>
+            <span class="state gate">E2E_VERIFY</span>
+            <span class="arrow" style="color:var(--muted-2)">ui_implementing</span>
+          </div>
+        </div>
+
+        <div class="reveal">
+          <div class="flag-group-label">Output content by state</div>
+          <div class="flag-grid">
+            <span class="flag-name">EVALUATE</span>
+            <span class="flag-desc">Items, specs, tests, evaluator prompt</span>
+            <span class="flag-name">QA_TEST</span>
+            <span class="flag-desc">Embeds <code>ui-qa-eval.md</code> + app url + step-list path</span>
+            <span class="flag-name">E2E_VERIFY</span>
+            <span class="flag-desc">Embeds <code>ui-e2e-eval.md</code> + test command</span>
+          </div>
+        </div>
+
+        <div class="reveal">
+          <div class="flag-group-label">Example invocations</div>
+          <div class="code-block">
+<span class="prompt">$ </span><span class="cmd">forgectl eval</span>                  <span class="comment"># from EVALUATE — pipe to sub-agent</span>
+<span class="prompt">$ </span><span class="cmd">forgectl eval</span>                  <span class="comment"># from QA_TEST — includes QA eval prompt + app url</span>
+<span class="prompt">$ </span><span class="cmd">forgectl eval</span>                  <span class="comment"># from E2E_VERIFY — includes e2e eval prompt + test cmd</span></div>
+        </div>
+
+        <div class="output-note reveal">
+          <span class="out-tag">output</span>
+          <span>Full context needed by AI evaluator (items, specs, notes, evaluator prompt, phase-specific embeds)</span>
+        </div>
+      </div>
+
+      <!-- handoff -->
+      <div class="panel accent" data-reveal>
+        <div class="panel-title">
+          <span class="n">forgectl handoff</span>
+          Register sub-agent artifacts back to the scaffold
+        </div>
+        <div class="reveal">
+          <p class="desc">The inverse of <code>eval</code>. Used by the sub-agent (AI evaluator) to register generated files back to the scaffold in <code>ui_implementing</code>. Verifies each file exists; surfaces them on a <strong>Review:</strong> line so the engineer reviews before recording a verdict. Carries no verdict and does not block <code>--eval-report</code>.</p>
+        </div>
+
+        <div class="reveal">
+          <div class="flag-group-label">Arguments</div>
+          <div class="flag-grid">
+            <span class="flag-name">&lt;file&gt; [&lt;file&gt;…]</span>
+            <span class="flag-desc">One or more generated files to register — QA report, QA step list, e2e report</span>
+          </div>
+        </div>
+
+        <div class="reveal">
+          <div class="flag-group-label">Valid states</div>
+          <div class="track">
+            <span class="state eval">EVALUATE</span>
+            <span class="state gate">QA_TEST</span>
+            <span class="state gate">E2E_VERIFY</span>
+            <span style="font-family:'JetBrains Mono',monospace;font-size:11px;color:var(--muted);margin-left:6px">same states as eval</span>
+          </div>
+        </div>
+
+        <div class="reveal">
+          <div class="flag-group-label">Example invocations</div>
+          <div class="code-block">
+<span class="prompt">$ </span><span class="cmd">forgectl handoff</span> <span class="val">qa-report.md</span>
+<span class="prompt">$ </span><span class="cmd">forgectl handoff</span> <span class="val">qa-report.md</span> <span class="val">qa-steps.json</span>
+<span class="prompt">$ </span><span class="cmd">forgectl handoff</span> <span class="val">e2e-report.md</span> <span class="val">e2e-tests.spec.ts</span></div>
+        </div>
+
+        <div class="output-note reveal">
+          <span class="out-tag">output</span>
+          <span>Registered N artifact(s) for review.</span>
+        </div>
+      </div>
+
+      <!-- add-queue-item -->
+      <div class="panel accent" data-reveal>
+        <div class="panel-title">
+          <span class="n">forgectl add-queue-item</span>
+          Append a spec to the specifying queue
+        </div>
+        <div class="reveal">
+          <p class="desc">Appends a new spec entry to the in-flight specifying queue. Domain is resolved from configured domains then session domains; must be supplied via <code>--domain</code> when no match is found.</p>
+
+          <div class="flag-group-label">Required flags</div>
+          <div class="flag-grid">
+            <span class="flag-name">--name &lt;str&gt;</span>
+            <span class="flag-desc">Spec name — must be <b>unique</b></span>
+            <span class="flag-name">--topic &lt;str&gt;</span>
+            <span class="flag-desc">Topic of concern</span>
+            <span class="flag-name">--file &lt;path&gt;</span>
+            <span class="flag-desc">Path to spec file — must exist; must match <code>&lt;domain&gt;/specs/&lt;name&gt;.md</code> convention</span>
+          </div>
+
+          <div class="flag-group-label">Optional flags</div>
+          <div class="flag-grid">
+            <span class="flag-name optional">--domain &lt;str&gt;</span>
+            <span class="flag-desc">Domain name — required when no match found via auto-resolution</span>
+          </div>
+        </div>
+
+        <div class="reveal">
+          <div class="flag-group-label">Valid states</div>
+          <div class="track">
+            <span class="state">DRAFT</span>
+            <span class="state">CROSS_REFERENCE_REVIEW</span>
+            <span class="state terminal">DONE</span>
+            <span class="state gate">RECONCILE_REVIEW</span>
+          </div>
+        </div>
+
+        <div class="reveal">
+          <div class="flag-group-label">Example invocations</div>
+          <div class="code-block">
+<span class="prompt">$ </span><span class="cmd">forgectl add-queue-item</span> <span class="flag">--name</span> <span class="val">auth-tokens</span> <span class="flag">--topic</span> <span class="val">"JWT lifecycle"</span> <span class="flag">--file</span> <span class="val">auth/specs/auth-tokens.md</span>
+<span class="prompt">$ </span><span class="cmd">forgectl add-queue-item</span> <span class="flag">--name</span> <span class="val">billing</span> <span class="flag">--topic</span> <span class="val">"payment flow"</span> <span class="flag">--file</span> <span class="val">billing/specs/billing.md</span> <span class="flag">--domain</span> <span class="val">billing</span></div>
+        </div>
+
+        <div class="output-note reveal">
+          <span class="out-tag">output</span>
+          <span>Added {name} to specifying queue for domain {domain}.</span>
+        </div>
+      </div>
+
+      <!-- set-roots -->
+      <div class="panel accent" data-reveal>
+        <div class="panel-title">
+          <span class="n">forgectl set-roots</span>
+          Set code search roots for a domain
+        </div>
+        <div class="reveal">
+          <p class="desc">Writes <code>specifying.domains[&lt;domain&gt;].code_search_roots</code> in the state file. Used to tell the planning and implementing phases where to search for existing code within a given domain.</p>
+
+          <div class="flag-group-label">Required flags</div>
+          <div class="flag-grid">
+            <span class="flag-name">--domain &lt;str&gt;</span>
+            <span class="flag-desc">Domain name to configure</span>
+            <span class="flag-name">--roots &lt;str&gt;</span>
+            <span class="flag-desc">Comma-separated list of root paths</span>
+          </div>
+        </div>
+
+        <div class="reveal">
+          <div class="flag-group-label">Example invocations</div>
+          <div class="code-block">
+<span class="prompt">$ </span><span class="cmd">forgectl set-roots</span> <span class="flag">--domain</span> <span class="val">auth</span> <span class="flag">--roots</span> <span class="val">./auth,./shared/middleware</span>
+<span class="prompt">$ </span><span class="cmd">forgectl set-roots</span> <span class="flag">--domain</span> <span class="val">billing</span> <span class="flag">--roots</span> <span class="val">./billing,./pkg/payments</span></div>
+        </div>
+
+        <div class="output-note reveal">
+          <span class="out-tag">output</span>
+          <span>Set code search roots for {domain}.</span>
+        </div>
+      </div>
+
+      <!-- --version -->
+      <div class="panel" data-reveal>
+        <div class="panel-title">
+          <span class="n">forgectl --version</span>
+          Display version
+        </div>
+        <div class="reveal">
+          <div class="code-block">
+<span class="prompt">$ </span><span class="cmd">forgectl</span> <span class="flag">--version</span>
+<span style="color:var(--muted)">v0.0.1</span></div>
+        </div>
+      </div>
+
+    </div><!-- /.cmd-grid -->
+
+    <!-- TWO-ACTOR MODEL -->
+    <div class="section-head">Two-Actor Model</div>
+
+    <div class="panel steel" data-reveal>
+      <div class="panel-title" style="margin-bottom:10px">
+        <span class="n" style="color:var(--steel)">Engineer ↔ Sub-Agent</span>
+        Which actor uses which commands
+      </div>
+      <p class="desc reveal">All commands flow through the same state file. The engineer drives the outer loop; the AI sub-agent receives context via <code>eval</code> and returns artifacts via <code>handoff</code> or <code>advance --verdict</code>.</p>
+
+      <div class="two-actor reveal">
+        <div class="actor-box">
+          <div class="actor-label">Engineer · Primary Agent</div>
+          <ul>
+            <li><code>forgectl init</code></li>
+            <li><code>forgectl advance</code></li>
+            <li><code>forgectl status</code></li>
+            <li><code>forgectl add-queue-item</code></li>
+            <li><code>forgectl set-roots</code></li>
+          </ul>
+          <div style="margin-top:14px;font-size:11px;color:var(--muted);font-family:'JetBrains Mono',monospace;">
+            <b style="color:var(--text);display:block;margin-bottom:6px">Writes:</b>
+            <span>Specs · Plans · Code · Notes</span>
+          </div>
+        </div>
+        <div class="actor-box steel">
+          <div class="actor-label">Sub-Agent · AI Evaluator</div>
+          <ul>
+            <li><code>forgectl eval</code></li>
+            <li><code>forgectl handoff</code> <span style="color:var(--muted-2)">(ui_implementing)</span></li>
+          </ul>
+          <div style="margin-top:14px;font-size:11px;color:var(--muted);font-family:'JetBrains Mono',monospace;">
+            <b style="color:var(--text);display:block;margin-bottom:6px">Reads:</b>
+            <span>Spec files · Implementation · Notes/refs · Evaluator prompt</span>
+          </div>
+          <div style="margin-top:10px;font-size:11px;color:var(--muted);font-family:'JetBrains Mono',monospace;">
+            <b style="color:var(--text);display:block;margin-bottom:6px">Writes:</b>
+            <span>Eval reports · QA reports/steps · e2e tests/reports</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="reveal">
+        <div class="track-label" style="margin-top:22px">Shared interface</div>
+        <div class="track">
+          <span class="state">advance --verdict</span>
+          <span class="arrow">+</span>
+          <span class="state">advance --eval-report</span>
+          <span class="arrow" style="color:var(--muted-2)">→</span>
+          <span class="state" style="border-color:rgba(95,168,211,0.4);color:var(--steel)">.forgectl/state/forgectl-state.json</span>
+        </div>
+      </div>
+    </div>
+
+  </main>
+
+  <footer>
+    <span>forgectl · docs/diagrams/04-cli-commands</span>
+    <span><a href="index.html">← workflow index</a></span>
+  </footer>
+</div>
+
+<script>
+  const io = new IntersectionObserver((entries)=>{
+    entries.forEach(e=>{ if(e.isIntersecting){ e.target.classList.add('lit');
+      e.target.querySelectorAll('.reveal').forEach((el,i)=>{el.style.animationDelay=(i*70)+'ms';});
+      io.unobserve(e.target);} });
+  }, { threshold:0.14, rootMargin:'0px 0px -8% 0px' });
+  document.querySelectorAll('[data-station],[data-reveal]').forEach(s=>io.observe(s));
+</script>
+</body>
+</html>

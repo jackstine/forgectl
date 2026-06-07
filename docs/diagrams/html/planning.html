@@ -1,0 +1,698 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>forgectl — Planning Phase</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600;700&family=Archivo+Expanded:wght@600;700;800;900&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet" />
+<link rel="stylesheet" href="forge.css" />
+<style>
+  .dim-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+    gap: 10px 18px;
+    margin-top: 4px;
+  }
+  .dim-item {
+    display: flex;
+    gap: 12px;
+    align-items: flex-start;
+    padding: 10px 12px;
+    border-radius: 8px;
+    background: var(--iron);
+    border: 1px solid var(--line);
+  }
+  .dim-item .dn {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 13px;
+    font-weight: 700;
+    color: var(--ember-hot);
+    flex: none;
+    width: 22px;
+    padding-top: 1px;
+  }
+  .dim-item .dtxt { font-size: 13px; color: var(--muted); }
+  .dim-item .dtxt b { display: block; color: var(--text); font-family: 'JetBrains Mono', monospace; font-size: 11.5px; letter-spacing: .04em; margin-bottom: 2px; font-weight: 600; }
+
+  .schema-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+    gap: 10px 18px;
+    margin-top: 4px;
+  }
+  .schema-block {
+    padding: 12px 14px;
+    border-radius: 8px;
+    background: var(--iron);
+    border: 1px solid var(--line);
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 12px;
+  }
+  .schema-block .sb-title {
+    font-size: 10px;
+    letter-spacing: .22em;
+    text-transform: uppercase;
+    color: var(--muted-2);
+    margin-bottom: 8px;
+  }
+  .schema-block .sb-field { color: var(--steel); }
+  .schema-block .sb-type  { color: var(--muted-2); }
+  .schema-block .sb-note  { color: var(--spark); }
+  .schema-block .sb-row { display: flex; gap: 6px; align-items: baseline; margin-bottom: 4px; flex-wrap: wrap; }
+
+  .validate-list {
+    list-style: none;
+    margin-top: 4px;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+  .validate-list li {
+    display: flex;
+    gap: 10px;
+    align-items: flex-start;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 12px;
+    color: var(--muted);
+    padding: 8px 12px;
+    border-radius: 7px;
+    background: var(--iron);
+    border: 1px solid var(--line);
+  }
+  .validate-list li::before {
+    content: '✓';
+    color: var(--ok);
+    flex: none;
+    font-size: 11px;
+    padding-top: 1px;
+  }
+
+  .agents-row {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 10px;
+    margin: 10px 0 6px;
+  }
+  @media (max-width: 620px) { .agents-row { grid-template-columns: 1fr; } }
+  .agent-box {
+    padding: 12px 14px;
+    border-radius: 8px;
+    background: var(--iron);
+    border: 1px solid var(--line);
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11.5px;
+  }
+  .agent-box .ab-label {
+    font-size: 9.5px;
+    letter-spacing: .2em;
+    text-transform: uppercase;
+    color: var(--muted-2);
+    margin-bottom: 6px;
+  }
+  .agent-box .ab-focus { color: var(--text); font-weight: 500; line-height: 1.55; }
+  .agent-box .ab-focus span { display: block; color: var(--muted); font-weight: 400; }
+</style>
+</head>
+<body>
+<div class="grain"></div>
+
+<div class="wrap">
+  <header>
+    <a class="crumb" href="index.html">← Workflow Atlas</a>
+    <span class="kicker"><span class="dot"></span> Phase 03 · Draw</span>
+    <h1 class="page-title">Planning</h1>
+    <p class="lede">
+      The <strong>Staff Engineer</strong> studies specs, explores the codebase with parallel sub-agents,
+      and drafts a structured <code>plan.json</code> before entering an adversarial
+      <strong>11-dimension evaluation loop</strong>. Each accepted plan carries a
+      <code>kind</code> field that routes the phase shift to the correct implementation variant.
+    </p>
+    <div class="meta-row">
+      <span class="chip"><b>Role</b> Staff Engineer</span>
+      <span class="chip"><b>Input</b> plan-queue.json + specs/*.md</span>
+      <span class="chip"><b>Output</b> plan.json + notes/*.md</span>
+      <span class="chip"><b>Eval</b> 11-dimension plan review</span>
+    </div>
+  </header>
+
+  <main class="pipeline">
+
+    <!-- INITIALIZATION -->
+    <section class="station" data-station>
+      <div class="node-marker">0</div>
+      <article class="card">
+        <div class="card-head">
+          <div class="reveal">
+            <div class="phase-label">Initialization</div>
+            <div class="phase-title">Entry Point</div>
+          </div>
+          <div class="io reveal">
+            <div class="ln"><span class="tag">in</span><span class="val">plan-queue.json</span></div>
+            <div class="ln"><span class="tag">cfg</span><span class="val">batch, eval.max_rounds, eval.min_rounds</span></div>
+          </div>
+        </div>
+        <p class="desc reveal">
+          Planning begins either from a manual <code>forgectl init</code> command or automatically
+          via a <strong>PHASE_SHIFT</strong> from the generate_planning_queue phase.
+          Pass <code>--guided</code> to enable user checkpoints throughout the run.
+        </p>
+        <div class="track-label reveal">Manual start</div>
+        <div class="track reveal">
+          <span class="state">forgectl init --phase planning --from plan-queue.json</span>
+        </div>
+        <div class="track-label reveal">Automatic entry</div>
+        <div class="track reveal">
+          <span class="state gate">PHASE_SHIFT</span>
+          <span class="arrow">→</span>
+          <span class="state">forgectl advance [--from plan-queue.json]</span>
+        </div>
+      </article>
+    </section>
+
+    <!-- ORIENT -->
+    <section class="station" data-station>
+      <div class="node-marker">1</div>
+      <article class="card">
+        <div class="card-head">
+          <div class="reveal">
+            <div class="phase-label">State 01</div>
+            <div class="phase-title">Orient</div>
+          </div>
+          <div class="io reveal">
+            <div class="ln"><span class="tag">action</span><span class="val">forgectl advance</span></div>
+          </div>
+        </div>
+        <p class="desc reveal">
+          Review plan metadata: name, domain, topic. Understand domain context.
+          If <code>--guided</code>: <strong>stop and discuss scope with user</strong> before advancing.
+        </p>
+        <div class="track-label reveal">Flow</div>
+        <div class="track reveal">
+          <span class="state">ORIENT</span>
+          <span class="arrow">→</span>
+          <span class="state">STUDY_SPECS</span>
+        </div>
+      </article>
+    </section>
+
+    <!-- STUDY PHASE -->
+    <div class="section-head" data-reveal>Study Phase — Deep Research Before Drafting</div>
+
+    <section class="station" data-station>
+      <div class="node-marker">2</div>
+      <article class="card">
+        <div class="card-head">
+          <div class="reveal">
+            <div class="phase-label">States 02 – 04</div>
+            <div class="phase-title">Study Specs · Code · Packages</div>
+          </div>
+          <div class="io reveal">
+            <div class="ln"><span class="tag">action</span><span class="val">forgectl advance</span></div>
+            <div class="ln"><span class="tag">each</span><span class="val">after each state</span></div>
+          </div>
+        </div>
+
+        <div class="track-label reveal">Sequential study states</div>
+        <div class="track reveal">
+          <span class="state">STUDY_SPECS</span>
+          <span class="arrow">→</span>
+          <span class="state">STUDY_CODE</span>
+          <span class="arrow">→</span>
+          <span class="state">STUDY_PACKAGES</span>
+        </div>
+
+        <div class="track-label reveal">STUDY_SPECS — spec deep-read</div>
+        <div class="track reveal" style="flex-direction:column;align-items:flex-start;gap:4px">
+          <div class="track" style="gap:6px;flex-wrap:wrap">
+            <span class="state">Read specs[] field entries</span>
+            <span class="arrow">·</span>
+            <span class="state">Review SPEC_MANIFEST.md</span>
+            <span class="arrow">·</span>
+            <span class="state">Check git diffs (recent spec commits)</span>
+            <span class="arrow">·</span>
+            <span class="state">Cross-reference dependencies</span>
+          </div>
+        </div>
+
+        <div class="track-label reveal">STUDY_CODE — 3 parallel sub-agents</div>
+        <div class="agents-row reveal">
+          <div class="agent-box">
+            <div class="ab-label">Agent 1</div>
+            <div class="ab-focus">Infra / Config / Entry Points
+              <span>bootstrap, config loading, CLI wiring</span>
+            </div>
+          </div>
+          <div class="agent-box">
+            <div class="ab-label">Agent 2</div>
+            <div class="ab-focus">Domain Models / State
+              <span>core types, state machines, business logic</span>
+            </div>
+          </div>
+          <div class="agent-box">
+            <div class="ab-label">Agent 3</div>
+            <div class="ab-focus">Transport / IO / Tests
+              <span>existing tests, placeholders, TODOs</span>
+            </div>
+          </div>
+        </div>
+        <p class="desc reveal" style="margin-top:8px">Search within <code>code_search_roots[]</code>. Find existing implementations, TODOs, placeholders, and patterns.</p>
+
+        <div class="track-label reveal">STUDY_PACKAGES — library analysis</div>
+        <div class="track reveal" style="flex-wrap:wrap">
+          <span class="state">Analyze go.mod / package.json</span>
+          <span class="arrow">·</span>
+          <span class="state">Study library docs</span>
+          <span class="arrow">·</span>
+          <span class="state">Review CLAUDE.md references</span>
+          <span class="arrow">·</span>
+          <span class="state">Understand constraints</span>
+        </div>
+      </article>
+    </section>
+
+    <!-- REVIEW -->
+    <section class="station" data-station>
+      <div class="node-marker">3</div>
+      <article class="card">
+        <div class="card-head">
+          <div class="reveal">
+            <div class="phase-label">State 05</div>
+            <div class="phase-title">Review</div>
+            <div class="role">Checkpoint before drafting</div>
+          </div>
+          <div class="io reveal">
+            <div class="ln"><span class="tag">action</span><span class="val">forgectl advance</span></div>
+          </div>
+        </div>
+        <p class="desc reveal">
+          Read <code>plan-format.json</code> (authoritative schema). Verify understanding of specs,
+          code, and packages. If <code>--guided</code>: <strong>stop and discuss approach</strong> with user before advancing.
+        </p>
+        <div class="track-label reveal">Flow</div>
+        <div class="track reveal">
+          <span class="state">REVIEW</span>
+          <span class="arrow">→</span>
+          <span class="state">DRAFT</span>
+        </div>
+      </article>
+    </section>
+
+    <!-- DRAFT -->
+    <div class="section-head" data-reveal>Draft — Generate Implementation Plan</div>
+
+    <section class="station" data-station>
+      <div class="node-marker">4</div>
+      <article class="card">
+        <div class="card-head">
+          <div class="reveal">
+            <div class="phase-label">State 06</div>
+            <div class="phase-title">Draft</div>
+          </div>
+          <div class="io reveal">
+            <div class="ln"><span class="tag">out</span><span class="val out">plan.json</span></div>
+            <div class="ln"><span class="tag">out</span><span class="val out">notes/&lt;pkg&gt;.md</span></div>
+            <div class="ln"><span class="tag">action</span><span class="val">forgectl advance</span></div>
+          </div>
+        </div>
+        <p class="desc reveal">
+          Generate the full implementation plan under
+          <code>&lt;domain&gt;/.forge_workspace/implementation_plan/</code>.
+          Advancing auto-validates <code>plan.json</code> — if valid, proceeds to <strong>SELF_REVIEW</strong>;
+          if invalid, enters <strong>VALIDATE</strong> for structural repair.
+        </p>
+
+        <div class="track-label reveal">Output layout</div>
+        <div class="schema-grid reveal">
+          <div class="schema-block">
+            <div class="sb-title">plan.json — top-level</div>
+            <div class="sb-row"><span class="sb-field">context</span><span class="sb-type">{ domain, module }</span></div>
+            <div class="sb-row"><span class="sb-field">refs</span><span class="sb-type">[{ id, path }]</span></div>
+            <div class="sb-row"><span class="sb-field">layers</span><span class="sb-type">[{ id, name, items[] }]</span></div>
+            <div class="sb-row"><span class="sb-field">items</span><span class="sb-type">[{ ... }]</span></div>
+            <div class="sb-row"><span class="sb-field">kind</span><span class="sb-note">"code" | "ui"</span><span class="sb-type"> — routes phase shift</span></div>
+          </div>
+          <div class="schema-block">
+            <div class="sb-title">items[] entry</div>
+            <div class="sb-row"><span class="sb-field">id, name, description</span></div>
+            <div class="sb-row"><span class="sb-field">depends_on[]</span><span class="sb-type"> DAG edges</span></div>
+            <div class="sb-row"><span class="sb-field">steps[], files[]</span></div>
+            <div class="sb-row"><span class="sb-field">specs[], refs[]</span></div>
+            <div class="sb-row"><span class="sb-field">tests[]</span><span class="sb-type"> [{ category, description }]</span></div>
+          </div>
+          <div class="schema-block">
+            <div class="sb-title">notes/ directory</div>
+            <div class="sb-row"><span class="sb-field">&lt;package-a&gt;.md</span><span class="sb-type"> impl guidance</span></div>
+            <div class="sb-row"><span class="sb-field">&lt;package-b&gt;.md</span></div>
+            <div class="sb-row" style="margin-top:8px"><span class="sb-note">one file per package</span></div>
+            <div class="sb-row"><span class="sb-type">referenced by items[].refs</span></div>
+          </div>
+        </div>
+
+        <div class="track-label reveal" style="margin-top:22px">Conditional branch on advance</div>
+        <div class="branch reveal">
+          <div class="bln">
+            <span class="verdict pass">plan valid</span>
+            <span class="arrow">→</span>
+            <span class="state">SELF_REVIEW</span>
+            <span style="color:var(--muted-2);font-size:11px;font-family:'JetBrains Mono',monospace">(if planning.self_review: true)</span>
+            <span class="arrow">→</span>
+            <span class="state eval">EVALUATE</span>
+          </div>
+          <div class="bln">
+            <span class="verdict fail">plan invalid</span>
+            <span class="arrow">→</span>
+            <span class="state gate">VALIDATE</span>
+            <span class="arrow">→</span>
+            <span class="state">SELF_REVIEW</span>
+            <span class="arrow">→</span>
+            <span class="state eval">EVALUATE</span>
+          </div>
+        </div>
+      </article>
+    </section>
+
+    <!-- VALIDATE -->
+    <section class="station" data-station>
+      <div class="node-marker">4a</div>
+      <article class="card">
+        <div class="card-head">
+          <div class="reveal">
+            <div class="phase-label">State 06a — Only when plan invalid</div>
+            <div class="phase-title">Validate</div>
+          </div>
+          <div class="io reveal">
+            <div class="ln"><span class="tag">trigger</span><span class="val">auto on invalid plan.json</span></div>
+            <div class="ln"><span class="tag">action</span><span class="val">forgectl advance (re-validates)</span></div>
+          </div>
+        </div>
+        <p class="desc reveal">
+          Structural repair loop. Fix all errors, then re-advance —
+          <code>forgectl advance</code> re-validates automatically.
+        </p>
+        <div class="track-label reveal">Structural checks</div>
+        <ul class="validate-list reveal">
+          <li>JSON parse validity</li>
+          <li>Required fields present: context, refs, layers, items</li>
+          <li>context.domain &amp; context.module non-empty</li>
+          <li>All ref paths resolve on disk</li>
+          <li>Item ID uniqueness across all items</li>
+          <li>Every item appears in exactly one layer</li>
+          <li>Layer ordering respects the dependency DAG</li>
+          <li>No dependency cycles</li>
+          <li>Test categories: functional, rejection, edge_case only</li>
+          <li>Notes files exist for all items[].refs entries</li>
+          <li>Spec files exist for all items[].specs entries</li>
+        </ul>
+      </article>
+    </section>
+
+    <!-- SELF_REVIEW -->
+    <section class="station" data-station>
+      <div class="node-marker">5</div>
+      <article class="card">
+        <div class="card-head">
+          <div class="reveal">
+            <div class="phase-label">State 07 — Only when planning.self_review: true</div>
+            <div class="phase-title">Self-Review</div>
+          </div>
+          <div class="io reveal">
+            <div class="ln"><span class="tag">action</span><span class="val">forgectl advance (re-validates)</span></div>
+          </div>
+        </div>
+        <p class="desc reveal">
+          Review <code>plan.json</code> against specs and study notes. Revise plan and notes as needed.
+          Skipped entirely when <code>planning.self_review: false</code>.
+          After REFINE, loops back here (when enabled) before EVALUATE.
+        </p>
+        <div class="track-label reveal">Flow</div>
+        <div class="track reveal">
+          <span class="state">SELF_REVIEW</span>
+          <span class="arrow">→</span>
+          <span class="state eval">EVALUATE</span>
+        </div>
+      </article>
+    </section>
+
+    <!-- EVALUATE / REFINE LOOP -->
+    <div class="section-head" data-reveal>Evaluate — 11-Dimension AI Review Loop</div>
+
+    <section class="station" data-station>
+      <div class="node-marker">6</div>
+      <article class="card">
+        <div class="card-head">
+          <div class="reveal">
+            <div class="phase-label">State 08</div>
+            <div class="phase-title">Evaluate</div>
+          </div>
+          <div class="io reveal">
+            <div class="ln"><span class="tag">cmd</span><span class="val">forgectl eval</span></div>
+            <div class="ln"><span class="tag">out</span><span class="val out">evals/round-N.md</span></div>
+          </div>
+        </div>
+        <p class="desc reveal">
+          <code>forgectl eval</code> outputs full context for an AI sub-agent that assesses the plan
+          against <strong>11 dimensions</strong>. Output written to <code>evals/round-N.md</code>
+          in <code>eval_mode: "report"</code>. In <code>"direct"</code> mode, the sub-agent edits
+          plan/notes in place; in <code>"conversational"</code> mode, the verdict is relayed verbally.
+        </p>
+
+        <div class="track-label reveal">11 evaluation dimensions</div>
+        <div class="dim-grid reveal">
+          <div class="dim-item">
+            <span class="dn">1</span>
+            <div class="dtxt"><b>Behavior</b>Plan items cover all spec behaviors</div>
+          </div>
+          <div class="dim-item">
+            <span class="dn">2</span>
+            <div class="dtxt"><b>Error Handling</b>Failure modes mapped to tests</div>
+          </div>
+          <div class="dim-item">
+            <span class="dn">3</span>
+            <div class="dtxt"><b>Rejection</b>Invalid inputs are tested</div>
+          </div>
+          <div class="dim-item">
+            <span class="dn">4</span>
+            <div class="dtxt"><b>Interface</b>Outputs match spec contracts</div>
+          </div>
+          <div class="dim-item">
+            <span class="dn">5</span>
+            <div class="dtxt"><b>Configuration</b>Configurable parameters covered</div>
+          </div>
+          <div class="dim-item">
+            <span class="dn">6</span>
+            <div class="dtxt"><b>Observability</b>Logging requirements addressed</div>
+          </div>
+          <div class="dim-item">
+            <span class="dn">7</span>
+            <div class="dtxt"><b>Integration</b>Cross-spec dependencies mapped</div>
+          </div>
+          <div class="dim-item">
+            <span class="dn">8</span>
+            <div class="dtxt"><b>Invariants</b>Always-true properties enforced</div>
+          </div>
+          <div class="dim-item">
+            <span class="dn">9</span>
+            <div class="dtxt"><b>Edge Cases</b>Boundary conditions tested</div>
+          </div>
+          <div class="dim-item">
+            <span class="dn">10</span>
+            <div class="dtxt"><b>Testing Criteria</b>All tests mapped to plan items</div>
+          </div>
+          <div class="dim-item">
+            <span class="dn">11</span>
+            <div class="dtxt"><b>Dependencies</b>DAG valid, schema compliant</div>
+          </div>
+        </div>
+
+        <div class="track-label reveal" style="margin-top:22px">Verdict routing</div>
+        <div class="track reveal">
+          <span class="state eval">EVALUATE</span>
+          <span class="arrow loopback">⟲</span>
+          <span class="state loop">REFINE</span>
+        </div>
+        <div class="branch reveal" style="margin-top:12px">
+          <div class="bln">
+            <span class="verdict pass">PASS ≥ min_rounds</span>
+            <span class="arrow">→</span>
+            <span class="state terminal">ACCEPT</span>
+          </div>
+          <div class="bln">
+            <span class="verdict fail">FAIL &lt; max_rounds</span>
+            <span class="arrow">→</span>
+            <span class="state loop">REFINE</span>
+            <span class="arrow">→</span>
+            <span class="state">SELF_REVIEW*</span>
+            <span style="color:var(--muted-2);font-size:11px;font-family:'JetBrains Mono',monospace">or VALIDATE if invalid</span>
+            <span class="arrow">→</span>
+            <span class="state eval">EVALUATE</span>
+          </div>
+          <div class="bln">
+            <span class="verdict fail">FAIL ≥ max_rounds</span>
+            <span class="arrow">→</span>
+            <span class="state terminal">ACCEPT</span>
+            <span style="color:var(--muted-2);font-size:11px;font-family:'JetBrains Mono',monospace">(forced, budget exhausted)</span>
+          </div>
+        </div>
+
+        <div class="track-label reveal" style="margin-top:22px">Advance commands (by eval_mode)</div>
+        <div class="track reveal" style="flex-direction:column;align-items:flex-start;gap:8px">
+          <div class="track" style="gap:8px;flex-wrap:wrap">
+            <span class="state gate">report</span>
+            <span class="arrow">→</span>
+            <span class="state">forgectl advance --verdict PASS|FAIL --eval-report &lt;path&gt;</span>
+          </div>
+          <div class="track" style="gap:8px;flex-wrap:wrap">
+            <span class="state gate">direct / conversational</span>
+            <span class="arrow">→</span>
+            <span class="state">forgectl advance --verdict PASS|FAIL</span>
+          </div>
+        </div>
+      </article>
+    </section>
+
+    <!-- REFINE -->
+    <section class="station" data-station>
+      <div class="node-marker">7</div>
+      <article class="card">
+        <div class="card-head">
+          <div class="reveal">
+            <div class="phase-label">State 09</div>
+            <div class="phase-title">Refine</div>
+          </div>
+          <div class="io reveal">
+            <div class="ln"><span class="tag">action</span><span class="val">forgectl advance</span></div>
+          </div>
+        </div>
+        <p class="desc reveal">
+          Address deficiencies surfaced by EVALUATE. Update <code>plan.json</code> and
+          <code>notes/*.md</code>, then advance. Returns to <strong>SELF_REVIEW</strong>
+          (when enabled) or directly to <strong>EVALUATE</strong>. If plan.json becomes
+          invalid during refinement, re-enters <strong>VALIDATE</strong> first.
+        </p>
+        <div class="track-label reveal">Loop path</div>
+        <div class="track reveal">
+          <span class="state loop">REFINE</span>
+          <span class="arrow">→</span>
+          <span class="state">SELF_REVIEW*</span>
+          <span class="arrow loopback">⟲</span>
+          <span class="state eval">EVALUATE</span>
+        </div>
+      </article>
+    </section>
+
+    <!-- ACCEPT -->
+    <section class="station" data-station>
+      <div class="node-marker">8</div>
+      <article class="card">
+        <div class="card-head">
+          <div class="reveal">
+            <div class="phase-label">State 10 — Terminal</div>
+            <div class="phase-title">Accept</div>
+          </div>
+          <div class="io reveal">
+            <div class="ln"><span class="tag">cmd</span><span class="val">forgectl advance [--message]</span></div>
+            <div class="ln"><span class="tag">out</span><span class="val out">plan.json finalized</span></div>
+          </div>
+        </div>
+        <p class="desc reveal">
+          Plan finalized. If <code>enable_commits</code> is set, a per-plan commit is created via
+          <code>forgectl advance --message</code>.
+          On advance, <code>passes: "pending"</code> and <code>rounds: 0</code> are stamped onto
+          every item in <code>plan.json</code> to initialize the implementing phase.
+        </p>
+        <div class="track-label reveal">Queue routing after ACCEPT</div>
+        <div class="branch reveal">
+          <div class="bln">
+            <span class="verdict pass">plan_all: true + queue non-empty</span>
+            <span class="arrow">→</span>
+            <span class="state gate">PHASE_SHIFT</span>
+            <span style="color:var(--muted-2);font-size:11px;font-family:'JetBrains Mono',monospace">planning → planning (next domain)</span>
+            <span class="arrow">→</span>
+            <span class="state">ORIENT</span>
+          </div>
+          <div class="bln">
+            <span class="verdict pass">plan_all: true + queue empty</span>
+            <span class="arrow">→</span>
+            <span class="state terminal">DONE</span>
+            <span class="arrow">→</span>
+            <span class="state gate">PHASE_SHIFT</span>
+          </div>
+          <div class="bln">
+            <span class="verdict pass">plan_all: false</span>
+            <span class="arrow">→</span>
+            <span class="state gate">PHASE_SHIFT</span>
+            <span style="color:var(--muted-2);font-size:11px;font-family:'JetBrains Mono',monospace">immediately after ACCEPT</span>
+          </div>
+        </div>
+      </article>
+    </section>
+
+  </main>
+
+  <!-- KIND ROUTING PHASE SHIFT -->
+  <div class="section-head" data-reveal>Phase Shift — Routed by plan.json kind field</div>
+
+  <div class="shift" style="padding-left:0;margin:0 0 30px" data-reveal>
+    <div class="shift-inner">
+      <span class="ps">PHASE_SHIFT</span>
+      <span style="color:var(--muted-2)">routed by kind:</span>
+      <span class="route"><span class="k">kind: "code"</span> → implementing</span>
+      <span class="route"><span class="k">kind: "ui"</span> → ui_implementing</span>
+    </div>
+  </div>
+
+  <div class="panel accent" data-reveal style="margin-bottom:30px">
+    <div class="panel-title"><span class="n">kind</span> Routing Field</div>
+    <p class="desc" style="margin-top:0">
+      Every <code>plan.json</code> carries a top-level <code>kind</code> field set during DRAFT.
+      The field is stamped and immutable after ACCEPT. On PHASE_SHIFT, forgectl reads
+      <code>kind</code> to select the correct implementing variant:
+      <strong><code>kind: "code"</code></strong> routes to the standard <em>Implementing</em> phase
+      (batch → eval → commit loop);
+      <strong><code>kind: "ui"</code></strong> routes to <em>UI Implementing</em>,
+      which inserts Playwright MCP QA and Playwright test-runner E2E gates after each code eval.
+    </p>
+    <div class="track" style="margin-top:16px;flex-wrap:wrap;gap:8px">
+      <span class="state"><span class="sub">plan.json</span> kind: "code"</span>
+      <span class="arrow">→</span>
+      <span class="state terminal">implementing</span>
+      <span style="color:var(--muted-2);font-size:13px;padding:0 4px">|</span>
+      <span class="state"><span class="sub">plan.json</span> kind: "ui"</span>
+      <span class="arrow">→</span>
+      <span class="state terminal">ui_implementing</span>
+    </div>
+  </div>
+
+  <!-- LEGEND -->
+  <section class="legend" data-station>
+    <h3>Key</h3>
+    <div class="legend-grid">
+      <div class="leg-item reveal"><div class="sw"><span class="state" style="padding:5px 9px;font-size:10px">STATE</span></div><div class="txt"><b>Standard state</b>Advance with <code>forgectl advance</code></div></div>
+      <div class="leg-item reveal"><div class="sw"><span class="state eval" style="padding:5px 9px;font-size:10px">EVAL</span></div><div class="txt"><b>EVALUATE</b>AI sub-agent reviews plan against 11 dimensions</div></div>
+      <div class="leg-item reveal"><div class="sw"><span class="state gate" style="padding:5px 9px;font-size:10px">GATE</span></div><div class="txt"><b>Conditional gate</b>VALIDATE (only invalid plan) · PHASE_SHIFT</div></div>
+      <div class="leg-item reveal"><div class="sw"><span class="state loop" style="padding:5px 9px;font-size:10px">LOOP</span></div><div class="txt"><b>REFINE</b>Fix deficiencies found in evaluation, then retry</div></div>
+      <div class="leg-item reveal"><div class="sw"><span class="state terminal" style="padding:5px 9px;font-size:10px">DONE</span></div><div class="txt"><b>Terminal state</b>ACCEPT — plan finalized; DONE when queue drained</div></div>
+      <div class="leg-item reveal"><div class="sw"><span class="arrow loopback" style="font-size:18px">⟲</span></div><div class="txt"><b>Loop back</b>Bounded by <code>eval.min_rounds</code> / <code>eval.max_rounds</code></div></div>
+      <div class="leg-item reveal"><div class="sw"><span style="font-family:'JetBrains Mono';font-size:10px;color:var(--spark)">kind</span></div><div class="txt"><b>Plan routing key</b><code>code</code> → implementing · <code>ui</code> → ui_implementing</div></div>
+      <div class="leg-item reveal"><div class="sw"><span class="state" style="padding:5px 9px;font-size:10px;border-style:dashed">*cond</span></div><div class="txt"><b>Conditional step</b>SELF_REVIEW only when <code>planning.self_review: true</code></div></div>
+    </div>
+  </section>
+
+  <footer>
+    <span>forgectl · docs/diagrams/02-planning-phase</span>
+    <span><a href="index.html">← workflow index</a></span>
+  </footer>
+</div>
+
+<script>
+  const io = new IntersectionObserver((entries)=>{
+    entries.forEach(e=>{ if(e.isIntersecting){ e.target.classList.add('lit');
+      e.target.querySelectorAll('.reveal').forEach((el,i)=>{el.style.animationDelay=(i*70)+'ms';});
+      io.unobserve(e.target);} });
+  }, { threshold:0.14, rootMargin:'0px 0px -8% 0px' });
+  document.querySelectorAll('[data-station],[data-reveal]').forEach(s=>io.observe(s));
+</script>
+</body>
+</html>

@@ -1,0 +1,116 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>forgectl — Workflow Atlas</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600;700&family=Archivo+Expanded:wght@600;700;800;900&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet" />
+<link rel="stylesheet" href="forge.css" />
+</head>
+<body>
+<div class="grain"></div>
+<div class="wrap">
+  <header>
+    <span class="kicker"><span class="dot"></span> Workflow Atlas</span>
+    <h1><span class="a">forge</span><span class="ctl">ctl</span></h1>
+    <p class="lede">Visual field guide to the <strong>forgectl</strong> workflows — the phases, state machines, evaluation loops, and artifacts that compile planning docs into production code.</p>
+    <div class="meta-row">
+      <span class="chip"><b>5</b> phases</span>
+      <span class="chip"><b>27</b> states</span>
+      <span class="chip">Go · <b>Cobra</b> CLI</span>
+      <span class="chip">JSON state machine</span>
+    </div>
+  </header>
+
+  <div class="section-head">Phases</div>
+  <main class="grid">
+    <a class="tile live" href="full-lifecycle.html" style="animation-delay:.04s">
+      <div class="tnum"><span>00</span><span class="badge live">Map</span></div>
+      <div class="tname">Full Lifecycle</div>
+      <div class="tdesc">Every phase end to end — specifying, planning queue, planning, and the code / UI implementation fork.</div>
+      <div class="tmeta">5 phases <span class="go">view →</span></div>
+    </a>
+
+    <a class="tile live" href="specifying.html" style="animation-delay:.08s">
+      <div class="tnum"><span>01</span><span class="badge live">Phase</span></div>
+      <div class="tname">Specifying</div>
+      <div class="tdesc">Systems Architect drafts permanent behavioral contracts under 11-dimension adversarial review, then reconciles.</div>
+      <div class="tmeta">Systems Architect <span class="go">view →</span></div>
+    </a>
+
+    <a class="tile live" href="planning.html" style="animation-delay:.12s">
+      <div class="tnum"><span>02</span><span class="badge live">Phase</span></div>
+      <div class="tname">Planning</div>
+      <div class="tdesc">Staff Engineer studies specs, code &amp; packages, drafts plan.json, validates and self-reviews before evaluation.</div>
+      <div class="tmeta">Staff Engineer <span class="go">view →</span></div>
+    </a>
+
+    <a class="tile live" href="implementing.html" style="animation-delay:.16s">
+      <div class="tnum"><span>03</span><span class="badge live">Phase · code</span></div>
+      <div class="tname">Implementing</div>
+      <div class="tdesc">Senior Engineer implements each batch, evaluates against spec tests, and commits. The default code path.</div>
+      <div class="tmeta">kind: code <span class="go">view →</span></div>
+    </a>
+
+    <a class="tile live" href="ui-implementing.html" style="animation-delay:.2s">
+      <div class="tnum"><span>10</span><span class="badge live">Phase · ui</span></div>
+      <div class="tname">UI Implementing</div>
+      <div class="tdesc">Three sequential gates per batch — code eval, Playwright MCP QA, and authored Playwright e2e verification.</div>
+      <div class="tmeta">kind: ui <span class="go">view →</span></div>
+    </a>
+
+    <a class="tile steel live" href="reverse-engineering.html" style="animation-delay:.24s">
+      <div class="tnum"><span>09</span><span class="badge live">Inverse</span></div>
+      <div class="tname">Reverse Engineering</div>
+      <div class="tdesc">The inverse flow — specs are extracted FROM existing code, domain by domain, driven entirely by the CLI.</div>
+      <div class="tmeta">specs from code <span class="go">view →</span></div>
+    </a>
+  </main>
+
+  <div class="section-head">Reference</div>
+  <main class="grid">
+    <a class="tile live" href="state-machine.html" style="animation-delay:.08s">
+      <div class="tnum"><span>06</span><span class="badge live">Atlas</span></div>
+      <div class="tname">State Machine</div>
+      <div class="tdesc">All 27 states across 5 phases in one map, including both implementation variants.</div>
+      <div class="tmeta">27 states <span class="go">view →</span></div>
+    </a>
+
+    <a class="tile live" href="evaluation-loop.html" style="animation-delay:.12s">
+      <div class="tnum"><span>07</span><span class="badge live">Mechanism</span></div>
+      <div class="tname">Evaluation Loop</div>
+      <div class="tdesc">Round-enforcement logic — min_rounds, max_rounds, and the force-accept boundary every phase shares.</div>
+      <div class="tmeta">min / max rounds <span class="go">view →</span></div>
+    </a>
+
+    <a class="tile live" href="data-flow.html" style="animation-delay:.16s">
+      <div class="tnum"><span>08</span><span class="badge live">Artifacts</span></div>
+      <div class="tname">Data Flow</div>
+      <div class="tdesc">What each phase consumes and produces, and how artifacts flow from planning docs to production code.</div>
+      <div class="tmeta">artifact map <span class="go">view →</span></div>
+    </a>
+
+    <a class="tile live" href="cli-commands.html" style="animation-delay:.2s">
+      <div class="tnum"><span>04</span><span class="badge live">CLI</span></div>
+      <div class="tname">CLI Commands</div>
+      <div class="tdesc">The forgectl command tree — init, advance, status, and their flags, mapped to the state machine.</div>
+      <div class="tmeta">command reference <span class="go">view →</span></div>
+    </a>
+
+    <a class="tile live" href="skills-and-roles.html" style="animation-delay:.24s">
+      <div class="tnum"><span>05</span><span class="badge live">Agents</span></div>
+      <div class="tname">Skills &amp; Roles</div>
+      <div class="tdesc">The specialized AI agent roles — each skill's capabilities, constraints, and workflow knowledge.</div>
+      <div class="tmeta">agent architecture <span class="go">view →</span></div>
+    </a>
+  </main>
+
+  <footer>
+    <span>forgectl · docs/diagrams/html</span>
+    <span>spec-driven development harness</span>
+  </footer>
+</div>
+</body>
+</html>

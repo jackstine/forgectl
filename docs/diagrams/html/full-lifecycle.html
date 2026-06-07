@@ -1,0 +1,299 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>forgectl — Full Development Lifecycle</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600;700&family=Archivo+Expanded:wght@600;700;800;900&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet" />
+<link rel="stylesheet" href="forge.css" />
+</head>
+<body>
+<div class="grain"></div>
+
+<div class="wrap">
+  <header>
+    <a class="crumb" href="index.html">← Workflow Atlas</a>
+    <span class="kicker"><span class="dot"></span> Spec-Driven Development Harness</span>
+    <h1><span class="forge">forge</span><span class="ctl">ctl</span></h1>
+    <p class="lede">
+      The <strong>full development lifecycle</strong> — raw planning documents are heated,
+      hammered, and quenched into production code through sequential phases, each governed
+      by a state machine with iterative, AI-powered evaluation loops.
+    </p>
+    <div class="meta-row">
+      <span class="chip"><b>5</b> phases</span>
+      <span class="chip">routed by plan <b>kind</b></span>
+      <span class="chip">state file <b>forgectl-state.json</b></span>
+      <span class="chip">config <b>.forgectl/config</b></span>
+    </div>
+  </header>
+
+  <main class="pipeline">
+
+    <!-- PHASE 1 -->
+    <section class="station" data-station>
+      <div class="node-marker">1</div>
+      <article class="card">
+        <div class="card-head">
+          <div class="reveal">
+            <div class="phase-label">Phase 01 — Heat</div>
+            <div class="phase-title">Specifying</div>
+            <div class="role">Role: <b>Systems Architect</b></div>
+          </div>
+          <div class="io reveal">
+            <div class="ln"><span class="tag">in</span><span class="val">spec-queue.json</span></div>
+            <div class="ln"><span class="tag">out</span><span class="val out">specs/*.md</span></div>
+            <div class="ln"><span class="tag">eval</span><span class="val">11-dim review</span></div>
+          </div>
+        </div>
+        <p class="desc reveal">
+          Permanent behavioral <strong>contracts</strong>. Each spec is drafted, then put through an
+          adversarial 11-dimension review by an Opus sub-agent. Cross-spec
+          <strong>reconciliation</strong> validates dependencies and symmetry before a single commit at <code>COMPLETE</code>.
+        </p>
+        <div class="track-label reveal">Per-spec loop</div>
+        <div class="track reveal">
+          <span class="state">ORIENT</span><span class="arrow">→</span>
+          <span class="state">SELECT</span><span class="arrow">→</span>
+          <span class="state">DRAFT</span><span class="arrow">→</span>
+          <span class="state eval">EVALUATE</span>
+          <span class="arrow loopback">⟲</span>
+          <span class="state loop">REFINE</span><span class="arrow">→</span>
+          <span class="state terminal">ACCEPT</span>
+        </div>
+        <div class="track-label reveal">Reconciliation</div>
+        <div class="track reveal">
+          <span class="state">RECONCILE</span><span class="arrow">→</span>
+          <span class="state eval">RECONCILE_EVAL</span><span class="arrow">→</span>
+          <span class="state gate">RECONCILE_REVIEW</span><span class="arrow">→</span>
+          <span class="state terminal">COMPLETE</span>
+        </div>
+        <div class="track-label reveal" style="margin-bottom:8px">Detailed view</div>
+        <a class="crumb" href="specifying.html" style="margin-bottom:0">Open the Specifying state machine →</a>
+      </article>
+    </section>
+
+    <div class="shift" data-station>
+      <div class="shift-inner reveal">
+        <span class="ps">PHASE_SHIFT</span> → generate_planning_queue
+        <span style="color:var(--muted-2)">— or</span>
+        <span class="route">advance --from plan-queue.json</span>
+      </div>
+    </div>
+
+    <!-- PHASE 2 -->
+    <section class="station cool" data-station>
+      <div class="node-marker">2</div>
+      <article class="card steel">
+        <div class="card-head">
+          <div class="reveal">
+            <div class="phase-label">Phase 02 — Sort</div>
+            <div class="phase-title">Generate Planning Queue</div>
+            <div class="role">Auto-generated, then architect-reviewed</div>
+          </div>
+          <div class="io reveal">
+            <div class="ln"><span class="tag">in</span><span class="val">completed specs</span></div>
+            <div class="ln"><span class="tag">out</span><span class="val out">plan-queue.json</span></div>
+          </div>
+        </div>
+        <p class="desc reveal">
+          Auto-generates <code>plan-queue.json</code> from completed specs. The architect
+          <strong>reorders and edits</strong> before planning begins. A cool, mechanical sort between the
+          molten authoring phases.
+        </p>
+        <div class="track-label reveal">Flow</div>
+        <div class="track reveal">
+          <span class="state">ORIENT <span class="sub">(gen)</span></span><span class="arrow">→</span>
+          <span class="state">REFINE <span class="sub">(review)</span></span><span class="arrow">→</span>
+          <span class="state gate">PHASE_SHIFT</span>
+        </div>
+      </article>
+    </section>
+
+    <div class="shift" data-station>
+      <div class="shift-inner reveal">
+        <span class="ps">PHASE_SHIFT</span> → planning
+        <span style="color:var(--muted-2)">— or</span>
+        <span class="route">advance --from &lt;path&gt;</span>
+      </div>
+    </div>
+
+    <!-- PHASE 3 -->
+    <section class="station" data-station>
+      <div class="node-marker">3</div>
+      <article class="card">
+        <div class="card-head">
+          <div class="reveal">
+            <div class="phase-label">Phase 03 — Draw</div>
+            <div class="phase-title">Planning</div>
+            <div class="role">Role: <b>Staff Engineer</b></div>
+          </div>
+          <div class="io reveal">
+            <div class="ln"><span class="tag">in</span><span class="val">plan-queue + specs</span></div>
+            <div class="ln"><span class="tag">out</span><span class="val out">plan.json</span></div>
+            <div class="ln"><span class="tag">out</span><span class="val out">notes/*.md</span></div>
+          </div>
+        </div>
+        <p class="desc reveal">
+          Studies specs, existing code, and packages before drafting an executable plan.
+          Each plan carries <code>kind: "code"</code> (default) or <code>kind: "ui"</code> — the field that
+          <strong>routes the next phase shift</strong> to the matching implementation variant.
+        </p>
+        <div class="track-label reveal">Study → Draft → Evaluate</div>
+        <div class="track reveal">
+          <span class="state">ORIENT</span><span class="arrow">→</span>
+          <span class="state">STUDY_SPECS</span><span class="arrow">→</span>
+          <span class="state">STUDY_CODE</span><span class="arrow">→</span>
+          <span class="state">STUDY_PACKAGES</span><span class="arrow">→</span>
+          <span class="state">REVIEW</span><span class="arrow">→</span>
+          <span class="state">DRAFT</span><span class="arrow">→</span>
+          <span class="state">VALIDATE</span><span class="arrow">→</span>
+          <span class="state">SELF_REVIEW</span><span class="arrow">→</span>
+          <span class="state eval">EVALUATE</span>
+          <span class="arrow loopback">⟲</span>
+          <span class="state loop">REFINE</span><span class="arrow">→</span>
+          <span class="state terminal">ACCEPT</span>
+        </div>
+        <div class="branch reveal" style="margin-top:16px">
+          <div class="bln"><span class="verdict pass">PASS ≥min</span> → <span class="state terminal">ACCEPT</span> &nbsp;·&nbsp; <span class="verdict fail">FAIL &lt;max</span> → <span class="state loop">REFINE</span></div>
+        </div>
+        <div class="track-label reveal" style="margin:22px 0 8px">Detailed view</div>
+        <a class="crumb" href="planning.html" style="margin-bottom:0">Open the Planning state machine →</a>
+      </article>
+    </section>
+
+    <div class="shift" data-station>
+      <div class="shift-inner reveal">
+        <span class="ps">PHASE_SHIFT</span>
+        <span style="color:var(--muted-2)">routed by kind:</span>
+        <span class="route"><span class="k">kind: code</span> → implementing</span>
+        <span class="route"><span class="k">kind: ui</span> → ui_implementing</span>
+      </div>
+    </div>
+
+    <div class="fork-label" data-station><span class="reveal">⑂ Implementation forks on plan kind</span></div>
+
+    <!-- PHASE 4a -->
+    <section class="station" data-station>
+      <div class="node-marker">4a</div>
+      <article class="card">
+        <div class="card-head">
+          <div class="reveal">
+            <div class="phase-label">Phase 04a — Forge · kind: code</div>
+            <div class="phase-title">Implementing</div>
+            <div class="role">Role: <b>Senior Software Engineer</b></div>
+          </div>
+          <div class="io reveal">
+            <div class="ln"><span class="tag">in</span><span class="val">plan.json +passes</span></div>
+            <div class="ln"><span class="tag">out</span><span class="val out">production code</span></div>
+            <div class="ln"><span class="tag">out</span><span class="val out">eval reports</span></div>
+          </div>
+        </div>
+        <p class="desc reveal">
+          The default code path. Implements each batch item, evaluates, and commits.
+          <strong>FAIL re-enters</strong> implement at round 2+; more batches loop back until the queue drains.
+        </p>
+        <div class="track-label reveal">Batch loop</div>
+        <div class="track reveal">
+          <span class="state">ORIENT</span><span class="arrow">→</span>
+          <span class="state">IMPLEMENT <span class="sub">1..n</span></span><span class="arrow">→</span>
+          <span class="state eval">EVALUATE</span>
+          <span class="arrow loopback">⟲</span>
+          <span class="state loop">IMPLEMENT <span class="sub">r2+</span></span><span class="arrow">→</span>
+          <span class="state">COMMIT</span><span class="arrow">→</span>
+          <span class="state terminal">DONE</span>
+        </div>
+        <div class="track-label reveal" style="margin:22px 0 8px">Detailed view</div>
+        <a class="crumb" href="implementing.html" style="margin-bottom:0">Open the Implementing state machine →</a>
+      </article>
+    </section>
+
+    <!-- PHASE 4b -->
+    <section class="station" data-station>
+      <div class="node-marker">4b</div>
+      <article class="card">
+        <div class="card-head">
+          <div class="reveal">
+            <div class="phase-label">Phase 04b — Forge + Quench · kind: ui</div>
+            <div class="phase-title">UI Implementing</div>
+            <div class="role">Role: <b>Senior Software Engineer (UI)</b></div>
+          </div>
+          <div class="io reveal">
+            <div class="ln"><span class="tag">in</span><span class="val">plan.json +passes</span></div>
+            <div class="ln"><span class="tag">out</span><span class="val out">UI code + e2e</span></div>
+            <div class="ln"><span class="tag">out</span><span class="val out">QA + eval reports</span></div>
+          </div>
+        </div>
+        <p class="desc reveal">
+          Reuses the implementing spine, then inserts <strong>two verification loops</strong> between
+          code eval and commit — <strong>three sequential gates per batch</strong>. An item passes only if all
+          three loops pass within budget.
+        </p>
+        <div class="track-label reveal">Three gates per batch</div>
+        <div class="track reveal">
+          <span class="state">ORIENT</span><span class="arrow">→</span>
+          <span class="state">IMPLEMENT</span><span class="arrow">→</span>
+          <span class="state eval">CODE EVAL</span><span class="arrow">→</span>
+          <span class="state gate">QA</span>
+          <span class="arrow loopback">⟲</span>
+          <span class="state loop">UI_REFINE</span><span class="arrow">→</span>
+          <span class="state gate">E2E</span>
+          <span class="arrow loopback">⟲</span>
+          <span class="state loop">E2E_REMEDIATE</span><span class="arrow">→</span>
+          <span class="state">COMMIT</span><span class="arrow">→</span>
+          <span class="state terminal">DONE</span>
+        </div>
+        <div class="branch reveal" style="margin-top:16px">
+          <div class="bln"><span class="state gate">QA</span> Playwright MCP — visual + interaction (<span class="verdict pass">QA_TEST</span> / <span class="verdict fail">UI_REFINE</span>)</div>
+          <div class="bln"><span class="state gate">E2E</span> Playwright test runner — authored specs (<span class="verdict pass">E2E_VERIFY</span> / <span class="verdict fail">E2E_REMEDIATE</span>)</div>
+        </div>
+        <div class="track-label reveal" style="margin:22px 0 8px">Detailed view</div>
+        <a class="crumb" href="ui-implementing.html" style="margin-bottom:0">Open the UI Implementing state machine →</a>
+      </article>
+    </section>
+
+    <div class="shift" data-station>
+      <div class="shift-inner reveal">
+        <span class="ps">PHASE_SHIFT</span> → planning (next domain) <span style="color:var(--muted-2)">if plans remain · domain boundaries re-route by kind</span>
+      </div>
+    </div>
+
+  </main>
+
+  <!-- LEGEND -->
+  <section class="legend" data-station>
+    <h3>Key</h3>
+    <div class="legend-grid">
+      <div class="leg-item reveal"><div class="sw"><span class="state" style="padding:5px 9px;font-size:10px">STATE</span></div><div class="txt"><b>Standard state</b>Advance with <code>forgectl advance</code></div></div>
+      <div class="leg-item reveal"><div class="sw"><span class="state eval" style="padding:5px 9px;font-size:10px">EVAL</span></div><div class="txt"><b>EVALUATE</b>AI sub-agent reviews work against evaluation dimensions</div></div>
+      <div class="leg-item reveal"><div class="sw"><span class="state gate" style="padding:5px 9px;font-size:10px">GATE</span></div><div class="txt"><b>Verification gate</b>Reconcile / review / QA / E2E checkpoints</div></div>
+      <div class="leg-item reveal"><div class="sw"><span class="state loop" style="padding:5px 9px;font-size:10px">LOOP</span></div><div class="txt"><b>REFINE / REMEDIATE</b>Fix deficiencies found in evaluation, then retry</div></div>
+      <div class="leg-item reveal"><div class="sw"><span class="state terminal" style="padding:5px 9px;font-size:10px">DONE</span></div><div class="txt"><b>Terminal state</b>ACCEPT · COMPLETE · DONE — phase advances</div></div>
+      <div class="leg-item reveal"><div class="sw"><span class="arrow loopback" style="font-size:18px">⟲</span></div><div class="txt"><b>Loop back</b>Bounded by <code>eval.min_rounds</code> / <code>max_rounds</code></div></div>
+      <div class="leg-item reveal"><div class="sw"><span class="ps" style="font-family:'JetBrains Mono';font-size:10px;color:var(--ember-hot);font-weight:700">SHIFT</span></div><div class="txt"><b>PHASE_SHIFT</b>Hard stop; engineer refreshes context. Mutates plan.json (passes + rounds)</div></div>
+      <div class="leg-item reveal"><div class="sw"><span style="font-family:'JetBrains Mono';font-size:10px;color:var(--spark)">kind</span></div><div class="txt"><b>Plan routing</b><span style="color:var(--spark)">code</span> → implementing · <span style="color:var(--spark)">ui</span> → ui_implementing</div></div>
+    </div>
+  </section>
+
+  <footer>
+    <span>forgectl · docs/diagrams/00-full-lifecycle</span>
+    <span><a href="index.html">← workflow index</a></span>
+  </footer>
+</div>
+
+<script>
+  const io = new IntersectionObserver((entries) => {
+    entries.forEach(e => {
+      if (e.isIntersecting) {
+        e.target.classList.add('lit');
+        e.target.querySelectorAll('.reveal').forEach((el, i) => { el.style.animationDelay = (i * 70) + 'ms'; });
+        io.unobserve(e.target);
+      }
+    });
+  }, { threshold: 0.18, rootMargin: '0px 0px -8% 0px' });
+  document.querySelectorAll('[data-station]').forEach(s => io.observe(s));
+</script>
+</body>
+</html>

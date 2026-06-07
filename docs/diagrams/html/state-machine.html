@@ -1,0 +1,523 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>forgectl — State Machine Atlas</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600;700&family=Archivo+Expanded:wght@600;700;800;900&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet" />
+<link rel="stylesheet" href="forge.css" />
+<style>
+  .panels { display: flex; flex-direction: column; gap: 22px; padding: 8px 0 60px; }
+  .panel { margin-bottom: 0; }
+  .panel + .phase-connector { margin: 4px 0; }
+  .phase-connector {
+    display: flex; align-items: center; padding: 0 6px;
+    font-family: 'JetBrains Mono', monospace; font-size: 12px;
+    color: var(--muted-2); gap: 12px;
+  }
+  .phase-connector::before,
+  .phase-connector::after { content: ''; flex: 1; height: 1px; background: var(--line-soft); }
+  .phase-connector .ps { color: var(--ember-hot); font-weight: 700; letter-spacing: .1em; }
+  .phase-connector .route { color: var(--text); background: var(--surface); border: 1px solid var(--line); padding: 2px 8px; border-radius: 6px; }
+  .phase-connector .route .k { color: var(--spark); }
+  .fork-note {
+    font-family: 'JetBrains Mono', monospace; font-size: 11px; letter-spacing: .2em;
+    text-transform: uppercase; color: var(--muted-2); text-align: center; margin: 6px 0 10px;
+  }
+  .variant-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+  @media (max-width: 860px) { .variant-grid { grid-template-columns: 1fr; } }
+  .variant-panel {
+    background: var(--surface-2); border: 1px solid var(--line); border-radius: 12px; padding: 20px 20px 18px;
+    position: relative; overflow: hidden;
+  }
+  .variant-panel.code-variant::before { content:''; position:absolute; left:0; top:0; bottom:0; width:3px; background: linear-gradient(180deg, var(--ember), var(--ember-hot)); }
+  .variant-panel.ui-variant::before  { content:''; position:absolute; left:0; top:0; bottom:0; width:3px; background: linear-gradient(180deg, var(--steel), var(--steel-deep)); }
+  .variant-label {
+    font-family: 'JetBrains Mono', monospace; font-size: 10px; letter-spacing: .28em;
+    text-transform: uppercase; margin-bottom: 12px;
+  }
+  .variant-label.code { color: var(--ember-hot); }
+  .variant-label.ui   { color: var(--steel); }
+  .note-box {
+    background: var(--iron); border: 1px dashed var(--line); border-radius: 8px;
+    padding: 10px 14px; margin-top: 10px;
+    font-family: 'JetBrains Mono', monospace; font-size: 11px; color: var(--muted);
+    line-height: 1.6;
+  }
+  .note-box b { color: var(--text); font-weight: 600; }
+  .avail-table { width: 100%; border-collapse: collapse; font-family: 'JetBrains Mono', monospace; font-size: 11px; margin-top: 14px; }
+  .avail-table th { color: var(--muted-2); font-weight: 500; letter-spacing: .12em; text-transform: uppercase; padding: 6px 10px 6px 0; border-bottom: 1px solid var(--line); text-align: left; }
+  .avail-table td { padding: 5px 10px 5px 0; border-bottom: 1px solid var(--line-soft); color: var(--muted); vertical-align: middle; }
+  .avail-table td:first-child { color: var(--text); }
+  .avail-table .dot-yes { color: var(--ok); }
+  .avail-table .dot-no  { color: var(--line); }
+  .cat-header td { background: var(--surface-2); color: var(--ember-hot); font-size: 10px; letter-spacing: .22em; text-transform: uppercase; padding: 8px 10px 6px 0; }
+</style>
+</head>
+<body>
+<div class="grain"></div>
+
+<div class="wrap">
+  <header>
+    <a class="crumb" href="index.html">← Workflow Atlas</a>
+    <span class="kicker"><span class="dot"></span> Reference · State Atlas</span>
+    <h1 class="page-title">State Machine</h1>
+    <p class="lede">
+      All <strong>27 states</strong> across <strong>5 phases</strong> — including both implementation variants
+      (<code>kind: code</code> and <code>kind: ui</code>). Every state, branch, and loop drawn from
+      the authoritative source. State is persisted atomically to
+      <code>.forgectl/state/forgectl-state.json</code>.
+    </p>
+    <div class="meta-row">
+      <span class="chip"><b>5</b> phases</span>
+      <span class="chip"><b>27</b> states</span>
+      <span class="chip">JSON-backed <b>atomic writes</b></span>
+      <span class="chip">state file <b>.forgectl/state/forgectl-state.json</b></span>
+    </div>
+  </header>
+
+  <div class="panels">
+
+    <!-- ═══════════════════════════════════════════════════════
+         PHASE 1 — SPECIFYING
+         ═══════════════════════════════════════════════════════ -->
+    <div class="panel accent" data-reveal>
+      <div class="panel-title"><span class="n">01</span> Specifying</div>
+
+      <div class="reveal">
+        <div class="track-label">Per-spec loop (repeats until queue empty)</div>
+        <div class="track">
+          <span class="state">ORIENT</span><span class="arrow">→</span>
+          <span class="state">SELECT</span><span class="arrow">→</span>
+          <span class="state">DRAFT</span><span class="arrow">→</span>
+          <span class="state eval">EVALUATE</span>
+          <span class="arrow loopback">⟲</span>
+          <span class="state loop">REFINE</span><span class="arrow">→</span>
+          <span class="state terminal">ACCEPT</span>
+        </div>
+        <div class="branch" style="margin-top:10px">
+          <div class="bln"><span class="verdict pass">PASS ≥ min · or FAIL ≥ max</span> → <span class="state terminal" style="padding:4px 9px;font-size:11px">ACCEPT</span></div>
+          <div class="bln"><span class="verdict fail">FAIL &lt; max · or PASS &lt; min</span> → <span class="state loop" style="padding:4px 9px;font-size:11px">REFINE</span> → back to <span class="state eval" style="padding:4px 9px;font-size:11px">EVALUATE</span></div>
+          <div class="bln" style="margin-top:4px;color:var(--muted-2)">Queue has more → loop back to ORIENT &nbsp;·&nbsp; Queue empty → DONE</div>
+        </div>
+      </div>
+
+      <div class="reveal">
+        <div class="track-label" style="margin-top:28px">Reconciliation (after queue drains)</div>
+        <div class="track">
+          <span class="state">DONE</span><span class="arrow">→</span>
+          <span class="state">RECONCILE</span><span class="arrow">→</span>
+          <span class="state eval">RECONCILE_EVAL</span>
+        </div>
+        <div class="branch" style="margin-top:10px">
+          <div class="bln"><span class="verdict pass">PASS</span> → <span class="state gate" style="padding:4px 9px;font-size:11px">RECONCILE_REVIEW</span> → accept → <span class="state terminal" style="padding:4px 9px;font-size:11px">COMPLETE</span></div>
+          <div class="bln"><span class="verdict fail">FAIL</span> → <span class="state gate" style="padding:4px 9px;font-size:11px">RECONCILE_REVIEW</span> → fail → loop back to <span class="state" style="padding:4px 9px;font-size:11px">RECONCILE</span></div>
+        </div>
+      </div>
+
+      <div class="reveal">
+        <div class="track-label" style="margin-top:28px">Phase exit</div>
+        <div class="track">
+          <span class="state terminal">COMPLETE</span>
+          <span class="arrow">→</span>
+          <span class="state gate">PHASE_SHIFT</span>
+          <span class="arrow" style="color:var(--muted-2)">specifying → generate_planning_queue</span>
+        </div>
+        <div class="note-box" style="margin-top:10px">
+          <b>--message required</b> at COMPLETE if <code>enable_commits: true</code>. PHASE_SHIFT can be bypassed with
+          <code>forgectl advance --from plan-queue.json</code>.
+        </div>
+      </div>
+
+      <div class="reveal" style="margin-top:12px">
+        <div style="font-family:'JetBrains Mono',monospace;font-size:10.5px;color:var(--muted-2);letter-spacing:.14em;margin-bottom:8px;text-transform:uppercase">States in this phase (10)</div>
+        <div class="track" style="flex-wrap:wrap">
+          <span class="state" style="font-size:10.5px;padding:5px 9px">ORIENT</span>
+          <span class="state" style="font-size:10.5px;padding:5px 9px">SELECT</span>
+          <span class="state" style="font-size:10.5px;padding:5px 9px">DRAFT</span>
+          <span class="state eval" style="font-size:10.5px;padding:5px 9px">EVALUATE</span>
+          <span class="state loop" style="font-size:10.5px;padding:5px 9px">REFINE</span>
+          <span class="state terminal" style="font-size:10.5px;padding:5px 9px">ACCEPT</span>
+          <span class="state terminal" style="font-size:10.5px;padding:5px 9px">DONE</span>
+          <span class="state loop" style="font-size:10.5px;padding:5px 9px">RECONCILE</span>
+          <span class="state eval" style="font-size:10.5px;padding:5px 9px">RECONCILE_EVAL</span>
+          <span class="state gate" style="font-size:10.5px;padding:5px 9px">RECONCILE_REVIEW</span>
+          <span class="state terminal" style="font-size:10.5px;padding:5px 9px">COMPLETE</span>
+          <span class="state gate" style="font-size:10.5px;padding:5px 9px">PHASE_SHIFT</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- connector 1→2 -->
+    <div class="phase-connector" data-reveal>
+      <span class="ps">PHASE_SHIFT</span>
+      specifying → generate_planning_queue
+      &nbsp;·&nbsp; or skip with
+      <span class="route">advance --from plan-queue.json</span>
+    </div>
+
+    <!-- ═══════════════════════════════════════════════════════
+         PHASE 2 — GENERATE PLANNING QUEUE
+         ═══════════════════════════════════════════════════════ -->
+    <div class="panel steel" data-reveal>
+      <div class="panel-title"><span class="n" style="color:var(--steel)">02</span> Generate Planning Queue</div>
+
+      <div class="reveal">
+        <div class="track-label">Flow</div>
+        <div class="track">
+          <span class="state">ORIENT <span class="sub">(generates plan-queue.json)</span></span>
+          <span class="arrow">→</span>
+          <span class="state loop">REFINE <span class="sub">(architect review)</span></span>
+          <span class="arrow">→</span>
+          <span class="state gate">PHASE_SHIFT</span>
+        </div>
+      </div>
+
+      <div class="reveal">
+        <div class="note-box" style="margin-top:14px">
+          <b>ORIENT</b> auto-generates <code>plan-queue.json</code> from completed specs.&nbsp;
+          <b>REFINE</b>: architect reorders and edits; forgectl validates on advance.&nbsp;
+          <b>PHASE_SHIFT</b>: consumes queue, transitions to planning ORIENT.&nbsp;
+          This entire phase can be skipped: <code>forgectl advance --from &lt;file&gt;</code> at specifying PHASE_SHIFT.
+        </div>
+      </div>
+
+      <div class="reveal" style="margin-top:12px">
+        <div style="font-family:'JetBrains Mono',monospace;font-size:10.5px;color:var(--muted-2);letter-spacing:.14em;margin-bottom:8px;text-transform:uppercase">States in this phase (3)</div>
+        <div class="track">
+          <span class="state" style="font-size:10.5px;padding:5px 9px">ORIENT</span>
+          <span class="state loop" style="font-size:10.5px;padding:5px 9px">REFINE</span>
+          <span class="state gate" style="font-size:10.5px;padding:5px 9px">PHASE_SHIFT</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- connector 2→3 -->
+    <div class="phase-connector" data-reveal>
+      <span class="ps">PHASE_SHIFT</span>
+      generate_planning_queue → planning
+    </div>
+
+    <!-- ═══════════════════════════════════════════════════════
+         PHASE 3 — PLANNING
+         ═══════════════════════════════════════════════════════ -->
+    <div class="panel accent" data-reveal>
+      <div class="panel-title"><span class="n">03</span> Planning</div>
+
+      <div class="reveal">
+        <div class="track-label">Study → Draft → Evaluate</div>
+        <div class="track">
+          <span class="state">ORIENT</span><span class="arrow">→</span>
+          <span class="state">STUDY_SPECS</span><span class="arrow">→</span>
+          <span class="state">STUDY_CODE</span><span class="arrow">→</span>
+          <span class="state">STUDY_PACKAGES</span><span class="arrow">→</span>
+          <span class="state">REVIEW</span><span class="arrow">→</span>
+          <span class="state">DRAFT</span>
+        </div>
+      </div>
+
+      <div class="reveal">
+        <div class="track-label" style="margin-top:22px">Validate → Self-review → Evaluate</div>
+        <div class="track">
+          <span class="state">DRAFT</span><span class="arrow">→</span>
+          <span class="state">VALIDATE <span class="sub">(if invalid)</span></span>
+          <span class="arrow loopback">⟲</span>
+          <span class="state">SELF_REVIEW <span class="sub">(optional*)</span></span>
+          <span class="arrow">→</span>
+          <span class="state eval">EVALUATE</span>
+          <span class="arrow loopback">⟲</span>
+          <span class="state loop">REFINE</span>
+          <span class="arrow">→</span>
+          <span class="state terminal">ACCEPT</span>
+        </div>
+        <div class="branch" style="margin-top:10px">
+          <div class="bln"><span class="verdict pass">PASS ≥ min · or FAIL ≥ max</span> → <span class="state terminal" style="padding:4px 9px;font-size:11px">ACCEPT</span></div>
+          <div class="bln"><span class="verdict fail">FAIL &lt; max · or PASS &lt; min</span> → <span class="state loop" style="padding:4px 9px;font-size:11px">REFINE</span> → back to <span class="state eval" style="padding:4px 9px;font-size:11px">EVALUATE</span> or <span class="state" style="padding:4px 9px;font-size:11px">VALIDATE</span></div>
+          <div class="bln" style="margin-top:4px;color:var(--muted-2)">* SELF_REVIEW entered only when <code>planning.self_review: true</code></div>
+        </div>
+      </div>
+
+      <div class="reveal">
+        <div class="track-label" style="margin-top:28px">Phase exit — routed by plan_all flag</div>
+        <div class="branch">
+          <div class="bln"><b style="color:var(--text)">plan_all: false</b> → <span class="state gate" style="padding:4px 9px;font-size:11px">PHASE_SHIFT</span> planning → implementing (or ui_implementing)</div>
+          <div class="bln"><b style="color:var(--text)">plan_all: true</b>, queue non-empty → <span class="state gate" style="padding:4px 9px;font-size:11px">PHASE_SHIFT</span> planning → planning (domain boundary) → ORIENT next domain</div>
+          <div class="bln"><b style="color:var(--text)">plan_all: true</b>, queue empty → <span class="state terminal" style="padding:4px 9px;font-size:11px">DONE</span> → <span class="state gate" style="padding:4px 9px;font-size:11px">PHASE_SHIFT</span> planning → implementing</div>
+        </div>
+      </div>
+
+      <div class="reveal" style="margin-top:12px">
+        <div style="font-family:'JetBrains Mono',monospace;font-size:10.5px;color:var(--muted-2);letter-spacing:.14em;margin-bottom:8px;text-transform:uppercase">States in this phase (11)</div>
+        <div class="track" style="flex-wrap:wrap">
+          <span class="state" style="font-size:10.5px;padding:5px 9px">ORIENT</span>
+          <span class="state" style="font-size:10.5px;padding:5px 9px">STUDY_SPECS</span>
+          <span class="state" style="font-size:10.5px;padding:5px 9px">STUDY_CODE</span>
+          <span class="state" style="font-size:10.5px;padding:5px 9px">STUDY_PACKAGES</span>
+          <span class="state" style="font-size:10.5px;padding:5px 9px">REVIEW</span>
+          <span class="state" style="font-size:10.5px;padding:5px 9px">DRAFT</span>
+          <span class="state" style="font-size:10.5px;padding:5px 9px">VALIDATE</span>
+          <span class="state" style="font-size:10.5px;padding:5px 9px">SELF_REVIEW</span>
+          <span class="state eval" style="font-size:10.5px;padding:5px 9px">EVALUATE</span>
+          <span class="state loop" style="font-size:10.5px;padding:5px 9px">REFINE</span>
+          <span class="state terminal" style="font-size:10.5px;padding:5px 9px">ACCEPT</span>
+          <span class="state terminal" style="font-size:10.5px;padding:5px 9px">DONE</span>
+          <span class="state gate" style="font-size:10.5px;padding:5px 9px">PHASE_SHIFT</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- connector 3→4 (fork) -->
+    <div class="phase-connector" data-reveal>
+      <span class="ps">PHASE_SHIFT</span>
+      routed by plan kind:
+      <span class="route"><span class="k">kind: code</span> → implementing</span>
+      <span class="route"><span class="k">kind: ui</span> → ui_implementing</span>
+    </div>
+    <div class="fork-note" data-reveal>⑂ implementation forks on plan kind</div>
+
+    <!-- ═══════════════════════════════════════════════════════
+         PHASE 4 — IMPLEMENTATION (both variants)
+         ═══════════════════════════════════════════════════════ -->
+    <div class="panel" data-reveal>
+      <div class="panel-title"><span class="n">04</span> Implementation</div>
+
+      <div class="variant-grid">
+
+        <!-- 4a code -->
+        <div class="variant-panel code-variant reveal">
+          <div class="variant-label code">Phase 04a · kind: code</div>
+          <div style="font-family:'Archivo Expanded',sans-serif;font-weight:800;font-size:16px;text-transform:uppercase;margin-bottom:14px;">Implementing</div>
+
+          <div class="track-label">Batch loop</div>
+          <div class="track" style="flex-wrap:wrap">
+            <span class="state" style="font-size:11px;padding:5px 9px">ORIENT</span><span class="arrow">→</span>
+            <span class="state" style="font-size:11px;padding:5px 9px">IMPLEMENT <span class="sub">item 1..N</span></span><span class="arrow">→</span>
+            <span class="state eval" style="font-size:11px;padding:5px 9px">EVALUATE</span>
+            <span class="arrow loopback">⟲</span>
+            <span class="state loop" style="font-size:11px;padding:5px 9px">IMPLEMENT <span class="sub">round 2+</span></span><span class="arrow">→</span>
+            <span class="state terminal" style="font-size:11px;padding:5px 9px">COMMIT</span><span class="arrow">→</span>
+            <span class="state terminal" style="font-size:11px;padding:5px 9px">DONE</span>
+          </div>
+
+          <div class="branch" style="margin-top:10px">
+            <div class="bln"><span class="verdict pass">PASS ≥ min · or FAIL ≥ max</span> → <span class="state terminal" style="padding:3px 7px;font-size:10.5px">COMMIT</span></div>
+            <div class="bln"><span class="verdict fail">FAIL &lt; max</span> → <span class="state loop" style="padding:3px 7px;font-size:10.5px">IMPLEMENT</span> round 2+ → back to <span class="state eval" style="padding:3px 7px;font-size:10.5px">EVALUATE</span></div>
+            <div class="bln" style="color:var(--muted-2)">More batches → loop back to ORIENT &nbsp;·&nbsp; All done → DONE</div>
+          </div>
+
+          <div class="note-box" style="margin-top:12px">
+            <b>DONE exit:</b> plan_all: false + queue non-empty → PHASE_SHIFT to planning (next domain).
+            plan_all: true + impl queue non-empty → PHASE_SHIFT implementation → implementation,
+            re-routed by next plan's <span style="color:var(--spark)">kind</span>.
+          </div>
+        </div>
+
+        <!-- 4b ui -->
+        <div class="variant-panel ui-variant reveal">
+          <div class="variant-label ui">Phase 04b · kind: ui</div>
+          <div style="font-family:'Archivo Expanded',sans-serif;font-weight:800;font-size:16px;text-transform:uppercase;margin-bottom:14px;color:var(--steel)">UI Implementing</div>
+
+          <div class="track-label" style="color:var(--steel)">Loop 1 — Code eval (shared spine)</div>
+          <div class="track" style="flex-wrap:wrap">
+            <span class="state" style="font-size:11px;padding:5px 9px">ORIENT</span><span class="arrow">→</span>
+            <span class="state" style="font-size:11px;padding:5px 9px">IMPLEMENT <span class="sub">1..N</span></span><span class="arrow">→</span>
+            <span class="state eval" style="font-size:11px;padding:5px 9px">EVALUATE</span>
+            <span class="arrow loopback">⟲</span>
+            <span class="state loop" style="font-size:11px;padding:5px 9px">IMPLEMENT <span class="sub">r2+</span></span>
+          </div>
+
+          <div class="track-label" style="margin-top:18px;color:var(--steel)">Loop 2 — QA (Playwright MCP)</div>
+          <div class="track" style="flex-wrap:wrap">
+            <span class="state gate" style="font-size:11px;padding:5px 9px">QA_TEST</span>
+            <span class="arrow loopback">⟲</span>
+            <span class="state loop" style="font-size:11px;padding:5px 9px">UI_REFINE</span>
+          </div>
+          <div class="branch" style="margin-top:8px">
+            <div class="bln"><span class="verdict pass">PASS ≥ min · or FAIL ≥ max</span> → advance to E2E_AUTHOR</div>
+            <div class="bln"><span class="verdict fail">FAIL &lt; max</span> → <span class="state loop" style="padding:3px 7px;font-size:10.5px">UI_REFINE</span> (iterate placement/controls) → back to <span class="state gate" style="padding:3px 7px;font-size:10.5px">QA_TEST</span></div>
+            <div class="bln" style="color:var(--muted-2)">QA_TEST always writes <code>qa/batch-N-steps.json</code> before exiting</div>
+          </div>
+
+          <div class="track-label" style="margin-top:18px;color:var(--steel)">Bridge — Author e2e tests</div>
+          <div class="track">
+            <span class="state" style="font-size:11px;padding:5px 9px">E2E_AUTHOR</span>
+            <span class="arrow" style="color:var(--muted-2)">(consumes qa/batch-N-steps.json)</span>
+          </div>
+
+          <div class="track-label" style="margin-top:18px;color:var(--steel)">Loop 3 — E2E (Playwright runner)</div>
+          <div class="track" style="flex-wrap:wrap">
+            <span class="state gate" style="font-size:11px;padding:5px 9px">E2E_VERIFY</span>
+            <span class="arrow loopback">⟲</span>
+            <span class="state loop" style="font-size:11px;padding:5px 9px">E2E_REMEDIATE</span>
+          </div>
+          <div class="branch" style="margin-top:8px">
+            <div class="bln"><span class="verdict pass">PASS ≥ min · or FAIL ≥ max</span> → <span class="state terminal" style="padding:3px 7px;font-size:10.5px">COMMIT</span></div>
+            <div class="bln"><span class="verdict fail">FAIL &lt; max</span> → <span class="state loop" style="padding:3px 7px;font-size:10.5px">E2E_REMEDIATE</span> (fix tests or UI) → back to <span class="state gate" style="padding:3px 7px;font-size:10.5px">E2E_VERIFY</span></div>
+          </div>
+
+          <div class="track-label" style="margin-top:18px;color:var(--steel)">Commit &amp; exit</div>
+          <div class="track">
+            <span class="state terminal" style="font-size:11px;padding:5px 9px">COMMIT</span><span class="arrow">→</span>
+            <span class="state terminal" style="font-size:11px;padding:5px 9px">DONE</span>
+          </div>
+          <div class="note-box" style="margin-top:10px">
+            <b>COMMIT status:</b> passed if all 3 loops passed; force-accepted if any loop hit max_rounds.
+            Three independent round budgets: <code>eval</code> / <code>qa</code> / <code>e2e</code>.
+            <b>DONE exit</b> uses same routing as implementing.
+          </div>
+        </div>
+      </div>
+
+      <div class="reveal" style="margin-top:16px">
+        <div style="font-family:'JetBrains Mono',monospace;font-size:10.5px;color:var(--muted-2);letter-spacing:.14em;margin-bottom:8px;text-transform:uppercase">Shared states (both variants)</div>
+        <div class="track" style="flex-wrap:wrap">
+          <span class="state" style="font-size:10.5px;padding:5px 9px">ORIENT</span>
+          <span class="state" style="font-size:10.5px;padding:5px 9px">IMPLEMENT</span>
+          <span class="state eval" style="font-size:10.5px;padding:5px 9px">EVALUATE</span>
+          <span class="state terminal" style="font-size:10.5px;padding:5px 9px">COMMIT</span>
+          <span class="state terminal" style="font-size:10.5px;padding:5px 9px">DONE</span>
+          <span class="state gate" style="font-size:10.5px;padding:5px 9px">PHASE_SHIFT</span>
+        </div>
+        <div style="font-family:'JetBrains Mono',monospace;font-size:10.5px;color:var(--muted-2);letter-spacing:.14em;margin:12px 0 8px;text-transform:uppercase">UI-only states (kind: ui)</div>
+        <div class="track" style="flex-wrap:wrap">
+          <span class="state gate" style="font-size:10.5px;padding:5px 9px">QA_TEST</span>
+          <span class="state loop" style="font-size:10.5px;padding:5px 9px">UI_REFINE</span>
+          <span class="state" style="font-size:10.5px;padding:5px 9px">E2E_AUTHOR</span>
+          <span class="state gate" style="font-size:10.5px;padding:5px 9px">E2E_VERIFY</span>
+          <span class="state loop" style="font-size:10.5px;padding:5px 9px">E2E_REMEDIATE</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- connector 4→next -->
+    <div class="phase-connector" data-reveal>
+      <span class="ps">PHASE_SHIFT</span>
+      → planning (next domain) if plans remain &nbsp;·&nbsp; domain boundaries re-route by kind
+    </div>
+
+    <!-- ═══════════════════════════════════════════════════════
+         PHASE AVAILABILITY TABLE
+         ═══════════════════════════════════════════════════════ -->
+    <div class="panel" data-reveal>
+      <div class="panel-title"><span class="n">REF</span> State × Phase Availability</div>
+
+      <div class="reveal" style="overflow-x:auto">
+        <table class="avail-table">
+          <thead>
+            <tr>
+              <th>State</th>
+              <th>Spec</th>
+              <th>GenPQ</th>
+              <th>Plan</th>
+              <th>Impl</th>
+              <th>UI-Impl</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr class="cat-header"><td colspan="6">Orientation</td></tr>
+            <tr><td>ORIENT</td><td class="dot-yes">✓</td><td class="dot-yes">✓</td><td class="dot-yes">✓</td><td class="dot-yes">✓</td><td class="dot-yes">✓</td></tr>
+            <tr class="cat-header"><td colspan="6">Selection</td></tr>
+            <tr><td>SELECT</td><td class="dot-yes">✓</td><td class="dot-no">·</td><td class="dot-no">·</td><td class="dot-no">·</td><td class="dot-no">·</td></tr>
+            <tr class="cat-header"><td colspan="6">Research</td></tr>
+            <tr><td>STUDY_SPECS</td><td class="dot-no">·</td><td class="dot-no">·</td><td class="dot-yes">✓</td><td class="dot-no">·</td><td class="dot-no">·</td></tr>
+            <tr><td>STUDY_CODE</td><td class="dot-no">·</td><td class="dot-no">·</td><td class="dot-yes">✓</td><td class="dot-no">·</td><td class="dot-no">·</td></tr>
+            <tr><td>STUDY_PACKAGES</td><td class="dot-no">·</td><td class="dot-no">·</td><td class="dot-yes">✓</td><td class="dot-no">·</td><td class="dot-no">·</td></tr>
+            <tr><td>REVIEW</td><td class="dot-no">·</td><td class="dot-no">·</td><td class="dot-yes">✓</td><td class="dot-no">·</td><td class="dot-no">·</td></tr>
+            <tr class="cat-header"><td colspan="6">Creation</td></tr>
+            <tr><td>DRAFT</td><td class="dot-yes">✓</td><td class="dot-no">·</td><td class="dot-yes">✓</td><td class="dot-no">·</td><td class="dot-no">·</td></tr>
+            <tr><td>E2E_AUTHOR</td><td class="dot-no">·</td><td class="dot-no">·</td><td class="dot-no">·</td><td class="dot-no">·</td><td class="dot-yes">✓</td></tr>
+            <tr class="cat-header"><td colspan="6">Self-review</td></tr>
+            <tr><td>SELF_REVIEW</td><td class="dot-no">·</td><td class="dot-no">·</td><td class="dot-yes">✓</td><td class="dot-no">·</td><td class="dot-no">·</td></tr>
+            <tr class="cat-header"><td colspan="6">Validation</td></tr>
+            <tr><td>VALIDATE</td><td class="dot-no">·</td><td class="dot-no">·</td><td class="dot-yes">✓</td><td class="dot-no">·</td><td class="dot-no">·</td></tr>
+            <tr class="cat-header"><td colspan="6">Evaluation</td></tr>
+            <tr><td>EVALUATE</td><td class="dot-yes">✓</td><td class="dot-no">·</td><td class="dot-yes">✓</td><td class="dot-yes">✓</td><td class="dot-yes">✓</td></tr>
+            <tr><td>QA_TEST</td><td class="dot-no">·</td><td class="dot-no">·</td><td class="dot-no">·</td><td class="dot-no">·</td><td class="dot-yes">✓ ◄ UI-only</td></tr>
+            <tr><td>E2E_VERIFY</td><td class="dot-no">·</td><td class="dot-no">·</td><td class="dot-no">·</td><td class="dot-no">·</td><td class="dot-yes">✓ ◄ UI-only</td></tr>
+            <tr><td>RECONCILE_EVAL</td><td class="dot-yes">✓</td><td class="dot-no">·</td><td class="dot-no">·</td><td class="dot-no">·</td><td class="dot-no">·</td></tr>
+            <tr class="cat-header"><td colspan="6">Iteration</td></tr>
+            <tr><td>REFINE</td><td class="dot-yes">✓</td><td class="dot-yes">✓</td><td class="dot-yes">✓</td><td class="dot-no">·</td><td class="dot-no">·</td></tr>
+            <tr><td>UI_REFINE</td><td class="dot-no">·</td><td class="dot-no">·</td><td class="dot-no">·</td><td class="dot-no">·</td><td class="dot-yes">✓ ◄ UI-only</td></tr>
+            <tr><td>E2E_REMEDIATE</td><td class="dot-no">·</td><td class="dot-no">·</td><td class="dot-no">·</td><td class="dot-no">·</td><td class="dot-yes">✓ ◄ UI-only</td></tr>
+            <tr><td>RECONCILE</td><td class="dot-yes">✓</td><td class="dot-no">·</td><td class="dot-no">·</td><td class="dot-no">·</td><td class="dot-no">·</td></tr>
+            <tr><td>RECONCILE_REVIEW</td><td class="dot-yes">✓</td><td class="dot-no">·</td><td class="dot-no">·</td><td class="dot-no">·</td><td class="dot-no">·</td></tr>
+            <tr class="cat-header"><td colspan="6">Execution</td></tr>
+            <tr><td>IMPLEMENT</td><td class="dot-no">·</td><td class="dot-no">·</td><td class="dot-no">·</td><td class="dot-yes">✓</td><td class="dot-yes">✓</td></tr>
+            <tr class="cat-header"><td colspan="6">Acceptance</td></tr>
+            <tr><td>ACCEPT</td><td class="dot-yes">✓</td><td class="dot-no">·</td><td class="dot-yes">✓</td><td class="dot-no">·</td><td class="dot-no">·</td></tr>
+            <tr><td>COMMIT</td><td class="dot-no">·</td><td class="dot-no">·</td><td class="dot-no">·</td><td class="dot-yes">✓</td><td class="dot-yes">✓</td></tr>
+            <tr class="cat-header"><td colspan="6">Terminal</td></tr>
+            <tr><td>DONE</td><td class="dot-yes">✓</td><td class="dot-no">·</td><td class="dot-yes">✓ *</td><td class="dot-yes">✓</td><td class="dot-yes">✓</td></tr>
+            <tr><td>COMPLETE</td><td class="dot-yes">✓</td><td class="dot-no">·</td><td class="dot-no">·</td><td class="dot-no">·</td><td class="dot-no">·</td></tr>
+            <tr class="cat-header"><td colspan="6">Transition</td></tr>
+            <tr><td>PHASE_SHIFT</td><td class="dot-yes">✓</td><td class="dot-yes">✓</td><td class="dot-yes">✓</td><td class="dot-yes">✓</td><td class="dot-yes">✓</td></tr>
+          </tbody>
+        </table>
+        <div class="note-box" style="margin-top:12px">
+          * Planning DONE only reachable when <code>plan_all_before_implementing: true</code>.
+          &nbsp;Impl = implementing (kind: code). &nbsp;UI-Impl = ui_implementing (kind: ui).
+        </div>
+      </div>
+    </div>
+
+    <!-- ═══════════════════════════════════════════════════════
+         LEGEND
+         ═══════════════════════════════════════════════════════ -->
+    <div class="panel" data-reveal>
+      <div class="panel-title"><span class="n">KEY</span> State Chip Legend</div>
+      <div class="legend-grid reveal">
+        <div class="leg-item">
+          <div class="sw"><span class="state" style="padding:5px 9px;font-size:10px">STATE</span></div>
+          <div class="txt"><b>Standard state</b>Advance with <code>forgectl advance</code></div>
+        </div>
+        <div class="leg-item">
+          <div class="sw"><span class="state eval" style="padding:5px 9px;font-size:10px">EVAL</span></div>
+          <div class="txt"><b>Evaluation state</b>AI sub-agent reviews work against evaluation dimensions</div>
+        </div>
+        <div class="leg-item">
+          <div class="sw"><span class="state gate" style="padding:5px 9px;font-size:10px">GATE</span></div>
+          <div class="txt"><b>Verification gate</b>QA, E2E, RECONCILE_REVIEW, PHASE_SHIFT checkpoints</div>
+        </div>
+        <div class="leg-item">
+          <div class="sw"><span class="state loop" style="padding:5px 9px;font-size:10px">LOOP</span></div>
+          <div class="txt"><b>Refine / Remediate</b>Fix deficiencies found in evaluation, then retry</div>
+        </div>
+        <div class="leg-item">
+          <div class="sw"><span class="state terminal" style="padding:5px 9px;font-size:10px">DONE</span></div>
+          <div class="txt"><b>Terminal state</b>ACCEPT · COMMIT · COMPLETE · DONE — phase advances</div>
+        </div>
+        <div class="leg-item">
+          <div class="sw"><span class="arrow loopback" style="font-size:18px">⟲</span></div>
+          <div class="txt"><b>Loop back</b>Bounded by <code>eval.min_rounds</code> / <code>max_rounds</code></div>
+        </div>
+        <div class="leg-item">
+          <div class="sw"><span style="font-family:'JetBrains Mono';font-size:10px;color:var(--ember-hot);font-weight:700">SHIFT</span></div>
+          <div class="txt"><b>PHASE_SHIFT</b>Hard stop; operator reviews and advances. Mutates plan.json</div>
+        </div>
+        <div class="leg-item">
+          <div class="sw"><span style="font-family:'JetBrains Mono';font-size:10px;color:var(--spark)">kind</span></div>
+          <div class="txt"><b>Plan routing field</b><span style="color:var(--spark)">code</span> → implementing &nbsp;·&nbsp; <span style="color:var(--spark)">ui</span> → ui_implementing</div>
+        </div>
+      </div>
+    </div>
+
+  </div><!-- /.panels -->
+
+  <footer>
+    <span>forgectl · docs/diagrams/06-state-machine-complete</span>
+    <span><a href="index.html">← workflow index</a></span>
+  </footer>
+</div>
+
+<script>
+  const io = new IntersectionObserver((entries)=>{
+    entries.forEach(e=>{ if(e.isIntersecting){ e.target.classList.add('lit');
+      e.target.querySelectorAll('.reveal').forEach((el,i)=>{el.style.animationDelay=(i*70)+'ms';});
+      io.unobserve(e.target);} });
+  }, { threshold:0.14, rootMargin:'0px 0px -8% 0px' });
+  document.querySelectorAll('[data-station],[data-reveal]').forEach(s=>io.observe(s));
+</script>
+</body>
+</html>

@@ -1,0 +1,739 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>forgectl — UI Implementing Phase</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600;700&family=Archivo+Expanded:wght@600;700;800;900&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet" />
+<link rel="stylesheet" href="forge.css" />
+<style>
+  .gates-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+    gap: 16px;
+    margin-top: 6px;
+  }
+  .gate-card {
+    background: var(--surface-2);
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    padding: 18px 20px;
+  }
+  .gate-card.eval-gate  { border-color: rgba(255,182,39,0.3); }
+  .gate-card.qa-gate    { border-color: rgba(95,168,211,0.3); }
+  .gate-card.e2e-gate   { border-color: rgba(95,168,211,0.3); }
+  .gate-num {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 10px; letter-spacing: .24em; text-transform: uppercase;
+    margin-bottom: 8px;
+  }
+  .gate-num.eval-c { color: var(--spark); }
+  .gate-num.qa-c   { color: var(--steel); }
+  .gate-num.e2e-c  { color: var(--steel); }
+  .gate-name {
+    font-family: 'Archivo Expanded', sans-serif;
+    font-weight: 800; font-size: 17px; text-transform: uppercase;
+    letter-spacing: .01em; margin-bottom: 10px; line-height: 1.1;
+  }
+  .gate-meta {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px; color: var(--muted); display: flex; flex-direction: column; gap: 5px;
+  }
+  .gate-meta .ml { display: flex; gap: 8px; align-items: flex-start; }
+  .gate-meta .mk { color: var(--muted-2); width: 56px; flex: none; text-transform: uppercase; font-size: 10px; letter-spacing: .1em; }
+  .gate-meta .mv { color: var(--text); }
+  .gate-meta .mv.file { color: var(--ember-hot); }
+  .gate-meta .mv.tool { color: var(--steel); }
+  .artifact-tree {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 12px; color: var(--muted);
+    background: var(--iron); border: 1px solid var(--line);
+    border-radius: 10px; padding: 18px 20px;
+    line-height: 1.8; margin-top: 4px;
+  }
+  .artifact-tree .dir  { color: var(--text); }
+  .artifact-tree .file { color: var(--ember-hot); }
+  .artifact-tree .note { color: var(--muted-2); font-size: 10.5px; }
+  .config-table {
+    width: 100%;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 12px;
+    border-collapse: collapse;
+    margin-top: 6px;
+  }
+  .config-table th {
+    text-align: left; color: var(--muted-2); font-size: 10px;
+    letter-spacing: .18em; text-transform: uppercase; padding: 0 12px 10px 0;
+    border-bottom: 1px solid var(--line);
+  }
+  .config-table td {
+    padding: 9px 12px 9px 0; color: var(--muted);
+    border-bottom: 1px solid var(--line-soft); vertical-align: top;
+  }
+  .config-table td.key  { color: var(--ember-hot); white-space: nowrap; }
+  .config-table td.desc { font-size: 11px; }
+  .config-table tr:last-child td { border-bottom: none; }
+  .actor-row {
+    display: flex; flex-wrap: wrap; gap: 14px; margin-top: 6px;
+  }
+  .actor-box {
+    flex: 1; min-width: 230px;
+    background: var(--surface-2); border: 1px solid var(--line);
+    border-radius: 10px; padding: 16px 18px;
+    font-family: 'JetBrains Mono', monospace; font-size: 12px;
+  }
+  .actor-box .actor-name {
+    font-size: 10px; letter-spacing: .22em; text-transform: uppercase;
+    color: var(--muted-2); margin-bottom: 10px;
+  }
+  .actor-box .cmd { color: var(--ember-hot); display: block; margin-bottom: 4px; }
+  .actor-box .cmd.steel { color: var(--steel); }
+  .actor-box .note { color: var(--muted); font-size: 11px; margin-top: 8px; line-height: 1.6; }
+  .item-states {
+    display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+    font-family: 'JetBrains Mono', monospace; font-size: 12px;
+    color: var(--muted); margin-top: 10px;
+  }
+  .item-states .is { color: var(--text); background: var(--surface-2); border: 1px solid var(--line); padding: 5px 10px; border-radius: 7px; }
+  .item-states .is.pass { color: var(--ok); border-color: rgba(107,194,138,0.4); background: rgba(107,194,138,0.05); }
+  .item-states .is.fail { color: var(--fail); border-color: rgba(232,93,93,0.4); background: rgba(232,93,93,0.05); }
+</style>
+</head>
+<body>
+<div class="grain"></div>
+
+<div class="wrap">
+  <header>
+    <a class="crumb" href="index.html">← Workflow Atlas</a>
+    <span class="kicker"><span class="dot"></span> Phase 04 (UI variant) · Forge + Quench · kind: ui</span>
+    <h1 class="page-title">UI Implementing</h1>
+    <p class="lede">
+      The <strong>UI implementation phase</strong> — reuses the implementing spine and inserts
+      <strong>two additional verification loops</strong> between code eval and commit.
+      Three sequential gates per batch: code eval, QA placement via the Playwright MCP,
+      and end-to-end verification via the Playwright test runner. An item passes only
+      if <strong>all three loops pass within their independent round budgets</strong>.
+    </p>
+    <div class="meta-row">
+      <span class="chip"><b>Role</b> Senior Software Engineer (UI)</span>
+      <span class="chip"><b>Input</b> plan.json (kind: ui)</span>
+      <span class="chip"><b>Output</b> UI code + QA reports + e2e tests</span>
+      <span class="chip steel"><b>Evaluators</b> impl-eval / ui-qa-eval / ui-e2e-eval</span>
+    </div>
+  </header>
+
+  <main class="pipeline">
+
+    <!-- INITIALIZATION -->
+    <section class="station" data-station>
+      <div class="node-marker">0</div>
+      <article class="card">
+        <div class="card-head">
+          <div class="reveal">
+            <div class="phase-label">Entry · Initialization</div>
+            <div class="phase-title">Phase Entry</div>
+            <div class="role">Triggered by <b>PHASE_SHIFT</b> when <code>kind: "ui"</code></div>
+          </div>
+          <div class="io reveal">
+            <div class="ln"><span class="tag">in</span><span class="val">plan.json (kind: ui)</span></div>
+            <div class="ln"><span class="tag">via</span><span class="val">forgectl init --phase ui_implementing</span></div>
+            <div class="ln"><span class="tag">alt</span><span class="val">auto PHASE_SHIFT from planning</span></div>
+          </div>
+        </div>
+        <p class="desc reveal">
+          Entered automatically when planning's <code>PHASE_SHIFT</code> detects <code>kind: "ui"</code>, or
+          manually via <code>forgectl init --from &lt;domain&gt;/.forgectl_workspace/ui_plan/plan.json --phase ui_implementing</code>.
+          Config is <strong>validated at entry</strong> — missing required keys keep the state at PHASE_SHIFT.
+          Optional <code>--guided</code> flag enables user checkpoints at each ORIENT.
+        </p>
+        <div class="track-label reveal">Required config (validated at entry)</div>
+        <div class="reveal" style="margin-top:6px">
+          <table class="config-table">
+            <thead>
+              <tr>
+                <th>Key</th>
+                <th>Purpose</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr><td class="key">ui_implementing.app.launch_command</td><td class="desc">Start the app for QA</td></tr>
+              <tr><td class="key">ui_implementing.app.url</td><td class="desc">URL the QA sub-agent navigates to via Playwright MCP</td></tr>
+              <tr><td class="key">ui_implementing.e2e.test_command</td><td class="desc">Command to run the authored e2e suite</td></tr>
+              <tr><td class="key">ui_implementing.e2e.test_dir</td><td class="desc">Directory where e2e Playwright test files are authored</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <div class="track-label reveal" style="margin-top:22px">Optional round budgets (in .forgectl/config)</div>
+        <div class="track reveal">
+          <span class="state eval">ui_implementing.eval.min_rounds / max_rounds</span>
+          <span class="arrow">·</span>
+          <span class="state gate">qa.min_rounds / max_rounds</span>
+          <span class="arrow">·</span>
+          <span class="state gate">e2e.min_rounds / max_rounds</span>
+        </div>
+      </article>
+    </section>
+
+    <div class="shift" data-station>
+      <div class="shift-inner reveal">
+        <span class="ps">ENTER</span> → ORIENT (first batch)
+      </div>
+    </div>
+
+    <!-- BATCH LOOP OVERVIEW -->
+    <section class="station" data-station>
+      <div class="node-marker">1</div>
+      <article class="card">
+        <div class="card-head">
+          <div class="reveal">
+            <div class="phase-label">Phase 04 (UI) — Batch Loop</div>
+            <div class="phase-title">Orient + Implement</div>
+            <div class="role">Role: <b>Senior Software Engineer (UI)</b></div>
+          </div>
+          <div class="io reveal">
+            <div class="ln"><span class="tag">resets</span><span class="val">eval_round, qa_round, e2e_round → 0</span></div>
+            <div class="ln"><span class="tag">selects</span><span class="val">next batch of unblocked items</span></div>
+          </div>
+        </div>
+        <p class="desc reveal">
+          Identical to the implementing phase spine: dependency-ordered batches, one item
+          at a time, with full context (steps / files / specs / refs) per item.
+          First-round commits when <code>enable_commits: true</code>; items move
+          <strong>pending → done</strong> here. Terminal status (<strong>passed / failed</strong>)
+          is decided later at COMMIT after all three loops complete.
+        </p>
+        <div class="track-label reveal">Batch sequence</div>
+        <div class="track reveal">
+          <span class="state">ORIENT</span>
+          <span class="arrow">→</span>
+          <span class="state">IMPLEMENT <span class="sub">item 1</span></span>
+          <span class="arrow">→</span>
+          <span class="state">IMPLEMENT <span class="sub">item 2</span></span>
+          <span class="arrow">→</span>
+          <span class="state">… <span class="sub">item n</span></span>
+          <span class="arrow">→</span>
+          <span class="state eval">EVALUATE</span>
+        </div>
+        <div class="track-label reveal" style="margin-top:18px">ORIENT detail</div>
+        <div class="track reveal">
+          <span class="state">Review layer progress</span>
+          <span class="arrow">→</span>
+          <span class="state">Show batch + App URL</span>
+          <span class="arrow">→</span>
+          <span class="state">Reset round counters</span>
+          <span class="arrow">→</span>
+          <span class="state gate">forgectl advance</span>
+        </div>
+      </article>
+    </section>
+
+    <!-- SECTION HEAD: THREE GATES -->
+    <div class="section-head" data-reveal>Gate Sequence — Three Sequential Loops Per Batch</div>
+
+    <!-- GATE 1: CODE EVAL -->
+    <section class="station" data-station>
+      <div class="node-marker">2</div>
+      <article class="card">
+        <div class="card-head">
+          <div class="reveal">
+            <div class="phase-label">Loop 1 — Code Evaluate</div>
+            <div class="phase-title">Code Eval Gate</div>
+            <div class="role">Budget: <b>ui_implementing.eval.min_rounds / max_rounds</b> · counter: <b>eval_round</b></div>
+          </div>
+          <div class="io reveal">
+            <div class="ln"><span class="tag">agent</span><span class="val">1× opus sub-agent</span></div>
+            <div class="ln"><span class="tag">eval</span><span class="val">impl-eval.md</span></div>
+            <div class="ln"><span class="tag">cmd</span><span class="val">forgectl eval</span></div>
+          </div>
+        </div>
+        <p class="desc reveal">
+          Shared with the standard implementing phase. An <strong>opus sub-agent</strong> receives
+          <code>impl-eval.md</code> and batch item details via <code>forgectl eval</code>, checks code
+          against specs, then returns its report via <code>forgectl handoff &lt;report&gt;</code>
+          (report mode) or inline (conv mode). The engineer reviews the <code>Review:</code> line
+          and records a verdict with <code>forgectl advance --verdict PASS|FAIL</code>.
+        </p>
+        <div class="track-label reveal">EVALUATE loop</div>
+        <div class="track reveal">
+          <span class="state eval">EVALUATE</span>
+          <span class="arrow loopback">⟲</span>
+          <span class="state loop">IMPLEMENT <span class="sub">round 2+</span></span>
+          <span class="arrow">→</span>
+          <span class="state eval">EVALUATE</span>
+          <span class="arrow">→</span>
+          <span class="state gate">QA_TEST <span class="sub">(qa_round=1)</span></span>
+        </div>
+        <div class="branch reveal" style="margin-top:14px">
+          <div class="bln">
+            <span class="verdict fail">FAIL &lt;max</span>
+            → apply eval_mode, fix code → <span class="state loop">IMPLEMENT (round 2+)</span>
+            → <span class="state eval">EVALUATE</span>
+          </div>
+          <div class="bln">
+            <span class="verdict pass">PASS ≥min</span>
+            → proceed to <span class="state gate">QA_TEST</span>
+          </div>
+          <div class="bln">
+            <span class="verdict fail">FAIL ≥max</span>
+            → <span style="color:var(--muted-2)">force-accept flagged</span> → proceed to <span class="state gate">QA_TEST</span>
+          </div>
+        </div>
+      </article>
+    </section>
+
+    <div class="shift" data-station>
+      <div class="shift-inner reveal">
+        Code EVAL terminates → <span class="route">QA_TEST</span>
+        <span style="color:var(--muted-2)">(step list contract begins)</span>
+      </div>
+    </div>
+
+    <!-- GATE 2: QA PLACEMENT -->
+    <section class="station" data-station>
+      <div class="node-marker">3</div>
+      <article class="card steel">
+        <div class="card-head">
+          <div class="reveal">
+            <div class="phase-label">Loop 2 — QA Placement</div>
+            <div class="phase-title">QA Gate</div>
+            <div class="role">Budget: <b>ui_implementing.qa.min_rounds / max_rounds</b> · counter: <b>qa_round</b></div>
+          </div>
+          <div class="io reveal">
+            <div class="ln"><span class="tag">agent</span><span class="val">1× sub-agent</span></div>
+            <div class="ln"><span class="tag">eval</span><span class="val">ui-qa-eval.md</span></div>
+            <div class="ln"><span class="tag">tool</span><span class="val">Playwright MCP</span></div>
+            <div class="ln"><span class="tag">out</span><span class="val out">qa/batch-N-steps.json (required)</span></div>
+          </div>
+        </div>
+        <p class="desc reveal">
+          The sub-agent receives <code>ui-qa-eval.md</code>, the app launch command, URL, and
+          step-list target path via <code>forgectl eval</code>. It drives the live app through
+          the <strong>Playwright MCP</strong>: navigates to <code>ui_implementing.app.url</code>,
+          reads the accessibility snapshot to judge placement, exercises controls
+          (click / type / fill / select), reads the console for runtime errors, and
+          captures screenshots as evidence. The QA step list
+          (<code>qa/batch-N-steps.json</code>) is <strong>always written</strong> — every round,
+          every eval_mode. A QA loop never exits toward E2E_AUTHOR without it.
+          Files are returned via <code>forgectl handoff &lt;qa-report&gt; &lt;step-list&gt;</code>.
+        </p>
+        <div class="track-label reveal">QA_TEST loop</div>
+        <div class="track reveal">
+          <span class="state gate">QA_TEST</span>
+          <span class="arrow loopback">⟲</span>
+          <span class="state loop">UI_REFINE</span>
+          <span class="arrow">→</span>
+          <span class="state gate">QA_TEST <span class="sub">(qa_round++)</span></span>
+          <span class="arrow">→</span>
+          <span class="state">E2E_AUTHOR</span>
+        </div>
+        <div class="branch reveal" style="margin-top:14px">
+          <div class="bln">
+            <span class="verdict fail">FAIL &lt;max</span>
+            → <span class="state loop">UI_REFINE</span>
+            <span style="color:var(--muted-2); font-size:11px">(move, resize, relabel, reorder, rewire — no commit)</span>
+            → <span class="state gate">QA_TEST</span>
+          </div>
+          <div class="bln">
+            <span class="verdict pass">PASS ≥min</span>
+            → step list present → <span class="state">E2E_AUTHOR</span>
+          </div>
+          <div class="bln">
+            <span class="verdict fail">FAIL ≥max</span>
+            → <span style="color:var(--muted-2)">qa force-accept flagged</span> → <span class="state">E2E_AUTHOR</span>
+          </div>
+        </div>
+        <div class="track-label reveal" style="margin-top:18px">UI_REFINE actions</div>
+        <div class="track reveal">
+          <span class="state loop">Move elements</span>
+          <span class="arrow">·</span>
+          <span class="state loop">Resize</span>
+          <span class="arrow">·</span>
+          <span class="state loop">Relabel</span>
+          <span class="arrow">·</span>
+          <span class="state loop">Reorder</span>
+          <span class="arrow">·</span>
+          <span class="state loop">Rewire controls</span>
+          <span class="arrow">·</span>
+          <span class="state loop">No commit</span>
+        </div>
+      </article>
+    </section>
+
+    <!-- E2E_AUTHOR bridging state -->
+    <section class="station cool" data-station>
+      <div class="node-marker">4</div>
+      <article class="card steel">
+        <div class="card-head">
+          <div class="reveal">
+            <div class="phase-label">Bridge State — E2E Authoring</div>
+            <div class="phase-title">E2E Author</div>
+            <div class="role">Single state — not a loop · consumes QA step list</div>
+          </div>
+          <div class="io reveal">
+            <div class="ln"><span class="tag">in</span><span class="val">qa/batch-N-steps.json (required)</span></div>
+            <div class="ln"><span class="tag">out</span><span class="val out">Playwright test files → e2e.test_dir</span></div>
+            <div class="ln"><span class="tag">runs</span><span class="val">ui_implementing.e2e.test_command</span></div>
+          </div>
+        </div>
+        <p class="desc reveal">
+          The engineer reads the QA step list and authors one runnable <strong>Playwright test file
+          per scenario</strong> into <code>ui_implementing.e2e.test_dir</code> — steps become actions,
+          expected outcomes become assertions. The suite is then run via
+          <code>ui_implementing.e2e.test_command</code>. Pass, fail, or runner error —
+          the engineer advances regardless; the verdict belongs to <strong>E2E_VERIFY</strong>.
+          Zero scenarios → author nothing, advance directly.
+          Authored test files are <strong>permanent project assets</strong>, not workspace files.
+        </p>
+        <div class="track-label reveal">Flow</div>
+        <div class="track reveal">
+          <span class="state">Read QA step list</span>
+          <span class="arrow">→</span>
+          <span class="state">Author Playwright tests</span>
+          <span class="arrow">→</span>
+          <span class="state">Run e2e.test_command</span>
+          <span class="arrow">→</span>
+          <span class="state gate">forgectl advance <span class="sub">(e2e_round=1)</span></span>
+          <span class="arrow">→</span>
+          <span class="state gate">E2E_VERIFY</span>
+        </div>
+      </article>
+    </section>
+
+    <div class="shift" data-station>
+      <div class="shift-inner reveal">
+        Step list contract satisfied → <span class="route">E2E_VERIFY</span>
+        <span style="color:var(--muted-2)">(loop 3 begins)</span>
+      </div>
+    </div>
+
+    <!-- GATE 3: E2E VERIFICATION -->
+    <section class="station" data-station>
+      <div class="node-marker">5</div>
+      <article class="card">
+        <div class="card-head">
+          <div class="reveal">
+            <div class="phase-label">Loop 3 — E2E Verification</div>
+            <div class="phase-title">E2E Gate</div>
+            <div class="role">Budget: <b>ui_implementing.e2e.min_rounds / max_rounds</b> · counter: <b>e2e_round</b></div>
+          </div>
+          <div class="io reveal">
+            <div class="ln"><span class="tag">agent</span><span class="val">1× sub-agent</span></div>
+            <div class="ln"><span class="tag">eval</span><span class="val">ui-e2e-eval.md</span></div>
+            <div class="ln"><span class="tag">tool</span><span class="val">Playwright test runner</span></div>
+            <div class="ln"><span class="tag">zero</span><span class="val">scenarios → PASS (vacuous)</span></div>
+          </div>
+        </div>
+        <p class="desc reveal">
+          The sub-agent receives <code>ui-e2e-eval.md</code>, the step-list path, test command,
+          and test dir via <code>forgectl eval</code>. It confirms the authored Playwright tests
+          <strong>run, pass, and cover the step list</strong>. In report mode the sub-agent returns
+          its report via <code>forgectl handoff &lt;e2e-report&gt;</code>. Zero scenarios yields
+          a vacuous PASS. The engineer records the verdict with
+          <code>forgectl advance --verdict PASS|FAIL</code>.
+        </p>
+        <div class="track-label reveal">E2E_VERIFY loop</div>
+        <div class="track reveal">
+          <span class="state gate">E2E_VERIFY</span>
+          <span class="arrow loopback">⟲</span>
+          <span class="state loop">E2E_REMEDIATE</span>
+          <span class="arrow">→</span>
+          <span class="state gate">E2E_VERIFY <span class="sub">(e2e_round++)</span></span>
+          <span class="arrow">→</span>
+          <span class="state">COMMIT</span>
+        </div>
+        <div class="branch reveal" style="margin-top:14px">
+          <div class="bln">
+            <span class="verdict fail">FAIL &lt;max</span>
+            → <span class="state loop">E2E_REMEDIATE</span>
+            <span style="color:var(--muted-2); font-size:11px">(fix failing tests or UI under test, re-run suite — no commit)</span>
+            → <span class="state gate">E2E_VERIFY</span>
+          </div>
+          <div class="bln">
+            <span class="verdict pass">PASS ≥min</span>
+            → proceed to <span class="state">COMMIT</span>
+          </div>
+          <div class="bln">
+            <span class="verdict fail">FAIL ≥max</span>
+            → <span style="color:var(--muted-2)">e2e force-accept flagged</span> → proceed to <span class="state">COMMIT</span>
+          </div>
+        </div>
+      </article>
+    </section>
+
+    <!-- COMMIT -->
+    <section class="station" data-station>
+      <div class="node-marker">6</div>
+      <article class="card">
+        <div class="card-head">
+          <div class="reveal">
+            <div class="phase-label">Batch Boundary — Terminal Status</div>
+            <div class="phase-title">Commit</div>
+            <div class="role">Terminal item status decided <b>here</b> — after all three loops</div>
+          </div>
+          <div class="io reveal">
+            <div class="ln"><span class="tag">passed</span><span class="val">all 3 loops PASSed within budget</span></div>
+            <div class="ln"><span class="tag">failed</span><span class="val">any loop force-accepted at max_rounds</span></div>
+          </div>
+        </div>
+        <p class="desc reveal">
+          The only place where items transition to their terminal status.
+          <strong>passed</strong> = code eval, QA, and E2E all passed within their respective
+          round budgets. <strong>failed</strong> = any loop reached its <code>max_rounds</code>
+          and was force-accepted. Items stay <code>done</code> while the batch moves
+          through the three loops; status is only finalized at COMMIT.
+        </p>
+        <div class="track-label reveal">Item state progression</div>
+        <div class="item-states reveal">
+          <span class="is">pending</span>
+          <span class="arrow">→</span>
+          <span class="is">done</span>
+          <span class="arrow">→</span>
+          <span class="is pass">passed</span>
+          <span style="color:var(--muted-2); font-size:12px; font-family:'JetBrains Mono',monospace">(all three loops PASS in budget)</span>
+        </div>
+        <div class="item-states reveal" style="margin-top:6px">
+          <span class="is">pending</span>
+          <span class="arrow">→</span>
+          <span class="is">done</span>
+          <span class="arrow">→</span>
+          <span class="is fail">failed</span>
+          <span style="color:var(--muted-2); font-size:12px; font-family:'JetBrains Mono',monospace">(any loop force-accepted at max)</span>
+        </div>
+        <div class="track-label reveal" style="margin-top:18px">Commit command</div>
+        <div class="track reveal">
+          <span class="state eval">enable_commits: true</span>
+          <span class="arrow">→</span>
+          <span class="state">forgectl advance --message "&lt;msg&gt;"</span>
+        </div>
+        <div class="track reveal" style="margin-top:6px">
+          <span class="state loop">enable_commits: false</span>
+          <span class="arrow">→</span>
+          <span class="state">forgectl advance</span>
+        </div>
+        <div class="track-label reveal" style="margin-top:18px">After commit</div>
+        <div class="branch reveal">
+          <div class="bln">
+            <span style="color:var(--muted)">more batches / more layers</span>
+            → <span class="state">ORIENT</span>
+            <span style="color:var(--muted-2)">(next batch)</span>
+          </div>
+          <div class="bln">
+            <span style="color:var(--muted)">all items complete</span>
+            → <span class="state terminal">DONE</span>
+          </div>
+        </div>
+      </article>
+    </section>
+
+    <div class="shift" data-station>
+      <div class="shift-inner reveal">
+        <span class="ps">PHASE_SHIFT</span>
+        <span style="color:var(--muted-2)">when all layers complete</span>
+        <span class="route">ui_implementing → planning (next domain)</span>
+        <span style="color:var(--muted-2)">or session complete if queue empty</span>
+      </div>
+    </div>
+
+    <!-- DONE -->
+    <section class="station" data-station>
+      <div class="node-marker">7</div>
+      <article class="card">
+        <div class="card-head">
+          <div class="reveal">
+            <div class="phase-label">Terminal State</div>
+            <div class="phase-title">Done</div>
+            <div class="role">All layers complete · per-loop round summary emitted</div>
+          </div>
+          <div class="io reveal">
+            <div class="ln"><span class="tag">summary</span><span class="val out">Rounds: code N, qa N, e2e N (across M batches)</span></div>
+          </div>
+        </div>
+        <p class="desc reveal">
+          All layers complete; all items are either <strong>passed</strong> or <strong>failed</strong>.
+          Summary reports per-layer pass counts and per-loop round totals:
+          <code>"Rounds: code 5, qa 4, e2e 6 (across 2 batches)"</code>.
+        </p>
+        <div class="track-label reveal">Transition (plan_all_before_implementing: false — interleaved)</div>
+        <div class="branch reveal">
+          <div class="bln"><span style="color:var(--muted)">planning queue non-empty</span> → <span class="state terminal">PHASE_SHIFT</span> (ui_implementing → planning, next domain)</div>
+          <div class="bln"><span style="color:var(--muted)">planning queue empty</span> → session complete</div>
+        </div>
+        <div class="track-label reveal">Transition (plan_all_before_implementing: true — all-planning-first)</div>
+        <div class="branch reveal">
+          <div class="bln"><span style="color:var(--muted)">impl plan queue non-empty</span> → <span class="state terminal">PHASE_SHIFT</span> (domain boundary; next plan routes by kind)</div>
+          <div class="bln"><span style="color:var(--muted)">queue empty</span> → session complete</div>
+        </div>
+      </article>
+    </section>
+
+  </main>
+
+  <!-- SECTION: THREE GATES REFERENCE -->
+  <div class="section-head" data-reveal>Three Gates — Quick Reference</div>
+
+  <div data-reveal>
+    <div class="gates-grid">
+      <div class="gate-card eval-gate reveal">
+        <div class="gate-num eval-c">Gate 1 · eval_round</div>
+        <div class="gate-name">Code Eval</div>
+        <div class="gate-meta">
+          <div class="ml"><span class="mk">Prompt</span><span class="mv file">impl-eval.md</span></div>
+          <div class="ml"><span class="mk">Tool</span><span class="mv tool">forgectl eval (code review)</span></div>
+          <div class="ml"><span class="mk">Budget</span><span class="mv">ui_implementing.eval.min / max</span></div>
+          <div class="ml"><span class="mk">PASS</span><span class="mv">→ QA_TEST</span></div>
+          <div class="ml"><span class="mk">FAIL</span><span class="mv">→ IMPLEMENT (round 2+) → EVALUATE</span></div>
+          <div class="ml"><span class="mk">Force</span><span class="mv">at max_rounds → proceed (flagged)</span></div>
+        </div>
+      </div>
+      <div class="gate-card qa-gate reveal">
+        <div class="gate-num qa-c">Gate 2 · qa_round</div>
+        <div class="gate-name">QA Placement</div>
+        <div class="gate-meta">
+          <div class="ml"><span class="mk">Prompt</span><span class="mv file">ui-qa-eval.md</span></div>
+          <div class="ml"><span class="mk">Tool</span><span class="mv tool">Playwright MCP</span></div>
+          <div class="ml"><span class="mk">Budget</span><span class="mv">ui_implementing.qa.min / max</span></div>
+          <div class="ml"><span class="mk">Always</span><span class="mv">writes qa/batch-N-steps.json</span></div>
+          <div class="ml"><span class="mk">PASS</span><span class="mv">→ E2E_AUTHOR (step list required)</span></div>
+          <div class="ml"><span class="mk">FAIL</span><span class="mv">→ UI_REFINE → QA_TEST</span></div>
+        </div>
+      </div>
+      <div class="gate-card e2e-gate reveal">
+        <div class="gate-num e2e-c">Gate 3 · e2e_round</div>
+        <div class="gate-name">E2E Verification</div>
+        <div class="gate-meta">
+          <div class="ml"><span class="mk">Prompt</span><span class="mv file">ui-e2e-eval.md</span></div>
+          <div class="ml"><span class="mk">Tool</span><span class="mv tool">Playwright test runner</span></div>
+          <div class="ml"><span class="mk">Budget</span><span class="mv">ui_implementing.e2e.min / max</span></div>
+          <div class="ml"><span class="mk">Zero</span><span class="mv">scenarios → PASS (vacuous)</span></div>
+          <div class="ml"><span class="mk">PASS</span><span class="mv">→ COMMIT</span></div>
+          <div class="ml"><span class="mk">FAIL</span><span class="mv">→ E2E_REMEDIATE → E2E_VERIFY</span></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- SECTION: ACTORS + COMMANDS -->
+  <div class="section-head" data-reveal>Two Actors, Three Commands</div>
+
+  <div data-reveal>
+    <div class="actor-row">
+      <div class="actor-box reveal">
+        <div class="actor-name">Engineer (primary agent)</div>
+        <span class="cmd">forgectl advance</span>
+        <span class="cmd">forgectl status</span>
+        <div class="note">
+          Drives all state transitions. Records verdicts via
+          <code>advance --verdict PASS|FAIL</code>.
+          In report mode: <code>advance --verdict PASS|FAIL --eval-report &lt;path&gt;</code>.
+        </div>
+      </div>
+      <div class="actor-box reveal">
+        <div class="actor-name">Sub-agent (evaluator — code | qa | e2e)</div>
+        <span class="cmd steel">forgectl eval</span>
+        <span class="cmd steel">forgectl handoff</span>
+        <div class="note">
+          Valid ONLY in the three evaluator states: EVALUATE, QA_TEST, E2E_VERIFY.
+          <code>handoff</code> verifies each file exists, surfaces them on a <code>Review:</code>
+          line, carries NO verdict. Coexists with <code>--eval-report</code>; divergent path warns but does not block.
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- SECTION: ARTIFACT LOCATIONS -->
+  <div class="section-head" data-reveal>Artifact Locations</div>
+
+  <div data-reveal>
+    <div class="panel accent reveal">
+      <div class="panel-title">Workspace + Project Layout</div>
+      <div class="artifact-tree">
+        <span class="dir">&lt;domain&gt;/.forgectl_workspace/ui_plan/</span><br>
+        ├── <span class="file">plan.json</span>               <span class="note">UI plan (mutated: passes/rounds)</span><br>
+        ├── <span class="dir">qa/</span><br>
+        │   ├── <span class="file">batch-N-steps.json</span>   <span class="note">QA step list (latest round wins) — contract between loop 2 + 3</span><br>
+        │   ├── <span class="file">batch-N-round-M.md</span>   <span class="note">QA reports</span><br>
+        │   └── <span class="file">batch-N-round-M-*.png</span> <span class="note">QA screenshot evidence (Playwright MCP captures)</span><br>
+        └── <span class="dir">e2e/</span><br>
+        &nbsp;&nbsp;&nbsp; └── <span class="file">batch-N-round-M.md</span>   <span class="note">e2e verification reports</span><br>
+        <br>
+        <span class="dir">ui_implementing.e2e.test_dir/</span>   <span class="note">→ authored Playwright test files (permanent project assets — not workspace)</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- SECTION: FULL STATE SEQUENCE -->
+  <div class="section-head" data-reveal>Full State Sequence — Complete Batch</div>
+
+  <div data-reveal>
+    <div class="panel reveal">
+      <div class="panel-title">All States in Order</div>
+      <div class="track-label" style="margin-top:0">Batch flow (repeats per batch)</div>
+      <div class="track reveal">
+        <span class="state">ORIENT</span>
+        <span class="arrow">→</span>
+        <span class="state">IMPLEMENT <span class="sub">1..n</span></span>
+        <span class="arrow">→</span>
+        <span class="state eval">EVALUATE</span>
+        <span class="arrow loopback">⟲</span>
+        <span class="state loop">IMPLEMENT <span class="sub">r2+</span></span>
+        <span class="arrow">→</span>
+        <span class="state gate">QA_TEST</span>
+        <span class="arrow loopback">⟲</span>
+        <span class="state loop">UI_REFINE</span>
+        <span class="arrow">→</span>
+        <span class="state">E2E_AUTHOR</span>
+        <span class="arrow">→</span>
+        <span class="state gate">E2E_VERIFY</span>
+        <span class="arrow loopback">⟲</span>
+        <span class="state loop">E2E_REMEDIATE</span>
+        <span class="arrow">→</span>
+        <span class="state">COMMIT</span>
+        <span class="arrow">→</span>
+        <span class="state terminal">DONE</span>
+      </div>
+      <div class="track-label" style="margin-top:22px">Gate summary</div>
+      <div class="track reveal">
+        <span class="state eval">impl-eval.md</span>
+        <span class="arrow">→</span>
+        <span class="state gate">ui-qa-eval.md + Playwright MCP</span>
+        <span class="arrow">→</span>
+        <span class="state gate">ui-e2e-eval.md + Playwright runner</span>
+        <span class="arrow">→</span>
+        <span class="state terminal">COMMIT</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- LEGEND -->
+  <section class="legend" data-station>
+    <h3>Key</h3>
+    <div class="legend-grid">
+      <div class="leg-item reveal"><div class="sw"><span class="state" style="padding:5px 9px;font-size:10px">STATE</span></div><div class="txt"><b>Standard state</b>Advance with <code>forgectl advance</code></div></div>
+      <div class="leg-item reveal"><div class="sw"><span class="state eval" style="padding:5px 9px;font-size:10px">EVAL</span></div><div class="txt"><b>Code EVALUATE</b>Opus sub-agent; impl-eval.md; checks code vs spec</div></div>
+      <div class="leg-item reveal"><div class="sw"><span class="state gate" style="padding:5px 9px;font-size:10px">GATE</span></div><div class="txt"><b>QA / E2E gate</b>QA_TEST (Playwright MCP) or E2E_VERIFY (Playwright runner)</div></div>
+      <div class="leg-item reveal"><div class="sw"><span class="state loop" style="padding:5px 9px;font-size:10px">LOOP</span></div><div class="txt"><b>UI_REFINE / E2E_REMEDIATE</b>Fix deficiencies; no commit; retry gate</div></div>
+      <div class="leg-item reveal"><div class="sw"><span class="state terminal" style="padding:5px 9px;font-size:10px">DONE</span></div><div class="txt"><b>Terminal state</b>All layers complete; per-loop round summary emitted</div></div>
+      <div class="leg-item reveal"><div class="sw"><span class="arrow loopback" style="font-size:18px">⟲</span></div><div class="txt"><b>Loop back</b>Bounded by <code>eval/qa/e2e .min_rounds / .max_rounds</code> (three independent budgets)</div></div>
+      <div class="leg-item reveal"><div class="sw"><span class="ps" style="font-family:'JetBrains Mono';font-size:10px;color:var(--ember-hot);font-weight:700">SHIFT</span></div><div class="txt"><b>PHASE_SHIFT</b>Hard stop; engineer refreshes context. Mutates plan.json (passes + rounds)</div></div>
+      <div class="leg-item reveal"><div class="sw"><span style="font-family:'JetBrains Mono';font-size:10px;color:var(--spark)">kind</span></div><div class="txt"><b>Plan routing</b><code>kind: "ui"</code> routes here from planning's PHASE_SHIFT</div></div>
+    </div>
+  </section>
+
+  <footer>
+    <span>forgectl · docs/diagrams/10-ui-implementing-phase</span>
+    <span><a href="index.html">← workflow index</a></span>
+  </footer>
+</div>
+
+<script>
+  const io = new IntersectionObserver((entries)=>{
+    entries.forEach(e=>{ if(e.isIntersecting){ e.target.classList.add('lit');
+      e.target.querySelectorAll('.reveal').forEach((el,i)=>{el.style.animationDelay=(i*70)+'ms';});
+      io.unobserve(e.target);} });
+  }, { threshold:0.14, rootMargin:'0px 0px -8% 0px' });
+  document.querySelectorAll('[data-station],[data-reveal]').forEach(s=>io.observe(s));
+</script>
+</body>
+</html>

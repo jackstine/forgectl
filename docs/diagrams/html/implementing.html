@@ -1,0 +1,584 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>forgectl — Implementing Phase</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600;700&family=Archivo+Expanded:wght@600;700;800;900&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet" />
+<link rel="stylesheet" href="forge.css" />
+<style>
+  .item-card {
+    background: var(--iron-2);
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    padding: 14px 16px;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11.5px;
+    color: var(--muted);
+    margin-top: 14px;
+  }
+  .item-card .irow { display: flex; gap: 10px; margin-bottom: 4px; }
+  .item-card .irow:last-child { margin-bottom: 0; }
+  .item-card .ilabel { color: var(--muted-2); width: 52px; flex: none; text-transform: uppercase; letter-spacing: .1em; font-size: 10px; padding-top: 1px; }
+  .item-card .ival  { color: var(--text); }
+  .item-card .ival.steps { color: var(--muted); }
+  .item-card .ival.steps span { display: block; padding-left: 12px; }
+
+  .transition-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11.5px;
+    margin-top: 4px;
+  }
+  .transition-table th {
+    text-align: left;
+    color: var(--muted-2);
+    font-weight: 500;
+    font-size: 10px;
+    letter-spacing: .14em;
+    text-transform: uppercase;
+    padding: 0 14px 10px 0;
+    border-bottom: 1px solid var(--line);
+  }
+  .transition-table td {
+    padding: 8px 14px 8px 0;
+    border-bottom: 1px solid var(--line-soft);
+    color: var(--muted);
+    vertical-align: top;
+  }
+  .transition-table tr:last-child td { border-bottom: none; }
+  .transition-table .from { color: var(--text); }
+  .transition-table .cond { color: var(--spark); }
+  .transition-table .to-pass { color: var(--ok); }
+  .transition-table .to-fail { color: var(--fail); }
+  .transition-table .to-loop { color: var(--muted); }
+
+  .eval-dim-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+    gap: 8px;
+    margin-top: 14px;
+  }
+  .eval-dim {
+    display: flex; align-items: flex-start; gap: 10px;
+    background: var(--iron-2); border: 1px solid var(--line);
+    border-radius: 8px; padding: 10px 12px;
+    font-family: 'JetBrains Mono', monospace; font-size: 11px;
+  }
+  .eval-dim .dnum { color: var(--ember-hot); font-weight: 700; flex: none; }
+  .eval-dim .dname { color: var(--text); font-weight: 500; }
+  .eval-dim .ddesc { color: var(--muted-2); font-size: 10px; margin-top: 2px; }
+
+  .layer-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 10px;
+    margin-top: 14px;
+  }
+  @media (max-width: 640px) { .layer-grid { grid-template-columns: 1fr; } }
+  .layer-col {
+    background: var(--iron-2); border: 1px solid var(--line);
+    border-radius: 10px; padding: 12px 14px;
+    font-family: 'JetBrains Mono', monospace; font-size: 11px;
+  }
+  .layer-col .lhead { color: var(--ember-hot); font-weight: 700; font-size: 10px; letter-spacing: .14em; text-transform: uppercase; margin-bottom: 8px; }
+  .layer-col .litem { color: var(--muted); padding: 3px 0; border-bottom: 1px solid var(--line-soft); }
+  .layer-col .litem:last-child { border-bottom: none; }
+  .layer-col .litem b { color: var(--text); }
+</style>
+</head>
+<body>
+<div class="grain"></div>
+
+<div class="wrap">
+  <header>
+    <a class="crumb" href="index.html">← Workflow Atlas</a>
+    <span class="kicker"><span class="dot"></span> Phase 04 · Forge · kind: code</span>
+    <h1 class="page-title">Implementing</h1>
+    <p class="lede">
+      The <strong>default code path</strong> — entered when a plan carries <code>kind: "code"</code>.
+      Batches of unblocked items are implemented, evaluated by an AI sub-agent,
+      and committed in bounded rounds until the queue drains or the max is forced.
+    </p>
+    <div class="meta-row">
+      <span class="chip"><b>Role</b>&nbsp;Senior Software Engineer</span>
+      <span class="chip"><b>Input</b>&nbsp;plan.json (passes / rounds)</span>
+      <span class="chip"><b>Output</b>&nbsp;production code + IMPLEMENTATION_LOG.md</span>
+      <span class="chip steel"><b>Eval</b>&nbsp;AI sub-agent vs spec tests</span>
+    </div>
+  </header>
+
+  <main class="pipeline">
+
+    <!-- SECTION: INITIALIZATION -->
+    <div class="section-head" data-reveal>Initialization</div>
+
+    <section class="station" data-station>
+      <div class="node-marker">⚙</div>
+      <article class="card">
+        <div class="card-head">
+          <div class="reveal">
+            <div class="phase-label">Entry Point</div>
+            <div class="phase-title">Init</div>
+            <div class="role">Via <b>PHASE_SHIFT</b> from planning — or manual</div>
+          </div>
+          <div class="io reveal">
+            <div class="ln"><span class="tag">cmd</span><span class="val">forgectl init</span></div>
+            <div class="ln"><span class="tag">flag</span><span class="val">--phase implementing</span></div>
+            <div class="ln"><span class="tag">flag</span><span class="val">--guided (optional)</span></div>
+          </div>
+        </div>
+        <p class="desc reveal">
+          Reads <code>plan.json</code> from the domain workspace and stamps every item with
+          <code>passes: "pending"</code> and <code>rounds: 0</code>.
+          Batch size and round limits come from <code>.forgectl/config</code> (<code>batch</code>,
+          <code>eval.max_rounds</code>). Pass <code>--guided</code> to insert user checkpoints at every
+          <strong>ORIENT</strong>.
+        </p>
+        <div class="track-label reveal">Command</div>
+        <div class="track reveal">
+          <span class="state">forgectl init --from &lt;domain&gt;/.forge_workspace/implementation_plan/plan.json --phase implementing</span>
+        </div>
+      </article>
+    </section>
+
+    <!-- SECTION: BATCH LOOP -->
+    <div class="section-head" data-reveal>Batch Loop</div>
+
+    <section class="station" data-station>
+      <div class="node-marker">1</div>
+      <article class="card">
+        <div class="card-head">
+          <div class="reveal">
+            <div class="phase-label">Batch Start</div>
+            <div class="phase-title">Orient</div>
+          </div>
+          <div class="io reveal">
+            <div class="ln"><span class="tag">action</span><span class="val">forgectl advance</span></div>
+          </div>
+        </div>
+        <p class="desc reveal">
+          Reviews layer progress (<em>"2/5 items passed"</em>), shows next batch composition,
+          and prints the <strong>"Next: N unblocked items"</strong> line.
+          If <code>--guided</code> is active, execution stops here for operator review.
+        </p>
+        <div class="track-label reveal">Triggers</div>
+        <div class="track reveal">
+          <span class="state">phase start</span>
+          <span class="arrow">→</span>
+          <span class="state">ORIENT</span>
+          <span class="arrow">→</span>
+          <span class="state">IMPLEMENT <span class="sub">batch 1..n</span></span>
+        </div>
+        <div class="track reveal" style="margin-top:8px">
+          <span class="state loop">⟲ after COMMIT</span>
+          <span class="arrow">→</span>
+          <span class="state">ORIENT</span>
+          <span class="arrow">→</span>
+          <span class="state">IMPLEMENT <span class="sub">next batch</span></span>
+        </div>
+      </article>
+    </section>
+
+    <section class="station" data-station>
+      <div class="node-marker">2</div>
+      <article class="card">
+        <div class="card-head">
+          <div class="reveal">
+            <div class="phase-label">Item Loop · Round 1</div>
+            <div class="phase-title">Implement</div>
+          </div>
+          <div class="io reveal">
+            <div class="ln"><span class="tag">action</span><span class="val">forgectl advance</span></div>
+            <div class="ln"><span class="tag">flag</span><span class="val">--message "&lt;what I did&gt;"</span></div>
+          </div>
+        </div>
+        <p class="desc reveal">
+          One item at a time within the batch. forgectl displays the item card; the engineer
+          reads spec contracts, consults notes, verifies the feature isn't already implemented,
+          writes <strong>complete code with no stubs</strong>, runs tests, and fixes failures.
+          <code>--message</code> is required on round 1 when <code>enable_commits: true</code> —
+          this fires the auto-commit. Item advances from <code>pending → done</code>.
+        </p>
+
+        <div class="track-label reveal">Example item card</div>
+        <div class="item-card reveal">
+          <div class="irow"><span class="ilabel">Item</span><span class="ival">config.load <span style="color:var(--muted-2)">(1/3 in batch)</span></span></div>
+          <div class="irow"><span class="ilabel">Name</span><span class="ival">Load service configuration</span></div>
+          <div class="irow"><span class="ilabel">Steps</span><span class="ival steps"><span>1. Create config struct</span><span>2. Add validation logic</span><span>3. Wire into service init</span></span></div>
+          <div class="irow"><span class="ilabel">Files</span><span class="ival">internal/config/load.go</span></div>
+          <div class="irow"><span class="ilabel">Specs</span><span class="ival">service-configuration.md, config-validation.md</span></div>
+          <div class="irow"><span class="ilabel">Refs</span><span class="ival">notes/config.md</span></div>
+          <div class="irow"><span class="ilabel">Tests</span><span class="ival">3 <span style="color:var(--muted-2)">(2 functional, 1 edge_case)</span></span></div>
+        </div>
+
+        <div class="track-label reveal">Engineer actions</div>
+        <div class="branch reveal">
+          <div class="bln">1. Read spec sections for contract</div>
+          <div class="bln">2. Read notes / refs for guidance</div>
+          <div class="bln">3. Search codebase — confirm not already implemented</div>
+          <div class="bln">4. Implement completely — <strong style="color:var(--text)">NO stubs, NO placeholders</strong></div>
+          <div class="bln">5. Run tests for changed/added code</div>
+          <div class="bln">6. Fix any failures</div>
+        </div>
+
+        <div class="track-label reveal">Item flow</div>
+        <div class="track reveal">
+          <span class="state">IMPLEMENT <span class="sub">item 1</span></span>
+          <span class="arrow">→</span>
+          <span class="state">IMPLEMENT <span class="sub">item 2</span></span>
+          <span class="arrow">→</span>
+          <span class="state">…</span>
+          <span class="arrow">→</span>
+          <span class="state">IMPLEMENT <span class="sub">item n</span></span>
+          <span class="arrow">→</span>
+          <span class="state eval">EVALUATE</span>
+        </div>
+      </article>
+    </section>
+
+    <!-- SECTION: EVALUATION LOOP -->
+    <div class="section-head" data-reveal>Evaluation Loop</div>
+
+    <section class="station" data-station>
+      <div class="node-marker">3</div>
+      <article class="card">
+        <div class="card-head">
+          <div class="reveal">
+            <div class="phase-label">Bounded · min_rounds → max_rounds</div>
+            <div class="phase-title">Evaluate</div>
+          </div>
+          <div class="io reveal">
+            <div class="ln"><span class="tag">cmd</span><span class="val">forgectl eval</span></div>
+            <div class="ln"><span class="tag">out</span><span class="val out">evals/batch-N-round-M.md</span></div>
+            <div class="ln"><span class="tag">verdict</span><span class="val">PASS | FAIL</span></div>
+          </div>
+        </div>
+        <p class="desc reveal">
+          An AI sub-agent receives the eval context from <code>forgectl eval</code> and checks
+          the batch implementation across <strong>seven dimensions</strong>. Output is written to
+          <code>evals/batch-N-round-M.md</code> (eval_mode: "report"). Round counter increments
+          each pass through.
+        </p>
+
+        <div class="track-label reveal">7 evaluation dimensions</div>
+        <div class="eval-dim-grid reveal">
+          <div class="eval-dim"><span class="dnum">1</span><div><div class="dname">Completeness</div><div class="ddesc">All steps done?</div></div></div>
+          <div class="eval-dim"><span class="dnum">2</span><div><div class="dname">Correctness</div><div class="ddesc">Matches spec?</div></div></div>
+          <div class="eval-dim"><span class="dnum">3</span><div><div class="dname">Test coverage</div><div class="ddesc">Criteria satisfied?</div></div></div>
+          <div class="eval-dim"><span class="dnum">4</span><div><div class="dname">Rejection handling</div><div class="ddesc">Invalid inputs handled?</div></div></div>
+          <div class="eval-dim"><span class="dnum">5</span><div><div class="dname">Edge cases</div><div class="ddesc">Boundaries covered?</div></div></div>
+          <div class="eval-dim"><span class="dnum">6</span><div><div class="dname">Code quality</div><div class="ddesc">Idiomatic?</div></div></div>
+          <div class="eval-dim"><span class="dnum">7</span><div><div class="dname">Integration</div><div class="ddesc">Works with deps?</div></div></div>
+        </div>
+
+        <div class="track-label reveal">Verdict routing</div>
+        <div class="track reveal">
+          <span class="state eval">EVALUATE</span>
+          <span class="arrow">→</span>
+        </div>
+        <div class="branch reveal" style="margin-top:8px">
+          <div class="bln">
+            <span class="verdict pass">PASS ≥ min_rounds</span>
+            <span class="arrow">→</span>
+            <span class="state">COMMIT</span>
+            &nbsp;·&nbsp; items: <span style="color:var(--ok)">passed</span>
+          </div>
+          <div class="bln">
+            <span class="verdict pass">PASS &lt; min_rounds</span>
+            <span class="arrow loopback">⟲</span>
+            <span class="state loop">IMPLEMENT <span class="sub">r2+</span></span>
+            &nbsp;(still must hit min)
+          </div>
+          <div class="bln">
+            <span class="verdict fail">FAIL &lt; max_rounds</span>
+            <span class="arrow loopback">⟲</span>
+            <span class="state loop">IMPLEMENT <span class="sub">r2+</span></span>
+            &nbsp;(fix deficiencies)
+          </div>
+          <div class="bln">
+            <span class="verdict fail">FAIL ≥ max_rounds</span>
+            <span class="arrow">→</span>
+            <span class="state">COMMIT</span>
+            &nbsp;·&nbsp; items: <span style="color:var(--fail)">failed</span> (force-accept)
+          </div>
+        </div>
+
+        <div class="track-label reveal">Re-implement (round 2+)</div>
+        <div class="track reveal">
+          <span class="state loop">IMPLEMENT <span class="sub">r2+</span></span>
+          <span class="arrow">→</span>
+          <span class="state eval">EVALUATE</span>
+          <span class="arrow loopback">⟲</span>
+        </div>
+        <div class="branch reveal" style="margin-top:6px">
+          <div class="bln" style="color:var(--muted-2)">eval_mode: report → study eval file &nbsp;·&nbsp; direct → review diff &nbsp;·&nbsp; conversational → relay verbally</div>
+          <div class="bln" style="color:var(--muted-2)">No <code>--message</code> flag &nbsp;·&nbsp; No auto-commit on round 2+</div>
+        </div>
+
+        <div class="track-label reveal">Advance commands</div>
+        <div class="track reveal" style="flex-direction:column; align-items:flex-start; gap:8px">
+          <span class="state" style="font-size:11px">forgectl advance --eval-report &lt;path&gt; --verdict PASS|FAIL &nbsp;<span class="sub">(eval_mode: report)</span></span>
+          <span class="state" style="font-size:11px">forgectl advance --verdict PASS|FAIL &nbsp;<span class="sub">(eval_mode: direct | conversational)</span></span>
+        </div>
+      </article>
+    </section>
+
+    <!-- SECTION: COMMIT -->
+    <div class="section-head" data-reveal>Batch Boundary</div>
+
+    <section class="station" data-station>
+      <div class="node-marker">4</div>
+      <article class="card">
+        <div class="card-head">
+          <div class="reveal">
+            <div class="phase-label">Batch Boundary — pause before continuing</div>
+            <div class="phase-title">Commit</div>
+          </div>
+          <div class="io reveal">
+            <div class="ln"><span class="tag">flag</span><span class="val">--message "&lt;commit msg&gt;"</span></div>
+            <div class="ln"><span class="tag">config</span><span class="val">enable_commits</span></div>
+          </div>
+        </div>
+        <p class="desc reveal">
+          Hard pause at the batch boundary. Commits include both
+          <strong>passed</strong> and <strong>force-accepted failed</strong> items.
+          When <code>enable_commits: false</code>, <code>forgectl advance</code> proceeds without
+          committing.
+        </p>
+        <div class="track-label reveal">Flow</div>
+        <div class="track reveal">
+          <span class="state">COMMIT <span class="sub">passed items</span></span>
+          <span class="arrow">→</span>
+          <span class="state">COMMIT <span class="sub">failed items (forced)</span></span>
+          <span class="arrow">→</span>
+        </div>
+        <div class="branch reveal" style="margin-top:8px">
+          <div class="bln">
+            <span style="color:var(--muted-2)">more batches / layers</span>
+            <span class="arrow loopback">⟲</span>
+            <span class="state">ORIENT <span class="sub">(next batch)</span></span>
+          </div>
+          <div class="bln">
+            <span style="color:var(--muted-2)">all items complete</span>
+            <span class="arrow">→</span>
+            <span class="state terminal">DONE</span>
+          </div>
+        </div>
+      </article>
+    </section>
+
+    <!-- SECTION: DONE + PHASE_SHIFT -->
+    <div class="section-head" data-reveal>Terminal State</div>
+
+    <section class="station" data-station>
+      <div class="node-marker">✓</div>
+      <article class="card">
+        <div class="card-head">
+          <div class="reveal">
+            <div class="phase-label">All layers complete</div>
+            <div class="phase-title">Done</div>
+          </div>
+          <div class="io reveal">
+            <div class="ln"><span class="tag">state</span><span class="val out">passed or failed</span></div>
+            <div class="ln"><span class="tag">out</span><span class="val out">IMPLEMENTATION_LOG.md</span></div>
+          </div>
+        </div>
+        <p class="desc reveal">
+          All layers complete, all items marked <code>passed</code> or <code>failed</code>.
+          A summary is displayed for this domain. Transition depends on the remaining plan queue
+          and the <code>plan_all_before_implementing</code> config flag.
+        </p>
+        <div class="track-label reveal">Transition routing</div>
+        <div class="branch reveal">
+          <div class="bln">
+            <span style="color:var(--muted-2)">plan_all_before_implementing: <b style="color:var(--text)">false</b> (interleaved)</span>
+          </div>
+          <div class="bln" style="padding-left:16px">
+            planning queue non-empty
+            <span class="arrow">→</span>
+            <span class="state gate">PHASE_SHIFT</span>
+            <span style="color:var(--muted-2)">(implementing → planning, next domain)</span>
+          </div>
+          <div class="bln" style="padding-left:16px">
+            planning queue empty
+            <span class="arrow">→</span>
+            <span class="state terminal">session complete</span>
+          </div>
+        </div>
+        <div class="branch reveal" style="margin-top:10px">
+          <div class="bln">
+            <span style="color:var(--muted-2)">plan_all_before_implementing: <b style="color:var(--text)">true</b> (all-planning-first)</span>
+          </div>
+          <div class="bln" style="padding-left:16px">
+            implementation plan queue non-empty
+            <span class="arrow">→</span>
+            <span class="state gate">PHASE_SHIFT</span>
+            <span style="color:var(--muted-2)">(domain boundary; next plan routes by kind)</span>
+          </div>
+          <div class="bln" style="padding-left:16px">
+            implementation plan queue empty
+            <span class="arrow">→</span>
+            <span class="state terminal">session complete</span>
+          </div>
+        </div>
+      </article>
+    </section>
+
+    <div class="shift" data-station>
+      <div class="shift-inner reveal">
+        <span class="ps">PHASE_SHIFT</span>
+        <span style="color:var(--muted-2)">→ planning (next domain) if plans remain · domain boundaries re-route by kind</span>
+      </div>
+    </div>
+
+  </main>
+
+  <!-- BATCH SELECTION ALGORITHM -->
+  <div class="section-head" data-reveal>Batch Selection Algorithm</div>
+
+  <div class="panel accent" data-reveal>
+    <div class="panel-title"><span class="n">B</span> Unblocked Items &amp; Layer Progression</div>
+    <p class="desc">
+      An item is <strong>unblocked</strong> when all items in prior layers have terminal passes
+      (<code>passed | failed</code>) and all items in its <code>depends_on[]</code> have terminal passes.
+      The batch takes up to <code>implementing.batch</code> unblocked items, selected in
+      <code>layer items[]</code> order.
+    </p>
+    <div class="layer-grid reveal">
+      <div class="layer-col">
+        <div class="lhead">Layer 0 — Foundation</div>
+        <div class="litem"><b>item.a</b></div>
+        <div class="litem"><b>item.b</b></div>
+      </div>
+      <div class="layer-col">
+        <div class="lhead">Layer 1 — Core</div>
+        <div class="litem"><b>item.c</b></div>
+        <div class="litem"><b>item.d</b></div>
+      </div>
+      <div class="layer-col">
+        <div class="lhead">Layer 2 — Integration</div>
+        <div class="litem"><b>item.e</b></div>
+        <div class="litem"><b>item.f</b></div>
+      </div>
+    </div>
+    <div class="track-label reveal" style="margin-top:24px">Layer dependency arrow</div>
+    <div class="track reveal">
+      <span class="state">Layer 0 <span class="sub">Foundation</span></span>
+      <span class="arrow">→</span>
+      <span class="state">Layer 1 <span class="sub">Core</span></span>
+      <span class="arrow">→</span>
+      <span class="state">Layer 2 <span class="sub">Integration</span></span>
+    </div>
+    <p class="desc reveal" style="margin-top:16px">
+      <strong>Note:</strong> <code>failed</code> items are terminal — they do <em>not</em> block dependents.
+    </p>
+  </div>
+
+  <!-- ITEM PROGRESS TRACKING -->
+  <div class="section-head" data-reveal>Item Progress Tracking</div>
+
+  <div class="panel steel" data-reveal>
+    <div class="panel-title"><span class="n" style="color:var(--steel)">T</span> plan.json Item State Machine</div>
+    <p class="desc" style="margin-bottom:20px">
+      Fields <code>passes</code> and <code>rounds</code> are stamped onto each item by
+      <strong>PHASE_SHIFT</strong> from planning. <code>rounds</code> increments on each
+      evaluation cycle.
+    </p>
+    <table class="transition-table reveal">
+      <thead>
+        <tr>
+          <th>From state</th>
+          <th>Condition</th>
+          <th>To state</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td class="from">pending</td>
+          <td class="cond">advance in IMPLEMENT</td>
+          <td class="to-loop">done</td>
+        </tr>
+        <tr>
+          <td class="from">done</td>
+          <td class="cond">PASS + rounds ≥ eval.min_rounds</td>
+          <td class="to-pass">passed</td>
+        </tr>
+        <tr>
+          <td class="from">done</td>
+          <td class="cond">FAIL + rounds ≥ eval.max_rounds</td>
+          <td class="to-fail">failed</td>
+        </tr>
+        <tr>
+          <td class="from">done</td>
+          <td class="cond">FAIL + rounds &lt; eval.max_rounds</td>
+          <td class="to-loop">done (stays — re-implement)</td>
+        </tr>
+        <tr>
+          <td class="from">done</td>
+          <td class="cond">PASS + rounds &lt; eval.min_rounds</td>
+          <td class="to-loop">done (stays — refine more)</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <!-- KIND ROUTING NOTE -->
+  <div class="section-head" data-reveal>Kind Routing</div>
+
+  <div class="panel" data-reveal>
+    <div class="panel-title">This is the <span style="color:var(--spark)">kind: code</span> variant</div>
+    <p class="desc">
+      This page documents the <strong>default</strong> implementing path, entered when a plan's
+      <code>kind</code> field is <code>"code"</code>. Plans with <code>kind: "ui"</code> are routed
+      at PHASE_SHIFT into <strong>ui_implementing</strong> — the same spine extended with two
+      additional verification gates (Playwright MCP QA + Playwright e2e test runner) before each
+      commit.
+    </p>
+    <div class="track-label reveal" style="margin-top:18px">PHASE_SHIFT routing</div>
+    <div class="track reveal">
+      <span class="state gate">PHASE_SHIFT</span>
+      <span class="arrow">→</span>
+      <span style="color:var(--muted-2);font-family:'JetBrains Mono',monospace;font-size:12px">routed by kind:</span>
+      <span class="state" style="color:var(--spark);border-color:rgba(255,182,39,0.4);background:rgba(255,182,39,0.05)">kind: code → <b style="color:var(--text)">implementing</b></span>
+      <span class="state gate">kind: ui → <b style="color:var(--text)">ui_implementing</b></span>
+    </div>
+    <div style="margin-top:20px">
+      <a class="crumb" href="ui-implementing.html" style="margin-bottom:0">See UI Implementing →</a>
+    </div>
+  </div>
+
+  <!-- LEGEND -->
+  <section class="legend" data-station>
+    <h3>Key</h3>
+    <div class="legend-grid">
+      <div class="leg-item reveal"><div class="sw"><span class="state" style="padding:5px 9px;font-size:10px">STATE</span></div><div class="txt"><b>Standard state</b>Advance with <code>forgectl advance</code></div></div>
+      <div class="leg-item reveal"><div class="sw"><span class="state eval" style="padding:5px 9px;font-size:10px">EVAL</span></div><div class="txt"><b>EVALUATE</b>AI sub-agent reviews work against evaluation dimensions</div></div>
+      <div class="leg-item reveal"><div class="sw"><span class="state gate" style="padding:5px 9px;font-size:10px">GATE</span></div><div class="txt"><b>PHASE_SHIFT</b>Hard stop; engineer refreshes context</div></div>
+      <div class="leg-item reveal"><div class="sw"><span class="state loop" style="padding:5px 9px;font-size:10px">LOOP</span></div><div class="txt"><b>IMPLEMENT r2+</b>Re-implement, fixing deficiencies, then re-evaluate</div></div>
+      <div class="leg-item reveal"><div class="sw"><span class="state terminal" style="padding:5px 9px;font-size:10px">DONE</span></div><div class="txt"><b>Terminal state</b>All layers complete — domain done</div></div>
+      <div class="leg-item reveal"><div class="sw"><span class="arrow loopback" style="font-size:18px">⟲</span></div><div class="txt"><b>Loop back</b>Bounded by <code>eval.min_rounds</code> / <code>eval.max_rounds</code></div></div>
+      <div class="leg-item reveal"><div class="sw"><span style="font-family:'JetBrains Mono';font-size:10px;color:var(--spark)">kind</span></div><div class="txt"><b>Plan routing</b><span style="color:var(--spark)">code</span> → implementing · <span style="color:var(--spark)">ui</span> → ui_implementing</div></div>
+      <div class="leg-item reveal"><div class="sw"><span style="font-family:'JetBrains Mono';font-size:10px;color:var(--ember-hot)">passes</span></div><div class="txt"><b>Item field</b>pending → done → passed | failed</div></div>
+    </div>
+  </section>
+
+  <footer>
+    <span>forgectl · docs/diagrams/03-implementing-phase</span>
+    <span><a href="index.html">← workflow index</a></span>
+  </footer>
+</div>
+
+<script>
+  const io = new IntersectionObserver((entries)=>{
+    entries.forEach(e=>{ if(e.isIntersecting){ e.target.classList.add('lit');
+      e.target.querySelectorAll('.reveal').forEach((el,i)=>{el.style.animationDelay=(i*70)+'ms';});
+      io.unobserve(e.target);} });
+  }, { threshold:0.14, rootMargin:'0px 0px -8% 0px' });
+  document.querySelectorAll('[data-station],[data-reveal]').forEach(s=>io.observe(s));
+</script>
+</body>
+</html>

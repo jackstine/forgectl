@@ -1,0 +1,641 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>forgectl — Evaluation Loop</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600;700&family=Archivo+Expanded:wght@600;700;800;900&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet" />
+<link rel="stylesheet" href="forge.css" />
+<style>
+  .decision-matrix { width: 100%; border-collapse: collapse; font-family: 'JetBrains Mono', monospace; font-size: 12px; margin-top: 8px; }
+  .decision-matrix th { text-align: left; padding: 9px 14px; border-bottom: 1px solid var(--line); color: var(--muted-2); letter-spacing: .1em; text-transform: uppercase; font-size: 10.5px; font-weight: 500; background: var(--iron-2); }
+  .decision-matrix td { padding: 9px 14px; border-bottom: 1px solid var(--line-soft); color: var(--muted); vertical-align: middle; }
+  .decision-matrix tr:last-child td { border-bottom: none; }
+  .decision-matrix .td-verdict { color: var(--text); font-weight: 500; }
+  .decision-matrix .td-outcome { color: var(--ok); }
+  .decision-matrix .td-outcome.forced { color: var(--ember-hot); }
+
+  .dim-table { width: 100%; border-collapse: collapse; font-family: 'JetBrains Mono', monospace; font-size: 12px; margin-top: 8px; }
+  .dim-table th { text-align: left; padding: 8px 12px; border-bottom: 1px solid var(--line); color: var(--muted-2); letter-spacing: .1em; text-transform: uppercase; font-size: 10px; font-weight: 500; background: var(--iron-2); }
+  .dim-table td { padding: 8px 12px; border-bottom: 1px solid var(--line-soft); color: var(--muted); vertical-align: top; }
+  .dim-table tr:last-child td { border-bottom: none; }
+  .dim-table .td-n { color: var(--muted-2); width: 36px; }
+  .dim-table .td-name { color: var(--text); font-weight: 500; white-space: nowrap; }
+
+  .gate-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 16px; margin-top: 8px; }
+
+  .mode-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 16px; margin-top: 8px; }
+
+  .example-block { display: flex; flex-direction: column; gap: 6px; margin-top: 8px; }
+  .example-row { display: flex; align-items: center; gap: 8px; font-family: 'JetBrains Mono', monospace; font-size: 12px; flex-wrap: wrap; }
+  .example-round { color: var(--muted-2); min-width: 56px; flex: none; }
+  .example-arrow { color: var(--muted-2); }
+
+  .path-table { width: 100%; border-collapse: collapse; font-family: 'JetBrains Mono', monospace; font-size: 11.5px; margin-top: 8px; }
+  .path-table th { text-align: left; padding: 8px 12px; border-bottom: 1px solid var(--line); color: var(--muted-2); letter-spacing: .1em; text-transform: uppercase; font-size: 10px; font-weight: 500; background: var(--iron-2); }
+  .path-table td { padding: 8px 12px; border-bottom: 1px solid var(--line-soft); color: var(--muted); vertical-align: top; }
+  .path-table tr:last-child td { border-bottom: none; }
+  .path-table .td-loop { color: var(--spark); }
+  .path-table .td-path { color: var(--text); word-break: break-all; }
+</style>
+</head>
+<body>
+<div class="grain"></div>
+
+<div class="wrap">
+  <header>
+    <a class="crumb" href="index.html">← Workflow Atlas</a>
+    <span class="kicker"><span class="dot"></span> Reference · Mechanism</span>
+    <h1 class="page-title">Evaluation Loop</h1>
+    <p class="lede">
+      Every phase shares this round-enforcement loop, tuned by <code>eval.min_rounds</code> and
+      <code>eval.max_rounds</code> — both <strong>phase-scoped in <code>.forgectl/config</code></strong>.
+      A PASS below the minimum still forces another REFINE cycle; a FAIL at the maximum
+      forces acceptance to prevent infinite loops (<strong>force-accept boundary</strong>).
+    </p>
+    <div class="meta-row">
+      <span class="chip"><b>eval.min_rounds</b> minimum quality gate</span>
+      <span class="chip"><b>eval.max_rounds</b> infinite-loop cap</span>
+      <span class="chip steel"><b>force-accept</b> boundary at max</span>
+      <span class="chip">phase-scoped in <b>.forgectl/config</b></span>
+    </div>
+  </header>
+
+  <main>
+
+    <!-- ── GENERIC LOOP ── -->
+    <div class="section-head">Generic Evaluation Loop</div>
+
+    <div class="card static" data-reveal>
+      <div class="card-head">
+        <div class="reveal">
+          <div class="phase-label">Core Pattern — All Phases</div>
+          <div class="phase-title">Evaluate → Branch → Enforce</div>
+        </div>
+        <div class="io reveal">
+          <div class="ln"><span class="tag">in</span><span class="val">work artifact</span></div>
+          <div class="ln"><span class="tag">loop</span><span class="val">rounds++</span></div>
+          <div class="ln"><span class="tag">out</span><span class="val out">ACCEPT / REFINE</span></div>
+        </div>
+      </div>
+      <p class="desc reveal">
+        After any unit of work (Draft, Implement, etc.) the evaluator runs, increments
+        <code>rounds</code>, and produces a verdict. The loop applies <strong>two independent
+        constraints</strong>: a <em>minimum quality bar</em> that keeps quality high even when the agent
+        passes too early, and a <em>maximum cap</em> that guarantees the batch always terminates.
+      </p>
+
+      <div class="track-label reveal">Loop flow</div>
+      <div class="track reveal">
+        <span class="state">WORK DONE</span>
+        <span class="arrow">→</span>
+        <span class="state eval">EVALUATE</span>
+        <span class="arrow">→</span>
+        <span class="state">PASS / FAIL</span>
+        <span class="arrow">→</span>
+        <span class="state">round check</span>
+        <span class="arrow">→</span>
+        <span class="state loop">REFINE</span>
+        <span class="arrow loopback">⟲</span>
+        <span class="state terminal">ACCEPT</span>
+      </div>
+
+      <div class="branch reveal" style="margin-top: 18px;">
+        <div class="bln">
+          <span class="verdict pass">PASS</span>
+          <span class="arrow">+</span>
+          <code>rounds &gt;= eval.min</code>
+          <span class="arrow">→</span>
+          <span class="state terminal">ACCEPT</span>
+          <span style="color: var(--muted-2); font-size: 11px;">quality satisfied</span>
+        </div>
+        <div class="bln">
+          <span class="verdict pass">PASS</span>
+          <span class="arrow">+</span>
+          <code>rounds &lt; eval.min</code>
+          <span class="arrow">→</span>
+          <span class="state loop">REFINE</span>
+          <span style="color: var(--muted-2); font-size: 11px;">need more eval cycles</span>
+        </div>
+        <div class="bln">
+          <span class="verdict fail">FAIL</span>
+          <span class="arrow">+</span>
+          <code>rounds &lt; eval.max</code>
+          <span class="arrow">→</span>
+          <span class="state loop">REFINE</span>
+          <span style="color: var(--muted-2); font-size: 11px;">fix and retry</span>
+        </div>
+        <div class="bln">
+          <span class="verdict fail">FAIL</span>
+          <span class="arrow">+</span>
+          <code>rounds &gt;= eval.max</code>
+          <span class="arrow">→</span>
+          <span class="state terminal">ACCEPT</span>
+          <span style="color: var(--ember-hot); font-size: 11px;">forced — cap reached</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- ── DECISION MATRIX ── -->
+    <div class="section-head">Decision Matrix</div>
+
+    <div class="panel accent" data-reveal>
+      <div class="panel-title reveal">Round Enforcement Rules</div>
+      <div class="reveal">
+        <table class="decision-matrix">
+          <thead>
+            <tr>
+              <th>Verdict</th>
+              <th>Round Condition</th>
+              <th>Outcome</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><span class="verdict pass">PASS</span></td>
+              <td><code>rounds &gt;= eval.min</code></td>
+              <td class="td-outcome">ACCEPT — quality satisfied</td>
+            </tr>
+            <tr>
+              <td><span class="verdict pass">PASS</span></td>
+              <td><code>rounds &lt; eval.min</code></td>
+              <td>REFINE — need more eval cycles</td>
+            </tr>
+            <tr>
+              <td><span class="verdict fail">FAIL</span></td>
+              <td><code>rounds &lt; eval.max</code></td>
+              <td>REFINE — fix and retry</td>
+            </tr>
+            <tr>
+              <td><span class="verdict fail">FAIL</span></td>
+              <td><code>rounds &gt;= eval.max</code></td>
+              <td class="td-outcome forced">ACCEPT — forced, cap reached</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- ── EXAMPLES ── -->
+    <div class="section-head">Examples by Configuration</div>
+
+    <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(290px, 1fr)); gap: 16px;">
+
+      <div class="panel" data-reveal>
+        <div class="panel-title reveal">
+          <span class="n">Ex 1</span>
+          min_rounds = 1 · max_rounds = 3
+          <span style="font-family:'JetBrains Mono',monospace; font-size:11px; color:var(--muted); font-weight:400;">(typical)</span>
+        </div>
+        <div class="example-block reveal">
+          <div class="example-row">
+            <span class="example-round">Round 1</span>
+            <span class="state eval" style="font-size:11px; padding:4px 9px;">EVAL</span>
+            <span class="example-arrow">→</span>
+            <span class="verdict pass">PASS</span>
+            <span class="example-arrow">→</span>
+            <span class="state terminal" style="font-size:11px; padding:4px 9px;">ACCEPT</span>
+            <span style="color:var(--muted-2); font-size:11px;">done in 1</span>
+          </div>
+          <div class="example-row">
+            <span class="example-round">Round 1</span>
+            <span class="state eval" style="font-size:11px; padding:4px 9px;">EVAL</span>
+            <span class="example-arrow">→</span>
+            <span class="verdict fail">FAIL</span>
+            <span class="example-arrow">→</span>
+            <span class="state loop" style="font-size:11px; padding:4px 9px;">REFINE</span>
+          </div>
+          <div class="example-row">
+            <span class="example-round">Round 2</span>
+            <span class="state eval" style="font-size:11px; padding:4px 9px;">EVAL</span>
+            <span class="example-arrow">→</span>
+            <span class="verdict pass">PASS</span>
+            <span class="example-arrow">→</span>
+            <span class="state terminal" style="font-size:11px; padding:4px 9px;">ACCEPT</span>
+            <span style="color:var(--muted-2); font-size:11px;">fixed</span>
+          </div>
+          <div class="example-row">
+            <span class="example-round">Round 2</span>
+            <span class="state eval" style="font-size:11px; padding:4px 9px;">EVAL</span>
+            <span class="example-arrow">→</span>
+            <span class="verdict fail">FAIL</span>
+            <span class="example-arrow">→</span>
+            <span class="state loop" style="font-size:11px; padding:4px 9px;">REFINE</span>
+          </div>
+          <div class="example-row">
+            <span class="example-round">Round 3</span>
+            <span class="state eval" style="font-size:11px; padding:4px 9px;">EVAL</span>
+            <span class="example-arrow">→</span>
+            <span class="verdict fail">FAIL</span>
+            <span class="example-arrow">→</span>
+            <span class="state terminal" style="font-size:11px; padding:4px 9px; border-color:rgba(255,90,31,0.4); color:var(--ember-hot);">ACCEPT</span>
+            <span style="color:var(--ember-hot); font-size:11px;">forced at max</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="panel" data-reveal>
+        <div class="panel-title reveal">
+          <span class="n">Ex 2</span>
+          min_rounds = 2 · max_rounds = 3
+          <span style="font-family:'JetBrains Mono',monospace; font-size:11px; color:var(--muted); font-weight:400;">(high quality)</span>
+        </div>
+        <div class="example-block reveal">
+          <div class="example-row">
+            <span class="example-round">Round 1</span>
+            <span class="state eval" style="font-size:11px; padding:4px 9px;">EVAL</span>
+            <span class="example-arrow">→</span>
+            <span class="verdict pass">PASS</span>
+            <span class="example-arrow">→</span>
+            <span class="state loop" style="font-size:11px; padding:4px 9px;">REFINE</span>
+            <span style="color:var(--muted-2); font-size:11px;">below min</span>
+          </div>
+          <div class="example-row">
+            <span class="example-round">Round 2</span>
+            <span class="state eval" style="font-size:11px; padding:4px 9px;">EVAL</span>
+            <span class="example-arrow">→</span>
+            <span class="verdict pass">PASS</span>
+            <span class="example-arrow">→</span>
+            <span class="state terminal" style="font-size:11px; padding:4px 9px;">ACCEPT</span>
+            <span style="color:var(--muted-2); font-size:11px;">met min</span>
+          </div>
+          <div class="example-row">
+            <span class="example-round">Round 1</span>
+            <span class="state eval" style="font-size:11px; padding:4px 9px;">EVAL</span>
+            <span class="example-arrow">→</span>
+            <span class="verdict fail">FAIL</span>
+            <span class="example-arrow">→</span>
+            <span class="state loop" style="font-size:11px; padding:4px 9px;">REFINE</span>
+          </div>
+          <div class="example-row">
+            <span class="example-round">Round 2</span>
+            <span class="state eval" style="font-size:11px; padding:4px 9px;">EVAL</span>
+            <span class="example-arrow">→</span>
+            <span class="verdict fail">FAIL</span>
+            <span class="example-arrow">→</span>
+            <span class="state loop" style="font-size:11px; padding:4px 9px;">REFINE</span>
+          </div>
+          <div class="example-row">
+            <span class="example-round">Round 3</span>
+            <span class="state eval" style="font-size:11px; padding:4px 9px;">EVAL</span>
+            <span class="example-arrow">→</span>
+            <span class="verdict fail">FAIL</span>
+            <span class="example-arrow">→</span>
+            <span class="state terminal" style="font-size:11px; padding:4px 9px; border-color:rgba(255,90,31,0.4); color:var(--ember-hot);">ACCEPT</span>
+            <span style="color:var(--ember-hot); font-size:11px;">forced at max</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="panel" data-reveal>
+        <div class="panel-title reveal">
+          <span class="n">Ex 3</span>
+          min_rounds = 1 · max_rounds = 1
+          <span style="font-family:'JetBrains Mono',monospace; font-size:11px; color:var(--muted); font-weight:400;">(fast pass)</span>
+        </div>
+        <div class="example-block reveal">
+          <div class="example-row">
+            <span class="example-round">Round 1</span>
+            <span class="state eval" style="font-size:11px; padding:4px 9px;">EVAL</span>
+            <span class="example-arrow">→</span>
+            <span class="verdict pass">PASS</span>
+            <span class="example-arrow">→</span>
+            <span class="state terminal" style="font-size:11px; padding:4px 9px;">ACCEPT</span>
+          </div>
+          <div class="example-row">
+            <span class="example-round">Round 1</span>
+            <span class="state eval" style="font-size:11px; padding:4px 9px;">EVAL</span>
+            <span class="example-arrow">→</span>
+            <span class="verdict fail">FAIL</span>
+            <span class="example-arrow">→</span>
+            <span class="state terminal" style="font-size:11px; padding:4px 9px; border-color:rgba(255,90,31,0.4); color:var(--ember-hot);">ACCEPT</span>
+            <span style="color:var(--ember-hot); font-size:11px;">forced, no retry</span>
+          </div>
+          <p class="desc reveal" style="margin-top: 16px; font-size: 13px;">
+            When min and max are both 1, every outcome terminates immediately — either
+            clean acceptance or a forced-accept with no REFINE cycle.
+          </p>
+        </div>
+      </div>
+
+    </div>
+
+    <!-- ── EVAL DIMENSIONS ── -->
+    <div class="section-head">Evaluation Dimensions</div>
+
+    <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(440px, 1fr)); gap: 16px;">
+
+      <div class="panel" data-reveal>
+        <div class="panel-title reveal">11 Dimensions <span style="font-family:'JetBrains Mono',monospace; font-size:11px; font-weight:400; color:var(--muted);">— Specifying &amp; Planning</span></div>
+        <div class="reveal">
+          <table class="dim-table">
+            <thead><tr><th>#</th><th>Dimension</th><th>What the evaluator checks</th></tr></thead>
+            <tbody>
+              <tr><td class="td-n">1</td><td class="td-name">Behavior</td><td>All spec behaviors covered by plan items</td></tr>
+              <tr><td class="td-n">2</td><td class="td-name">Error Handling</td><td>Failure modes mapped to tests</td></tr>
+              <tr><td class="td-n">3</td><td class="td-name">Rejection</td><td>Invalid inputs tested</td></tr>
+              <tr><td class="td-n">4</td><td class="td-name">Interface</td><td>Outputs match spec contracts</td></tr>
+              <tr><td class="td-n">5</td><td class="td-name">Configuration</td><td>Configurable params covered</td></tr>
+              <tr><td class="td-n">6</td><td class="td-name">Observability</td><td>Logging requirements addressed</td></tr>
+              <tr><td class="td-n">7</td><td class="td-name">Integration Points</td><td>Cross-spec dependencies mapped</td></tr>
+              <tr><td class="td-n">8</td><td class="td-name">Invariants</td><td>Always-true properties enforced</td></tr>
+              <tr><td class="td-n">9</td><td class="td-name">Edge Cases</td><td>Boundary conditions tested</td></tr>
+              <tr><td class="td-n">10</td><td class="td-name">Testing Criteria</td><td>All tests mapped to plan items</td></tr>
+              <tr><td class="td-n">11</td><td class="td-name">Dependencies &amp; Format</td><td>DAG valid, schema compliant</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <div class="panel" data-reveal>
+        <div class="panel-title reveal">7 Criteria <span style="font-family:'JetBrains Mono',monospace; font-size:11px; font-weight:400; color:var(--muted);">— Implementation</span></div>
+        <div class="reveal">
+          <table class="dim-table">
+            <thead><tr><th>#</th><th>Criterion</th><th>What the evaluator checks</th></tr></thead>
+            <tbody>
+              <tr><td class="td-n">1</td><td class="td-name">Completeness</td><td>All steps implemented, all files present</td></tr>
+              <tr><td class="td-n">2</td><td class="td-name">Correctness</td><td>Implementation matches spec contract</td></tr>
+              <tr><td class="td-n">3</td><td class="td-name">Test Coverage</td><td>Each acceptance criterion satisfied</td></tr>
+              <tr><td class="td-n">4</td><td class="td-name">Rejection Handling</td><td>Invalid inputs rejected as specified</td></tr>
+              <tr><td class="td-n">5</td><td class="td-name">Edge Cases</td><td>Boundary conditions handled</td></tr>
+              <tr><td class="td-n">6</td><td class="td-name">Code Quality</td><td>Clean, idiomatic, maintainable</td></tr>
+              <tr><td class="td-n">7</td><td class="td-name">Integration</td><td>Works correctly with dependencies</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+    </div>
+
+    <!-- ── UI_IMPLEMENTING THREE LOOPS ── -->
+    <div class="section-head">ui_implementing — Three Loops in Series</div>
+
+    <div class="card static" data-reveal>
+      <div class="card-head">
+        <div class="reveal">
+          <div class="phase-label">Phase 04b — kind: ui</div>
+          <div class="phase-title">Three Sequential Gates per Batch</div>
+        </div>
+        <div class="io reveal">
+          <div class="ln"><span class="tag">loop 1</span><span class="val">code eval</span></div>
+          <div class="ln"><span class="tag">loop 2</span><span class="val">qa</span></div>
+          <div class="ln"><span class="tag">loop 3</span><span class="val">e2e</span></div>
+        </div>
+      </div>
+      <p class="desc reveal">
+        Each batch passes <strong>three sequential gates</strong>. Each gate is an independent instance of
+        the generic evaluation loop with its own <code>rounds</code> counter and its own
+        <code>min_rounds</code> / <code>max_rounds</code> budget. An item is "passed" only if all three
+        loops passed within budget; if <em>any</em> loop force-accepted, the item is marked "failed" at
+        <code>COMMIT</code>.
+      </p>
+
+      <div class="track-label reveal">Batch pipeline</div>
+      <div class="track reveal">
+        <span class="state">IMPLEMENT(s)</span>
+        <span class="arrow">→</span>
+        <span class="state eval">CODE EVAL</span>
+        <span class="arrow loopback">⟲</span>
+        <span class="state loop">REFINE</span>
+        <span class="arrow">→</span>
+        <span class="state gate">QA</span>
+        <span class="arrow loopback">⟲</span>
+        <span class="state loop">UI_REFINE</span>
+        <span class="arrow">→</span>
+        <span class="state gate">E2E</span>
+        <span class="arrow loopback">⟲</span>
+        <span class="state loop">E2E_REMEDIATE</span>
+        <span class="arrow">→</span>
+        <span class="state terminal">COMMIT</span>
+      </div>
+    </div>
+
+    <div class="gate-grid" style="margin-top: 16px;">
+
+      <!-- Loop 1 -->
+      <div class="panel accent" data-reveal>
+        <div class="panel-title reveal"><span class="n">Loop 1</span> Code Eval</div>
+        <div class="reveal">
+          <div class="track-label">States</div>
+          <div class="track" style="margin-bottom: 12px;">
+            <span class="state eval" style="font-size:11px; padding:5px 10px;">EVALUATE</span>
+            <span class="arrow loopback">⟲</span>
+            <span class="state loop" style="font-size:11px; padding:5px 10px;">REFINE</span>
+            <span class="arrow">→</span>
+            <span class="state terminal" style="font-size:11px; padding:5px 10px;">ACCEPT</span>
+          </div>
+          <div style="font-family:'JetBrains Mono',monospace; font-size:11px; color:var(--muted); margin-bottom:8px;">
+            Budget: <code>[ui_implementing.eval]</code>
+          </div>
+          <div style="font-family:'JetBrains Mono',monospace; font-size:11px; color:var(--muted);">
+            Report: <code>ui_plan/evals/batch-N-round-M.md</code>
+          </div>
+          <p class="desc" style="margin-top:10px; font-size:13px;">
+            Standard code-correctness evaluation using the 7-criterion rubric. Same logic
+            as the <code>implementing</code> phase.
+          </p>
+        </div>
+      </div>
+
+      <!-- Loop 2 -->
+      <div class="panel steel" data-reveal>
+        <div class="panel-title reveal"><span class="n" style="color:var(--steel);">Loop 2</span> QA</div>
+        <div class="reveal">
+          <div class="track-label">States</div>
+          <div class="track" style="margin-bottom: 12px;">
+            <span class="state gate" style="font-size:11px; padding:5px 10px;">QA_TEST</span>
+            <span class="arrow loopback">⟲</span>
+            <span class="state loop" style="font-size:11px; padding:5px 10px;">UI_REFINE</span>
+            <span class="arrow">→</span>
+            <span class="state terminal" style="font-size:11px; padding:5px 10px;">ACCEPT</span>
+          </div>
+          <div style="font-family:'JetBrains Mono',monospace; font-size:11px; color:var(--muted); margin-bottom:8px;">
+            Budget: <code>[ui_implementing.qa]</code>
+          </div>
+          <div style="font-family:'JetBrains Mono',monospace; font-size:11px; color:var(--muted);">
+            Report: <code>ui_plan/qa/batch-N-round-M.md</code>
+          </div>
+          <div style="font-family:'JetBrains Mono',monospace; font-size:11px; color:var(--muted-2); margin-top:4px;">
+            + <code>qa/batch-N-steps.json</code> (step list, always written)<br>
+            + <code>qa/batch-N-round-M-*.png</code> (screenshots)
+          </div>
+          <p class="desc" style="margin-top:10px; font-size:13px;">
+            Playwright MCP — visual + interaction. Checks placement, controls, runtime health,
+            reachability, and emits an e2e step list.
+          </p>
+          <div class="track-label" style="margin-top:14px; margin-bottom:8px;">5 QA Criteria</div>
+          <table class="dim-table">
+            <thead><tr><th>#</th><th>Criterion</th><th>What is checked</th></tr></thead>
+            <tbody>
+              <tr><td class="td-n">1</td><td class="td-name">Placement</td><td>Layout / structure via accessibility snapshot</td></tr>
+              <tr><td class="td-n">2</td><td class="td-name">Controls</td><td>Each control click / type / fill / select works</td></tr>
+              <tr><td class="td-n">3</td><td class="td-name">Runtime health</td><td>Console free of errors while exercising UI</td></tr>
+              <tr><td class="td-n">4</td><td class="td-name">Reachability</td><td>App launches and serves at configured URL</td></tr>
+              <tr><td class="td-n">5</td><td class="td-name">Step-list output</td><td>Emits e2e scenarios (always written)</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- Loop 3 -->
+      <div class="panel steel" data-reveal>
+        <div class="panel-title reveal"><span class="n" style="color:var(--steel);">Loop 3</span> E2E</div>
+        <div class="reveal">
+          <div class="track-label">States</div>
+          <div class="track" style="margin-bottom: 12px;">
+            <span class="state gate" style="font-size:11px; padding:5px 10px;">E2E_AUTHOR</span>
+            <span class="arrow">→</span>
+            <span class="state gate" style="font-size:11px; padding:5px 10px;">E2E_VERIFY</span>
+            <span class="arrow loopback">⟲</span>
+            <span class="state loop" style="font-size:11px; padding:5px 10px;">E2E_REMEDIATE</span>
+            <span class="arrow">→</span>
+            <span class="state terminal" style="font-size:11px; padding:5px 10px;">ACCEPT</span>
+          </div>
+          <div style="font-family:'JetBrains Mono',monospace; font-size:11px; color:var(--muted); margin-bottom:8px;">
+            Budget: <code>[ui_implementing.e2e]</code>
+          </div>
+          <div style="font-family:'JetBrains Mono',monospace; font-size:11px; color:var(--muted);">
+            Report: <code>ui_plan/e2e/batch-N-round-M.md</code>
+          </div>
+          <div style="font-family:'JetBrains Mono',monospace; font-size:11px; color:var(--muted-2); margin-top:4px;">
+            Tests live in <code>ui_implementing.e2e.test_dir</code> (permanent assets)
+          </div>
+          <p class="desc" style="margin-top:10px; font-size:13px;">
+            Playwright test runner — authored specs. Covers the QA step-list scenarios.
+            Zero-scenario step list → <span class="verdict pass">PASS</span> vacuously.
+          </p>
+          <div class="track-label" style="margin-top:14px; margin-bottom:8px;">3 E2E Criteria</div>
+          <table class="dim-table">
+            <thead><tr><th>#</th><th>Criterion</th><th>What is checked</th></tr></thead>
+            <tbody>
+              <tr><td class="td-n">1</td><td class="td-name">Tests run</td><td>Authored Playwright tests execute</td></tr>
+              <tr><td class="td-n">2</td><td class="td-name">Tests pass</td><td>The suite passes via the test command</td></tr>
+              <tr><td class="td-n">3</td><td class="td-name">Coverage</td><td>Tests cover the QA step-list scenarios</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+    </div>
+
+    <!-- ── EVAL MODE ── -->
+    <div class="section-head">eval_mode Configuration</div>
+
+    <div class="panel" data-reveal>
+      <div class="panel-title reveal">Three Modes — How Findings are Recorded</div>
+      <p class="desc reveal">
+        Configured per-phase at <code>[specifying.eval]</code>, <code>[planning.eval]</code>,
+        <code>[implementing.eval]</code>, and (one per loop) <code>[ui_implementing.eval]</code>,
+        <code>[ui_implementing.qa]</code>, <code>[ui_implementing.e2e]</code>.
+        Reconciliation and cross-reference eval inherit <code>specifying.eval</code>'s mode.
+      </p>
+      <div class="mode-grid reveal" style="margin-top: 16px;">
+
+        <div style="background: var(--iron-2); border: 1px solid var(--line); border-radius: 12px; padding: 18px 20px;">
+          <div style="font-family:'JetBrains Mono',monospace; font-size:11px; color:var(--spark); letter-spacing:.1em; margin-bottom:10px; text-transform:uppercase;">report <span style="color:var(--muted-2);">(default)</span></div>
+          <ul style="font-size: 13px; color: var(--muted); padding-left: 18px; display: flex; flex-direction: column; gap: 5px;">
+            <li>Sub-agent writes report to disk</li>
+            <li><code>forgectl advance</code> requires <code>--eval-report &lt;path&gt;</code></li>
+            <li>EVALUATE output names report path + prior rounds list</li>
+            <li>REFINE output says: "Study eval file and implement corrections"</li>
+          </ul>
+        </div>
+
+        <div style="background: var(--iron-2); border: 1px solid var(--line); border-radius: 12px; padding: 18px 20px;">
+          <div style="font-family:'JetBrains Mono',monospace; font-size:11px; color:var(--steel); letter-spacing:.1em; margin-bottom:10px; text-transform:uppercase;">direct</div>
+          <ul style="font-size: 13px; color: var(--muted); padding-left: 18px; display: flex; flex-direction: column; gap: 5px;">
+            <li>Sub-agent edits files in place; corrections land as unstaged changes</li>
+            <li><code>forgectl advance</code> requires only <code>--verdict</code></li>
+            <li>REFINE output says: "Review unstaged changes (git diff)"</li>
+            <li>No report file written</li>
+          </ul>
+        </div>
+
+        <div style="background: var(--iron-2); border: 1px solid var(--line); border-radius: 12px; padding: 18px 20px;">
+          <div style="font-family:'JetBrains Mono',monospace; font-size:11px; color:var(--muted); letter-spacing:.1em; margin-bottom:10px; text-transform:uppercase;">conversational</div>
+          <ul style="font-size: 13px; color: var(--muted); padding-left: 18px; display: flex; flex-direction: column; gap: 5px;">
+            <li>Verdict communicated verbally by sub-agent</li>
+            <li><code>forgectl advance</code> requires only <code>--verdict</code></li>
+            <li>REFINE output says: "Make corrections based on evaluator communication"</li>
+            <li>No report file; no PREVIOUS EVALUATIONS section emitted</li>
+          </ul>
+        </div>
+
+      </div>
+      <p class="desc reveal" style="margin-top: 14px; font-size: 13px;">
+        All modes: <code>forgectl eval</code> outputs full evaluator context with embedded prompts.
+        <code>--eval-report</code> is accepted but ignored unless mode is <code>report</code> (a warning is printed).
+        Legacy <code>enable_eval_output</code> boolean is honored when <code>eval_mode</code> is unset —
+        <code>true</code> resolves to <code>report</code>, <code>false</code> resolves to <code>conversational</code>.
+      </p>
+    </div>
+
+    <!-- ── EVAL REPORT LOCATIONS ── -->
+    <div class="section-head">Eval Report Locations <span style="font-family:'JetBrains Mono',monospace; font-size:11px; font-weight:400; color:var(--muted); text-transform:none; letter-spacing:0;">— eval_mode: report</span></div>
+
+    <div class="panel" data-reveal>
+      <div class="panel-title reveal">Report Path Reference</div>
+      <div class="reveal">
+        <table class="path-table">
+          <thead>
+            <tr><th>Phase / Loop</th><th>Report Path</th></tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td class="td-loop">Specifying</td>
+              <td class="td-path"><code>&lt;domain&gt;/specs/.eval/batch-N-rN.md</code></td>
+            </tr>
+            <tr>
+              <td class="td-loop">Planning</td>
+              <td class="td-path"><code>&lt;domain&gt;/.forge_workspace/implementation_plan/evals/round-N.md</code></td>
+            </tr>
+            <tr>
+              <td class="td-loop">Implementing</td>
+              <td class="td-path"><code>&lt;domain&gt;/.forge_workspace/implementation_plan/evals/batch-N-round-M.md</code></td>
+            </tr>
+            <tr>
+              <td class="td-loop">ui_implementing · code</td>
+              <td class="td-path"><code>&lt;domain&gt;/.forgectl_workspace/ui_plan/evals/batch-N-round-M.md</code></td>
+            </tr>
+            <tr>
+              <td class="td-loop">ui_implementing · qa</td>
+              <td class="td-path">
+                <code>&lt;domain&gt;/.forgectl_workspace/ui_plan/qa/batch-N-round-M.md</code><br>
+                <span style="color:var(--muted-2);">+ <code>qa/batch-N-steps.json</code> · <code>qa/batch-N-round-M-*.png</code></span>
+              </td>
+            </tr>
+            <tr>
+              <td class="td-loop">ui_implementing · e2e</td>
+              <td class="td-path">
+                <code>&lt;domain&gt;/.forgectl_workspace/ui_plan/e2e/batch-N-round-M.md</code><br>
+                <span style="color:var(--muted-2);">Tests in <code>ui_implementing.e2e.test_dir</code> (permanent)</span>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+      <p class="desc reveal" style="margin-top: 12px; font-size: 13px;">
+        Sub-agents register all reports via <code>forgectl handoff</code>.
+      </p>
+    </div>
+
+  </main>
+
+  <footer>
+    <span>forgectl · docs/diagrams/07-evaluation-loop</span>
+    <span><a href="index.html">← workflow index</a></span>
+  </footer>
+</div>
+
+<script>
+  const io = new IntersectionObserver((entries)=>{
+    entries.forEach(e=>{ if(e.isIntersecting){ e.target.classList.add('lit');
+      e.target.querySelectorAll('.reveal').forEach((el,i)=>{el.style.animationDelay=(i*70)+'ms';});
+      io.unobserve(e.target);} });
+  }, { threshold:0.14, rootMargin:'0px 0px -8% 0px' });
+  document.querySelectorAll('[data-station],[data-reveal]').forEach(s=>io.observe(s));
+</script>
+</body>
+</html>
