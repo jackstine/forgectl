@@ -19,6 +19,7 @@ The plan queue tells forgectl which implementation plans to produce in this sess
     {
       "name": "<string>",
       "domain": "<string>",
+      "kind": "code | ui",
       "file": "<string>",
       "specs": ["<string>", ...],
       "spec_commits": ["<string>", ...],
@@ -32,6 +33,7 @@ The plan queue tells forgectl which implementation plans to produce in this sess
 |-------|------|----------|-------------|
 | `name` | string | yes | Display name for the plan (shown in `forgectl status`) |
 | `domain` | string | yes | Domain this plan covers (e.g., `launcher`, `api`) |
+| `kind` | string | no | `"code"` (default) or `"ui"`. Selects the implementation phase: `"code"` → implementing, `"ui"` → ui_implementing (adds per-batch QA + e2e loops). Absent means `"code"`. |
 | `file` | string | yes | Target path for the output `plan.json`, relative to project root |
 | `specs` | string[] | yes | Spec file paths to study during STUDY_SPECS. May be empty. |
 | `spec_commits` | string[] | yes | Git commit hashes associated with specs for viewing diffs. May be empty. |
@@ -45,8 +47,9 @@ Forgectl validates the queue strictly on `init`. If validation fails, it prints 
 
 - Top-level key must be `"plans"` (no other fields allowed)
 - `plans` must be a non-empty array
-- Each entry must have all 6 fields listed above
-- No extra fields permitted beyond the 6 listed
+- Each entry must have all 6 required fields listed above (`kind` is optional, defaulting to `"code"`)
+- When present, `kind` must be `"code"` or `"ui"`
+- No extra fields permitted beyond the 7 listed
 - `spec_commits` is an array and may be empty (`[]`)
 - `specs` and `code_search_roots` are arrays and may be empty (`[]`)
 
@@ -60,6 +63,7 @@ Forgectl validates the queue strictly on `init`. If validation fails, it prints 
     {
       "name": "Service Configuration",
       "domain": "launcher",
+      "kind": "code",
       "file": "launcher/.forge_workspace/implementation_plan/plan.json",
       "specs": [
         "launcher/specs/service-configuration.md",
@@ -67,6 +71,15 @@ Forgectl validates the queue strictly on `init`. If validation fails, it prints 
       ],
       "spec_commits": ["7cede10", "8743b1d"],
       "code_search_roots": ["launcher/", "api/"]
+    },
+    {
+      "name": "Portal Dashboard",
+      "domain": "portal",
+      "kind": "ui",
+      "file": "portal/.forge_workspace/implementation_plan/plan.json",
+      "specs": ["portal/specs/dashboard.md"],
+      "spec_commits": ["9a1c2f0"],
+      "code_search_roots": ["portal/"]
     }
   ]
 }

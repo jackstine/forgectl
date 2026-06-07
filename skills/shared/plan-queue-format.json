@@ -3,6 +3,7 @@
     {
       "name": "<display name for forgectl status>",
       "domain": "<domain this plan covers, e.g. api, launcher>",
+      "kind": "<code (default) | ui>",
       "file": "<target path for output plan.json, relative to project root>",
       "specs": [
         "<spec file path relative to project root>",

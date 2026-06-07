@@ -36,25 +36,16 @@ Ask: **"Would you like to start with `generate_planning_queue` (auto-generate fr
 <step_0a>
 **Generate Planning Queue — Auto-Generate from Completed Specs**
 
-This path uses forgectl's `generate_planning_queue` phase to auto-generate the plan queue from completed specs.
+This path uses forgectl's `generate_planning_queue` phase to auto-generate the plan queue from completed specs. That phase has its own session and skill — run it first, then return here at planning ORIENT.
 
-See: [references/generate-planning-queue.md](references/generate-planning-queue.md)
+**See the dedicated skill: `skills/generate_planning_queue/SKILL.md`** (background: [../shared/generate-planning-queue.md](../shared/generate-planning-queue.md)).
 
-The generate_planning_queue phase has 3 states:
-
-1. **ORIENT** — Forgectl groups completed specs by domain and writes `<state_dir>/plan-queue.json`. Advance to continue.
-2. **REFINE** — Review the generated `<state_dir>/plan-queue.json`. Reorder domains, adjust entries, or leave unchanged. Advance when satisfied (forgectl validates before transitioning).
-3. **PHASE_SHIFT** — Validates the queue and transitions to the planning phase. Advance to begin planning.
+In brief, the phase has 3 states: **ORIENT** (forgectl groups completed specs by domain and writes `<state_dir>/plan-queue.json`) → **REFINE** (review/reorder/edit the queue) → **PHASE_SHIFT** (validate and transition to planning). Advance through each:
 
 ```bash
-# Advance through each state
+# Advance through each state; at the final PHASE_SHIFT you may override the queue:
 forgectl advance
-```
-
-At the PHASE_SHIFT (generate_planning_queue → planning), you may optionally override with a different file:
-
-```bash
-forgectl advance --from <custom-queue.json>
+forgectl advance --from <custom-queue.json>   # optional override at PHASE_SHIFT
 ```
 
 After the phase shift, planning begins at ORIENT. Proceed to step_1.
@@ -65,7 +56,7 @@ After the phase shift, planning begins at ORIENT. Proceed to step_1.
 
 Prepare a plan queue JSON file listing every implementation plan to produce in this session.
 
-See: [references/creating-plan-queue.md](references/creating-plan-queue.md) and [references/plan-queue-format.md](references/plan-queue-format.md)
+See: [../shared/creating-plan-queue.md](../shared/creating-plan-queue.md) and [../shared/plan-queue-format.md](../shared/plan-queue-format.md)
 
 ```bash
 forgectl init --phase planning --from <plan-queue.json>

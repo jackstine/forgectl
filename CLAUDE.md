@@ -25,6 +25,10 @@ Registering the file makes forgectl aware that a handoff is pending, so the next
 
 Do not update skill files (`skills/`) until implementation planning has begun. Skills consume forgectl — updating them before the work is even planned creates a chicken-and-egg problem. Once a phase reaches implementation planning, its skill may be drafted and committed alongside the plan.
 
+### Release prep: write skills to the spec, not the current binary
+
+We are preparing for release, and the binary is being completed now. The remaining spec'd behavior (e.g. the `kind` plan-queue field and the `ui_implementing` phase) is being implemented imminently. **Author skills and their references as if the full spec'd implementation already exists.** Describe the intended behavior from `forgectl/specs/` directly — do NOT add "pending binary support", "not yet implemented", or "the validator will reject this" caveats for behavior that is spec'd and in-flight. Such hedging callouts must not appear in skill files. The specs are the contract the binary is converging on; skills target that contract.
+
 ## Build
 
 ```bash

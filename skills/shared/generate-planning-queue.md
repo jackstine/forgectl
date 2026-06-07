@@ -25,6 +25,7 @@ On entry, forgectl:
 2. For each domain, produces a plan entry:
    - `name`: `"<Domain> Implementation Plan"` (domain name capitalized)
    - `domain`: the domain name
+   - `kind`: `"code"` (the default) — set `"ui"` during REFINE for domains that need the QA + e2e verification loops
    - `file`: `<domain>/.forge_workspace/implementation_plan/plan.json`
    - `specs`: all completed spec file paths for this domain
    - `spec_commits`: deduplicated commit hashes from the domain's completed specs
@@ -38,6 +39,7 @@ forgectl advance
 ### REFINE
 
 The architect reviews `<state_dir>/plan-queue.json`. You can:
+- Set `kind: "ui"` for domains that need the QA + e2e verification loops (default is `"code"`)
 - Reorder domains (change plan processing order)
 - Adjust plan names
 - Modify `code_search_roots` to include cross-domain directories
@@ -96,6 +98,7 @@ The auto-generated file follows the same schema as manually constructed queues:
     {
       "name": "Optimizer Implementation Plan",
       "domain": "optimizer",
+      "kind": "code",
       "file": "optimizer/.forge_workspace/implementation_plan/plan.json",
       "specs": [
         "optimizer/specs/cost-function.md",
