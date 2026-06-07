@@ -1,0 +1,406 @@
+{
+  "context": {
+    "domain": "forgectl",
+    "module": "forgectl"
+  },
+  "refs": [
+    { "id": "spec-ui-batch", "path": "../../specs/ui-batch-implementation.md" },
+    { "id": "spec-batch-impl", "path": "../../specs/batch-implementation.md" },
+    { "id": "spec-phase-transitions", "path": "../../specs/phase-transitions.md" },
+    { "id": "spec-session-init", "path": "../../specs/session-init.md" },
+    { "id": "spec-state-persistence", "path": "../../specs/state-persistence.md" },
+    { "id": "eval-ui-qa", "path": "../../evaluators/ui-qa-eval.md" },
+    { "id": "eval-ui-e2e", "path": "../../evaluators/ui-e2e-eval.md" }
+  ],
+  "layers": [
+    {
+      "id": "L0",
+      "name": "Type & Config Foundations",
+      "items": ["types.constants", "types.config", "config.toml", "config.validate", "types.kind", "types.uistate", "evaluators.embed"]
+    },
+    {
+      "id": "L1",
+      "name": "Output & Eval-Context Rendering",
+      "items": ["output.advance", "output.eval"]
+    },
+    {
+      "id": "L2",
+      "name": "State Machine",
+      "items": ["advance.core", "advance.qa", "advance.e2e"]
+    },
+    {
+      "id": "L3",
+      "name": "Commands & Phase-Shift Routing",
+      "items": ["advance.phaseshift", "cmd.init", "cmd.evalwiring", "cmd.handoff"]
+    },
+    {
+      "id": "L4",
+      "name": "Derived Documentation",
+      "items": ["docs.schemas", "docs.config", "docs.diagrams"]
+    }
+  ],
+  "items": [
+    {
+      "id": "types.constants",
+      "name": "Add ui_implementing phase and state constants",
+      "description": "Introduce the PhaseUIImplementing phase constant and the five new StateName constants for the QA and e2e loops, so the rest of the code can reference them.",
+      "depends_on": [],
+      "steps": [
+        "Add PhaseUIImplementing PhaseName = \"ui_implementing\" to the PhaseName const block (types.go:3-12).",
+        "Add StateQATest=\"QA_TEST\", StateUIRefine=\"UI_REFINE\", StateE2EAuthor=\"E2E_AUTHOR\", StateE2EVerify=\"E2E_VERIFY\", StateE2ERemediate=\"E2E_REMEDIATE\" to the StateName const block (types.go:16-52).",
+        "Add a value-equality table test mirroring TestReverseEngineeringStateConstants."
+      ],
+      "files": ["state/types.go", "state/types_test.go"],
+      "specs": ["ui-batch-implementation.md#state-machine", "state-persistence.md#state-file-schema"],
+      "refs": ["notes/state-types.md"],
+      "tests": [
+        { "category": "functional", "description": "PhaseUIImplementing and all five new StateName constants equal their exact SCREAMING_SNAKE_CASE / snake_case string values." }
+      ]
+    },
+    {
+      "id": "types.config",
+      "name": "Add UIImplementingConfig struct and defaults",
+      "description": "Define UIImplementingConfig (app, eval, qa, e2e sub-configs with independent round budgets), add it to ForgeConfig, and populate DefaultForgeConfig with its defaults.",
+      "depends_on": ["types.constants"],
+      "steps": [
+        "Define UIAppConfig (launch_command, url, ready_timeout_seconds), UIE2EConfig (embeds EvalConfig + test_command + test_dir), and UIImplementingConfig (batch, commit_strategy, app, eval EvalConfig, qa EvalConfig, e2e UIE2EConfig).",
+        "Add UIImplementing UIImplementingConfig `json:\"ui_implementing\"` to ForgeConfig (types.go:172-183).",
+        "Add a UIImplementing defaults block to DefaultForgeConfig (mirror ImplementingConfig defaults at types.go:220-233): batch=1, commit_strategy=scoped, app.ready_timeout_seconds=30, each loop min=1/max=3/model=opus/type=eval/count=1/eval_mode=report; required string keys default empty.",
+        "Add defaults + JSON round-trip tests in types_config_test.go."
+      ],
+      "files": ["state/types.go", "state/types_config_test.go"],
+      "specs": ["ui-batch-implementation.md#configuration"],
+      "refs": ["notes/state-types.md"],
+      "tests": [
+        { "category": "functional", "description": "DefaultForgeConfig().UIImplementing has batch=1, commit_strategy=scoped, app.ready_timeout_seconds=30, and eval/qa/e2e each min=1 max=3 model=opus eval_mode=report." },
+        { "category": "functional", "description": "UIImplementingConfig marshals and unmarshals to JSON with app/eval/qa/e2e nested under ui_implementing and round fields at each loop level." }
+      ]
+    },
+    {
+      "id": "config.toml",
+      "name": "Decode and merge [ui_implementing] TOML",
+      "description": "Parse the [ui_implementing] TOML tables from .forgectl/config and merge them into ForgeConfig, preserving the unset-vs-zero distinction used elsewhere.",
+      "depends_on": ["types.config"],
+      "steps": [
+        "Add tomlUIImplementingConfig (parallel to tomlImplementingConfig at config.go:87-91) with nested app/eval/qa/e2e tables; use pointer fields for optional scalars like the existing tomlEvalConfig.EvalMode (*string).",
+        "Add UIImplementing tomlUIImplementingConfig `toml:\"ui_implementing\"` to tomlForgeConfig (config.go:135-146).",
+        "Add a UIImplementing merge block to mergeTomlConfig (config.go:190-283), reusing mergeEvalConfig for eval/qa/e2e and non-empty/non-zero guards for app and e2e string fields.",
+        "Add TOML load/override and defaults-fallback tests in config_test.go."
+      ],
+      "files": ["state/config.go", "state/config_test.go"],
+      "specs": ["ui-batch-implementation.md#configuration", "session-init.md#configuration"],
+      "refs": ["notes/config.md"],
+      "tests": [
+        { "category": "functional", "description": "A [ui_implementing] TOML block with app/eval/qa/e2e values overrides the corresponding ForgeConfig fields after load." },
+        { "category": "edge_case", "description": "When [ui_implementing] is absent from config, all UIImplementing fields fall back to DefaultForgeConfig values." }
+      ]
+    },
+    {
+      "id": "config.validate",
+      "name": "Validate ui_implementing config constraints",
+      "description": "Extend ValidateConfig with the structural constraints for the ui_implementing block (per-loop round ordering, batch size, commit_strategy, eval_mode). Required-key checks are deferred to the phase boundary, not here.",
+      "depends_on": ["types.config"],
+      "steps": [
+        "In ValidateConfig (config.go:422-504) add: ui_implementing.batch>=1; for each of eval/qa/e2e min_rounds<=max_rounds; commit_strategy in validStrategies; each loop eval_mode in validEvalModes.",
+        "Use the existing error-string style, naming the offending loop (e.g. ui_implementing.qa.min_rounds > ui_implementing.qa.max_rounds).",
+        "Do NOT require app.*/e2e.test_* here (ValidateConfig runs for every phase); those are phase-conditional (see cmd.init / advance.phaseshift).",
+        "Add rejection tests in config_test.go."
+      ],
+      "files": ["state/config.go", "state/config_test.go"],
+      "specs": ["session-init.md#rejection", "ui-batch-implementation.md#configuration"],
+      "refs": ["notes/config.md"],
+      "tests": [
+        { "category": "rejection", "description": "ValidateConfig rejects ui_implementing.batch < 1." },
+        { "category": "rejection", "description": "ValidateConfig rejects min_rounds > max_rounds for each of eval, qa, and e2e loops, naming the loop." },
+        { "category": "rejection", "description": "ValidateConfig rejects an invalid ui_implementing commit_strategy and an invalid loop eval_mode." }
+      ]
+    },
+    {
+      "id": "types.kind",
+      "name": "Add plan-queue kind field and validation",
+      "description": "Add the kind routing field to plan-queue entries and validate it (code/ui/absent), so planning can carry the implementation target through to the phase shift.",
+      "depends_on": [],
+      "steps": [
+        "Add Kind string `json:\"kind,omitempty\"` to PlanQueueEntry (types.go:275-287).",
+        "In ValidatePlanQueue (validate.go:68-120) add \"kind\" to allowedFields so it is not rejected as unexpected; reject any value other than \"code\"/\"ui\"/absent, naming the offending entry and value.",
+        "Leave PlanJSON and ValidatePlanJSON unchanged (kind routes from the plan-queue entry carried in state, not from plan.json).",
+        "Add acceptance + rejection tests in validate_test.go."
+      ],
+      "files": ["state/types.go", "state/validate.go", "state/validate_test.go"],
+      "specs": ["session-init.md#plan-queue-input-file-phase-planning", "phase-transitions.md#invariants"],
+      "refs": ["notes/state-types.md"],
+      "tests": [
+        { "category": "functional", "description": "ValidatePlanQueue accepts entries with kind \"code\", kind \"ui\", and no kind field (defaulting to code)." },
+        { "category": "rejection", "description": "ValidatePlanQueue rejects a plan-queue entry whose kind is any value other than code or ui, naming the entry and value." }
+      ]
+    },
+    {
+      "id": "types.uistate",
+      "name": "Add UIImplementingState and UIBatchState types",
+      "description": "Define the dedicated state structs for the phase (three round counters, three eval histories, handed-off artifacts, per-loop force-accept flags), wire them into ForgeState, and add a constructor.",
+      "depends_on": ["types.constants", "types.config"],
+      "steps": [
+        "Define UIBatchState (items, current_item_index, eval_round, qa_round, e2e_round, evals, qa_evals, e2e_evals, handed_off_artifacts, code/qa/e2e force-accept flags), UIBatchHistory, UILayerHistory, and UIImplementingState (current_layer, batch_number, current_batch, layer_history, current_plan_file, current_plan_domain, plan_queue) — mirroring ImplementingState (types.go:448-485).",
+        "Add UIImplementing *UIImplementingState `json:\"ui_implementing,omitempty\"` to ForgeState.",
+        "Add NewUIImplementingState() next to NewImplementingState (state.go:197-201).",
+        "Reuse EvalRecord and LayerRef as-is. Add constructor + JSON round-trip tests."
+      ],
+      "files": ["state/types.go", "state/state.go", "state/types_config_test.go"],
+      "specs": ["ui-batch-implementation.md#round-tracking", "state-persistence.md#state-file-schema"],
+      "refs": ["notes/state-types.md"],
+      "tests": [
+        { "category": "functional", "description": "NewUIImplementingState returns a zero-valued UIImplementingState (nil current_batch, batch_number 0) ready for ORIENT." },
+        { "category": "functional", "description": "A ForgeState carrying a populated UIImplementing with all three round counters and histories round-trips through Save/Load unchanged." }
+      ]
+    },
+    {
+      "id": "evaluators.embed",
+      "name": "Embed ui-qa-eval.md and ui-e2e-eval.md",
+      "description": "Register the two existing-on-disk UI evaluator prompts via //go:embed so the eval command can surface them.",
+      "depends_on": [],
+      "steps": [
+        "Add UIQAEval (//go:embed ui-qa-eval.md) and UIE2EEval (//go:embed ui-e2e-eval.md) vars to evaluators/evaluators.go, following the existing var pattern.",
+        "Confirm go build succeeds (a wrong embed filename fails the build)."
+      ],
+      "files": ["evaluators/evaluators.go"],
+      "specs": ["ui-batch-implementation.md#integration-points"],
+      "refs": ["notes/evaluators.md"],
+      "tests": [
+        { "category": "functional", "description": "evaluators.UIQAEval and evaluators.UIE2EEval are non-empty and contain their prompt H1 headings (UI QA Evaluation Prompt / UI E2E Verification Prompt)." }
+      ]
+    },
+    {
+      "id": "output.advance",
+      "name": "Render ui_implementing advance and status output",
+      "description": "Implement printUIImplementingOutput covering all phase states (including the Review line for handed-off artifacts) and add the PhaseUIImplementing cases to the shared output dispatch helpers.",
+      "depends_on": ["types.uistate", "types.config"],
+      "steps": [
+        "Add printUIImplementingOutput (switch over the ten states) mirroring printImplementingOutput (output.go:685-1067); Phase line reads ui_implementing; add Loop/Round lines and per-state App/Steps/Tests/Run lines per the spec Outputs section.",
+        "Render a Review: block listing CurrentBatch.HandedOffArtifacts before the Action line in EVALUATE/QA_TEST/E2E_VERIFY when non-empty.",
+        "Render COMMIT terminal item status, the DONE per-loop round totals, and the user_guided STOP line in ORIENT.",
+        "Add PhaseUIImplementing cases to PrintAdvanceOutput (29-47), CurrentEvalMode (17-26, loop-by-state), phaseConfig (1639-1652), and printProgressLine (1656-1696).",
+        "Reuse writeEvalEntryAction and writeRefineBody. Add output tests."
+      ],
+      "files": ["state/output.go", "state/output_test.go"],
+      "specs": ["ui-batch-implementation.md#outputs", "batch-implementation.md#outputs"],
+      "refs": ["notes/output.md"],
+      "tests": [
+        { "category": "functional", "description": "QA_TEST advance output shows Phase ui_implementing, Loop qa, the App launch/url, and the Steps step-list path; UI_REFINE shows the QA report path and refine action." },
+        { "category": "functional", "description": "When CurrentBatch.HandedOffArtifacts is non-empty, the rendered output includes a Review: line listing each artifact before the Action line." },
+        { "category": "functional", "description": "COMMIT output marks items passed when no loop force-accepted and failed (naming the force-accepted loop and rounds) when one did; DONE summary reports code/qa/e2e round totals." }
+      ]
+    },
+    {
+      "id": "output.eval",
+      "name": "Render QA and e2e eval context",
+      "description": "Implement PrintUIQAEvalOutput and PrintUIE2EEvalOutput that embed the UI evaluator prompts and assemble the application, step-list, report, handoff, and previous-evaluation sections per eval_mode.",
+      "depends_on": ["evaluators.embed", "types.uistate", "types.config"],
+      "steps": [
+        "Add PrintUIQAEvalOutput: header, --- QA EVALUATOR INSTRUCTIONS --- (embed evaluators.UIQAEval), --- APPLICATION --- (launch/url/ready timeout/Driver=Playwright MCP), --- ITEMS TO QA ---, --- STEP LIST OUTPUT --- (all modes), --- REPORT OUTPUT --- (report mode; direct=correct-directly; conversational omitted), --- HANDOFF --- (all modes; report/direct list report+step-list, conversational step-list only), --- PREVIOUS EVALUATIONS --- on later rounds.",
+        "Add PrintUIE2EEvalOutput: header, --- E2E EVALUATOR INSTRUCTIONS --- (embed evaluators.UIE2EEval), --- E2E SUITE --- (step list, test command, test dir, Runner=Playwright test runner), --- REPORT OUTPUT --- and --- HANDOFF --- (report mode only), previous evaluations on later rounds.",
+        "Route PhaseUIImplementing EVALUATE through the existing printImplementingEval in PrintEvalOutput (1702-1711); QA_TEST/E2E_VERIFY to the new functions.",
+        "Source config from s.Config.UIImplementing.App/E2E; workspace paths under <domain>/.forgectl_workspace/ui_plan/. Add tests."
+      ],
+      "files": ["state/output.go", "state/output_test.go"],
+      "specs": ["ui-batch-implementation.md#eval-output"],
+      "refs": ["notes/output.md", "notes/evaluators.md"],
+      "tests": [
+        { "category": "functional", "description": "PrintUIQAEvalOutput embeds the QA prompt and shows the APPLICATION url, the STEP LIST OUTPUT path, and a HANDOFF section in every eval_mode." },
+        { "category": "functional", "description": "PrintUIE2EEvalOutput embeds the e2e prompt and shows the E2E SUITE step-list path, test command, and test dir; the REPORT OUTPUT and HANDOFF sections appear only in report mode." },
+        { "category": "edge_case", "description": "Round 2+ QA/e2e eval output includes a PREVIOUS EVALUATIONS section listing prior verdicts and report paths." }
+      ]
+    },
+    {
+      "id": "advance.core",
+      "name": "ui_implementing core state machine (spine + code loop)",
+      "description": "Implement advanceUIImplementing and the spine handlers: ORIENT batch selection with three-counter reset, one-at-a-time IMPLEMENT, the code EVALUATE loop into QA_TEST, COMMIT terminal marking, and DONE.",
+      "depends_on": ["types.uistate", "types.config", "output.advance"],
+      "steps": [
+        "Add case PhaseUIImplementing to the Advance dispatch (advance.go:24-38) calling advanceUIImplementing.",
+        "Implement advanceUIImplementing as a switch over states; reuse loadPlan/savePlan/selectBatch/itemUnblocked/setItemPasses/incrementItemRounds/allLayerItemsTerminal/allLayersComplete against s.UIImplementing.",
+        "ORIENT: select batch, create UIBatchState with eval_round/qa_round/e2e_round=0, present first item.",
+        "IMPLEMENT: mirror advanceImplFromImplement (mark done; last item increments item rounds and -> EVALUATE).",
+        "Code EVALUATE: replicate advanceImplFromEvaluate using config.UIImplementing.Eval; PASS&>=min -> QA_TEST (qa_round=1); below-min/FAIL<max -> IMPLEMENT; FAIL>=max -> set CodeForceAccepted -> QA_TEST.",
+        "COMMIT: mark items passed iff no loop force-accepted else failed; archive batch into UILayerHistory; -> ORIENT or DONE. DONE handling mirrors implementing (interleaved -> phase shift; summary adds qa/e2e totals).",
+        "Add advance tests + a newUIImplementingState helper."
+      ],
+      "files": ["state/advance.go", "state/advance_test.go"],
+      "specs": ["ui-batch-implementation.md#transition-table", "batch-implementation.md#state-machine"],
+      "refs": ["notes/state-machine.md"],
+      "tests": [
+        { "category": "functional", "description": "ORIENT selects the first batch, transitions to IMPLEMENT, and resets eval_round/qa_round/e2e_round to 0." },
+        { "category": "functional", "description": "Code EVALUATE PASS at >= eval.min_rounds transitions to QA_TEST with qa_round 1; FAIL at eval.max_rounds force-accepts and still transitions to QA_TEST flagged code-force-accepted." },
+        { "category": "functional", "description": "After all three loops, COMMIT marks items passed when none force-accepted and DONE transitions to PHASE_SHIFT (ui_implementing -> planning) when interleaved and the planning queue is non-empty." }
+      ]
+    },
+    {
+      "id": "advance.qa",
+      "name": "QA loop transitions (QA_TEST / UI_REFINE)",
+      "description": "Implement the QA placement loop with its own round budget and force-accept, and enforce the QA step-list presence invariant on both exits toward E2E_AUTHOR.",
+      "depends_on": ["advance.core"],
+      "steps": [
+        "QA_TEST: require --verdict (and --eval-report in qa report mode); increment qa_round, append qa_evals; PASS&>=qa.min -> E2E_AUTHOR; below-min/FAIL<max -> UI_REFINE; FAIL>=qa.max -> set QAForceAccepted -> E2E_AUTHOR.",
+        "On both QA exits toward E2E_AUTHOR, require the step-list file <domain>/.forgectl_workspace/ui_plan/qa/batch-N-steps.json to exist; if absent, reject naming the path (exit 1), stay QA_TEST.",
+        "Read the step list only to confirm presence and count scenarios; a zero-scenario list is valid and logs a WARN.",
+        "UI_REFINE: always -> QA_TEST, increment qa_round.",
+        "Add transition tests including the step-list-absent rejections."
+      ],
+      "files": ["state/advance.go", "state/advance_test.go"],
+      "specs": ["ui-batch-implementation.md#transition-table", "ui-batch-implementation.md#invariants"],
+      "refs": ["notes/state-machine.md"],
+      "tests": [
+        { "category": "functional", "description": "QA_TEST FAIL below qa.max_rounds transitions to UI_REFINE; UI_REFINE advance returns to QA_TEST with qa_round incremented." },
+        { "category": "functional", "description": "QA_TEST PASS at >= qa.min_rounds with a step-list file present transitions to E2E_AUTHOR." },
+        { "category": "rejection", "description": "Advancing out of QA_TEST toward E2E_AUTHOR (PASS at min or FAIL force-accept at max) with the step-list file absent is rejected naming the expected path; state remains QA_TEST." }
+      ]
+    },
+    {
+      "id": "advance.e2e",
+      "name": "E2E loop transitions (E2E_AUTHOR / E2E_VERIFY / E2E_REMEDIATE)",
+      "description": "Implement the bridging E2E_AUTHOR state and the e2e verification loop with its own round budget and force-accept, terminating each batch into COMMIT.",
+      "depends_on": ["advance.qa"],
+      "steps": [
+        "E2E_AUTHOR: no verdict; always -> E2E_VERIFY, increment e2e_round to 1 (zero-scenario step list still advances).",
+        "E2E_VERIFY: require --verdict (and --eval-report in e2e report mode); increment e2e_round, append e2e_evals; PASS&>=e2e.min -> COMMIT; below-min/FAIL<max -> E2E_REMEDIATE; FAIL>=e2e.max -> set E2EForceAccepted -> COMMIT.",
+        "E2E_REMEDIATE: always -> E2E_VERIFY, increment e2e_round.",
+        "Ensure COMMIT terminal marking (in advance.core) observes E2EForceAccepted alongside the other two force-accept flags.",
+        "Add transition tests including the empty-step-list vacuous pass and independent-round-budget cases."
+      ],
+      "files": ["state/advance.go", "state/advance_test.go"],
+      "specs": ["ui-batch-implementation.md#transition-table", "ui-batch-implementation.md#edge-cases"],
+      "refs": ["notes/state-machine.md"],
+      "tests": [
+        { "category": "functional", "description": "E2E_AUTHOR advances to E2E_VERIFY (e2e_round 1); E2E_VERIFY FAIL below e2e.max transitions to E2E_REMEDIATE; E2E_REMEDIATE returns to E2E_VERIFY with e2e_round incremented." },
+        { "category": "functional", "description": "E2E_VERIFY PASS at >= e2e.min_rounds with no loop force-accepted transitions to COMMIT with items passed; FAIL at e2e.max transitions to COMMIT with items failed." },
+        { "category": "edge_case", "description": "A zero-scenario step list passes the e2e loop vacuously (E2E_AUTHOR -> E2E_VERIFY PASS at min rounds), and the three loops count/bound their rounds independently given different per-loop max_rounds." }
+      ]
+    },
+    {
+      "id": "advance.phaseshift",
+      "name": "Route phase shift by plan kind",
+      "description": "Make the planning->implementation and implementation->implementation domain-boundary phase shifts route to implementing or ui_implementing by the plan's kind, validating UI config keys when entering ui_implementing.",
+      "depends_on": ["advance.core", "config.validate", "types.kind"],
+      "steps": [
+        "In advancePhaseShift (advance.go:803-973), at the planning->implementation block (~872-911), read the active plan's Kind: ui -> set Phase=PhaseUIImplementing, code/absent -> PhaseImplementing.",
+        "When entering ui_implementing, validate the four required keys (app.launch_command, app.url, e2e.test_command, e2e.test_dir) non-empty; if any empty, print errors naming each and remain at PHASE_SHIFT.",
+        "Initialize state via NewUIImplementingState and add passes:pending/rounds:0 to plan.json items (same loop as implementing).",
+        "Apply the same kind routing at the implementation->implementation domain boundary (~921) for the next plan.",
+        "Add phase-shift routing tests (kind ui, kind code/absent, missing-config rejection)."
+      ],
+      "files": ["state/advance.go", "state/advance_test.go"],
+      "specs": ["phase-transitions.md#planning-implementation-implementing-or-ui_implementing", "phase-transitions.md#testing-criteria"],
+      "refs": ["notes/state-machine.md"],
+      "tests": [
+        { "category": "functional", "description": "planning->implementation PHASE_SHIFT with active plan kind:ui and non-empty UI config sets phase ui_implementing/state ORIENT and mutates plan.json items; kind:code or absent sets phase implementing." },
+        { "category": "rejection", "description": "planning->implementation PHASE_SHIFT with kind:ui and an empty required UI config key prints the missing key and remains at PHASE_SHIFT." },
+        { "category": "functional", "description": "In all-planning-first mode the implementation->implementation domain boundary routes the next plan by its kind (code->implementing, ui->ui_implementing)." }
+      ]
+    },
+    {
+      "id": "cmd.init",
+      "name": "init --phase ui_implementing",
+      "description": "Accept ui_implementing as an init phase, validate the required UI config keys, and build the ui_implementing state from a plan.json identical to the implementing input.",
+      "depends_on": ["types.uistate", "config.validate"],
+      "steps": [
+        "Add \"ui_implementing\": true to the validPhases map (init.go:38) and update the error message and --phase flag help (init.go:27,40).",
+        "Add case state.PhaseUIImplementing in the phase switch (init.go:81-189): reject if any of the four required UI keys is empty (naming each), else validate plan.json, add passes/rounds, and build state via state.NewUIImplementingState.",
+        "Add a case to phaseRoundConfig (init.go:222-236) returning UIImplementing batch + eval min/max.",
+        "Add command tests."
+      ],
+      "files": ["cmd/init.go", "cmd/commands_test.go"],
+      "specs": ["session-init.md#planjson-input-file-phase-ui_implementing", "session-init.md#testing-criteria"],
+      "refs": ["notes/commands.md"],
+      "tests": [
+        { "category": "functional", "description": "init --phase ui_implementing with valid config and plan.json creates state with phase ui_implementing, state ORIENT, and plan.json items carrying passes/rounds." },
+        { "category": "rejection", "description": "init --phase ui_implementing with any one of the four required UI config keys empty exits 1 naming the missing key." },
+        { "category": "rejection", "description": "init --phase planning rejects a plan-queue entry whose kind is an invalid value, naming the entry and value." }
+      ]
+    },
+    {
+      "id": "cmd.evalwiring",
+      "name": "Wire advance/eval for the new evaluator states",
+      "description": "Make --verdict/--eval-report valid in QA_TEST and E2E_VERIFY, route the eval command to the QA/e2e/code eval output in ui_implementing, and treat ui_implementing DONE as terminal.",
+      "depends_on": ["output.eval", "advance.core"],
+      "steps": [
+        "Add StateQATest and StateE2EVerify to validateAdvanceFlags.validStates (advance.go:218-227) and printAdvanceWarnings.evalStates (234-238); add a PhaseUIImplementing branch selecting the loop eval_mode by current state for the --eval-report warning.",
+        "Add PhaseUIImplementing && StateDone to isTerminalState (advance.go:185-209).",
+        "In runEval (eval.go:32-48) add cases: ui_implementing+EVALUATE -> PrintEvalOutput; +QA_TEST -> PrintUIQAEvalOutput; +E2E_VERIFY -> PrintUIE2EEvalOutput; any other ui_implementing state -> error naming valid states.",
+        "Add command tests."
+      ],
+      "files": ["cmd/advance.go", "cmd/eval.go", "cmd/commands_test.go"],
+      "specs": ["ui-batch-implementation.md#interface", "ui-batch-implementation.md#rejection"],
+      "refs": ["notes/commands.md"],
+      "tests": [
+        { "category": "functional", "description": "forgectl eval in ui_implementing QA_TEST emits the QA context and in E2E_VERIFY emits the e2e context; --verdict is accepted in both states." },
+        { "category": "rejection", "description": "forgectl eval in ui_implementing UI_REFINE is rejected naming the current state and phase." },
+        { "category": "functional", "description": "ui_implementing DONE is treated as a terminal state so the session is archived on advance." }
+      ]
+    },
+    {
+      "id": "cmd.handoff",
+      "name": "Add the handoff command",
+      "description": "Add the sub-agent artifact-return command that registers generated files for the current evaluator round and drives the Review prompt, valid only in the three ui_implementing evaluator states.",
+      "depends_on": ["types.uistate", "advance.core"],
+      "steps": [
+        "Create cmd/handoff.go modeled on cmd/adddomain.go: Use \"handoff <file> [<file>...]\", Args cobra.MinimumNArgs(1), register via init().",
+        "Load state; gate to phase ui_implementing and state in {EVALUATE, QA_TEST, E2E_VERIFY}, else error naming current state+phase (exit 1).",
+        "os.Stat each argument; a missing file -> error naming the path, register nothing (exit 1).",
+        "On success set CurrentBatch.HandedOffArtifacts = args (latest hand-off replaces prior), Save, and print the registered files. No verdict, no transition.",
+        "Add command tests for register/Review, outside-state rejection, non-existent-file rejection, and no-args rejection."
+      ],
+      "files": ["cmd/handoff.go", "cmd/commands_test.go"],
+      "specs": ["ui-batch-implementation.md#handoff-command", "ui-batch-implementation.md#hand-off-behavior"],
+      "refs": ["notes/commands.md"],
+      "tests": [
+        { "category": "functional", "description": "handoff in QA_TEST with existing files registers them (latest call replaces prior) and a subsequent status shows a Review: line listing them with no verdict recorded." },
+        { "category": "rejection", "description": "handoff outside an evaluator state (e.g. UI_REFINE) is rejected naming the current state and phase." },
+        { "category": "rejection", "description": "handoff naming a non-existent file, and handoff with no file arguments, are each rejected and register nothing." }
+      ]
+    },
+    {
+      "id": "docs.schemas",
+      "name": "Update schema docs",
+      "description": "Bring docs/schemas into sync with the new types: ui_implementing in forge-state, the plan-queue kind field, and a new QA step-list schema doc.",
+      "depends_on": ["types.uistate", "types.config", "types.kind"],
+      "steps": [
+        "forge-state.md: add ui_implementing to phase values; add a UIImplementingPhaseConfig section (app/eval/qa/e2e/batch/commit_strategy); add the ui_implementing state values (QA_TEST, UI_REFINE, E2E_AUTHOR, E2E_VERIFY, E2E_REMEDIATE); document UIBatchState (three round counters, three eval histories, handed_off_artifacts, three force-accept flags) and the ui_implementing ForgeState section.",
+        "plan-queue.md: add the kind field to the entry table and update the field-count validation rule.",
+        "Create docs/schemas/qa-step-list.md describing the QA step-list JSON (batch, round, scenarios[] with id/name/preconditions/steps/expected/priority).",
+        "Leave plan-json.md unchanged (kind is not on plan.json)."
+      ],
+      "files": ["../docs/schemas/forge-state.md", "../docs/schemas/plan-queue.md", "../docs/schemas/qa-step-list.md"],
+      "specs": ["ui-batch-implementation.md#data-models", "state-persistence.md#state-file-schema"],
+      "refs": ["notes/docs.md"],
+      "tests": []
+    },
+    {
+      "id": "docs.config",
+      "name": "Update configuration docs",
+      "description": "Document the ui_implementing config block in configurations.md and default-config.toml, plus the new phase/verdict/workspace references.",
+      "depends_on": ["types.config"],
+      "steps": [
+        "configurations.md: add a full [ui_implementing] section (batch, commit_strategy, app.*, eval/qa/e2e loops); add ui_implementing to --phase values; add QA_TEST/E2E_VERIFY to --verdict context; add the ui_plan/ workspace path to the directory structure.",
+        "default-config.toml: append a commented [ui_implementing] block with [ui_implementing.app]/[.eval]/[.qa]/[.e2e] mirroring the [implementing] style and the DefaultForgeConfig values."
+      ],
+      "files": ["../docs/configurations.md", "../docs/default-config.toml"],
+      "specs": ["ui-batch-implementation.md#configuration", "session-init.md#configuration"],
+      "refs": ["notes/docs.md"],
+      "tests": []
+    },
+    {
+      "id": "docs.diagrams",
+      "name": "Reconcile diagrams",
+      "description": "Verify the already-updated lifecycle/state-machine diagrams against the final implemented state and config names, and check the one diagram not yet confirmed.",
+      "depends_on": ["advance.core"],
+      "steps": [
+        "Verify 00-full-lifecycle, 03-implementing-phase, 04-cli-commands, 06-state-machine-complete, 07-evaluation-loop, 08-data-flow, and 10-ui-implementing-phase against the final state names (QA_TEST/UI_REFINE/E2E_AUTHOR/E2E_VERIFY/E2E_REMEDIATE), config keys, and kind routing; fix only drift.",
+        "Check 05-skills-and-roles.txt for a QA/e2e sub-agent role mention and add if missing.",
+        "Do not rewrite diagrams that are already correct."
+      ],
+      "files": ["../docs/diagrams/05-skills-and-roles.txt", "../docs/diagrams/10-ui-implementing-phase.txt", "../docs/diagrams/00-full-lifecycle.txt"],
+      "specs": ["ui-batch-implementation.md#state-machine"],
+      "refs": ["notes/docs.md"],
+      "tests": []
+    }
+  ]
+}
