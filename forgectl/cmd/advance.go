@@ -187,6 +187,10 @@ func isTerminalState(s *state.ForgeState) bool {
 	if s.Phase == state.PhaseImplementing && s.State == state.StateDone {
 		return true
 	}
+	// UI implementing phase complete.
+	if s.Phase == state.PhaseUIImplementing && s.State == state.StateDone {
+		return true
+	}
 	// Specifying phase complete (phase shifting to planning, started at specifying).
 	if s.State == state.StatePhaseShift &&
 		s.PhaseShift != nil &&
@@ -220,9 +224,11 @@ func validateAdvanceFlags(s *state.ForgeState) error {
 			state.StateEvaluate:           true,
 			state.StateReconcileEval:      true,
 			state.StateCrossReferenceEval: true,
+			state.StateQATest:             true,
+			state.StateE2EVerify:          true,
 		}
 		if !validStates[s.State] {
-			return fmt.Errorf("--verdict is only valid in EVALUATE, RECONCILE_EVAL, or CROSS_REFERENCE_EVAL state (current: %s)", s.State)
+			return fmt.Errorf("--verdict is only valid in EVALUATE, RECONCILE_EVAL, CROSS_REFERENCE_EVAL, QA_TEST, or E2E_VERIFY state (current: %s)", s.State)
 		}
 	}
 
@@ -235,6 +241,8 @@ func printAdvanceWarnings(w interface{ Write([]byte) (int, error) }, s *state.Fo
 		state.StateEvaluate:           true,
 		state.StateReconcileEval:      true,
 		state.StateCrossReferenceEval: true,
+		state.StateQATest:             true,
+		state.StateE2EVerify:          true,
 	}
 
 	// Warn if --eval-report provided but the current phase's eval_mode is not "report".
@@ -249,6 +257,17 @@ func printAdvanceWarnings(w interface{ Write([]byte) (int, error) }, s *state.Fo
 			ec = s.Config.Planning.Eval
 		case state.PhaseImplementing:
 			ec = s.Config.Implementing.Eval
+		case state.PhaseUIImplementing:
+			// ui_implementing runs three loops with independent eval modes;
+			// select the one matching the current state.
+			switch s.State {
+			case state.StateQATest:
+				ec = s.Config.UIImplementing.QA
+			case state.StateE2EVerify:
+				ec = s.Config.UIImplementing.E2E.EvalConfig
+			default:
+				ec = s.Config.UIImplementing.Eval
+			}
 		}
 		if state.EvalModeFor(ec, s.Config.General) != "report" {
 			fmt.Fprintf(w, "warning: --eval-report is ignored, --eval-report is only used in report mode\n")

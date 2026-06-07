@@ -54,3 +54,10 @@ Log of implementation updates across sessions. Add a new entry after each unit o
 - **Batch:** 7/6
 - **Eval Rounds:** 1
 - **Notes:** e2e loop — advanceUIFromE2EAuthor bridges (e2e_round++ → E2E_VERIFY, zero-scenario advances), advanceUIFromE2EVerify records E2EEval and routes PASS>=e2e.min → COMMIT / FAIL>=e2e.max → E2EForceAccepted+COMMIT / else E2E_REMEDIATE, advanceUIFromE2ERemediate loops back (e2e_round++). COMMIT marking already observes all three force-accept flags. Full chain ORIENT→IMPLEMENT→EVALUATE→QA_TEST→E2E_AUTHOR→E2E_VERIFY→COMMIT now connected with three independent round budgets. L2 complete.
+
+### 2026-06-07 — L3 Commands & Phase-Shift Routing: Batch 8 (advance.phaseshift, cmd.init, cmd.evalwiring, cmd.handoff) — completes L3
+- **Errors:** None
+- **All Tests Pass:** Yes
+- **Batch:** 8/6
+- **Eval Rounds:** 2
+- **Notes:** advance.phaseshift routes the planning→implementation and impl→impl domain boundaries by the active plan's `Kind` (ui → ui_implementing with the four required app/e2e keys validated and plan.json items reset, code/absent → implementing); added `Kind` to ActivePlan. cmd.init accepts `--phase ui_implementing` (validates UI config keys naming each empty one, mutates plan.json, builds state via NewUIImplementingState) and phaseRoundConfig returns the UI batch/eval budget. cmd.evalwiring makes --verdict/--eval-report valid in QA_TEST/E2E_VERIFY, routes `eval` to the code/QA/e2e output per state, and treats ui_implementing DONE as terminal. cmd.handoff (new) is the sub-agent artifact-return command — gated to the three evaluator states, verifies each file exists (registers nothing on a miss), sets CurrentBatch.HandedOffArtifacts (latest wins), no verdict/transition. Round-1 FAIL fixed: the ui_implementing `eval` rejection now names both phase and state. L3 complete.

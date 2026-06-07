@@ -3480,3 +3480,154 @@ func TestAdvanceUIE2EZeroScenarioVacuousAndIndependentBudgets(t *testing.T) {
 			s2.UIImplementing.CurrentBatch.EvalRound, s2.UIImplementing.CurrentBatch.QARound)
 	}
 }
+
+// phaseShiftToImplState builds a state poised at the planning→implementation
+// PHASE_SHIFT with the active plan carrying the given kind, and a valid plan.json
+// at planFile. UI config keys are populated (override per test as needed).
+func phaseShiftToImplState(t *testing.T, dir, planFile, kind string) *ForgeState {
+	t.Helper()
+	createValidPlan(t, dir, planFile)
+	cfg := DefaultForgeConfig()
+	cfg.UIImplementing.App.LaunchCommand = "npm run dev"
+	cfg.UIImplementing.App.URL = "http://localhost:5173"
+	cfg.UIImplementing.E2E.TestCommand = "npm run e2e"
+	cfg.UIImplementing.E2E.TestDir = "e2e/"
+	return &ForgeState{
+		Phase:  PhasePlanning,
+		State:  StatePhaseShift,
+		Config: cfg,
+		Planning: &PlanningState{CurrentPlan: &ActivePlan{
+			ID: 1, Name: "P", Domain: "portal", File: planFile, Kind: kind,
+		}},
+		PhaseShift: &PhaseShiftInfo{From: PhasePlanning, To: PhaseImplementing},
+	}
+}
+
+// Functional: planning→implementation PHASE_SHIFT routes by the active plan's kind
+// — ui → ui_implementing (ORIENT, plan.json items annotated), code/absent →
+// implementing.
+func TestAdvancePhaseShiftRoutesByKind(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		kind      string
+		wantPhase PhaseName
+	}{
+		{"ui", "ui", PhaseUIImplementing},
+		{"code", "code", PhaseImplementing},
+		{"absent", "", PhaseImplementing},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			s := phaseShiftToImplState(t, dir, "p/plan.json", tc.kind)
+			if err := Advance(s, AdvanceInput{}, dir); err != nil {
+				t.Fatalf("phase-shift advance: %v", err)
+			}
+			if s.Phase != tc.wantPhase {
+				t.Errorf("expected phase %s, got %s", tc.wantPhase, s.Phase)
+			}
+			if s.State != StateOrient {
+				t.Errorf("expected ORIENT, got %s", s.State)
+			}
+			// plan.json items must be annotated with passes/rounds.
+			plan, err := loadPlan(s, dir)
+			if err != nil {
+				t.Fatalf("loadPlan: %v", err)
+			}
+			if plan.Items[0].Passes != "pending" {
+				t.Errorf("plan items must be annotated passes=pending, got %q", plan.Items[0].Passes)
+			}
+			if tc.kind == "ui" {
+				if s.UIImplementing == nil || s.UIImplementing.CurrentPlanFile != "p/plan.json" {
+					t.Errorf("ui_implementing state not set up: %+v", s.UIImplementing)
+				}
+				if s.Implementing != nil {
+					t.Error("implementing state must be nil for a ui plan")
+				}
+			} else {
+				if s.Implementing == nil {
+					t.Error("implementing state must be set for a code plan")
+				}
+			}
+		})
+	}
+}
+
+// Rejection: planning→implementation PHASE_SHIFT with kind:ui and an empty required
+// UI config key names the missing key and remains at PHASE_SHIFT.
+func TestAdvancePhaseShiftUIMissingConfigKey(t *testing.T) {
+	dir := t.TempDir()
+	s := phaseShiftToImplState(t, dir, "p/plan.json", "ui")
+	s.Config.UIImplementing.E2E.TestDir = "" // missing required key
+
+	err := Advance(s, AdvanceInput{}, dir)
+	if err == nil {
+		t.Fatal("expected rejection for missing UI config key")
+	}
+	ve, ok := err.(*ValidationError)
+	if !ok {
+		t.Fatalf("expected *ValidationError, got %T: %v", err, err)
+	}
+	named := false
+	for _, e := range ve.Errors {
+		if strings.Contains(e, "e2e.test_dir") {
+			named = true
+		}
+	}
+	if !named {
+		t.Errorf("validation errors should name the missing key, got: %v", ve.Errors)
+	}
+	if s.State != StatePhaseShift || s.PhaseShift == nil {
+		t.Errorf("must remain at PHASE_SHIFT, got state=%s shift=%+v", s.State, s.PhaseShift)
+	}
+	if s.Phase != PhasePlanning {
+		t.Errorf("phase must remain planning (source) on rejection, got %s", s.Phase)
+	}
+}
+
+// Functional: in all-planning-first mode the implementation→implementation domain
+// boundary routes the next plan by its kind (code → implementing, ui →
+// ui_implementing).
+func TestAdvancePhaseShiftDomainBoundaryRoutesByKind(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		kind      string
+		wantPhase PhaseName
+	}{
+		{"code", "code", PhaseImplementing},
+		{"ui", "ui", PhaseUIImplementing},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			cfg := DefaultForgeConfig()
+			cfg.UIImplementing.App.LaunchCommand = "x"
+			cfg.UIImplementing.App.URL = "x"
+			cfg.UIImplementing.E2E.TestCommand = "x"
+			cfg.UIImplementing.E2E.TestDir = "x"
+			s := &ForgeState{
+				Phase:    PhaseImplementing,
+				State:    StatePhaseShift,
+				Config:   cfg,
+				Planning: &PlanningState{CurrentPlan: &ActivePlan{ID: 1, Name: "cur", Domain: "d", File: "cur/plan.json"}},
+				Implementing: &ImplementingState{
+					CurrentPlanFile: "cur/plan.json",
+					PlanQueue: []PlanQueueEntry{
+						{Name: "next", Domain: "d2", File: "next/plan.json", Kind: tc.kind},
+					},
+				},
+				PhaseShift: &PhaseShiftInfo{From: PhaseImplementing, To: PhaseImplementing},
+			}
+			if err := Advance(s, AdvanceInput{}, dir); err != nil {
+				t.Fatalf("domain-boundary advance: %v", err)
+			}
+			if s.Phase != tc.wantPhase {
+				t.Errorf("expected phase %s, got %s", tc.wantPhase, s.Phase)
+			}
+			if tc.kind == "ui" && (s.UIImplementing == nil || s.UIImplementing.CurrentPlanFile != "next/plan.json") {
+				t.Errorf("ui routing failed: %+v", s.UIImplementing)
+			}
+			if tc.kind == "code" && (s.Implementing == nil || s.Implementing.CurrentPlanFile != "next/plan.json") {
+				t.Errorf("code routing failed: %+v", s.Implementing)
+			}
+		})
+	}
+}

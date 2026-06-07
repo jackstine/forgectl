@@ -619,7 +619,8 @@
           "passes": false
         }
       ],
-      "passes": "pending"
+      "passes": "passed",
+      "rounds": 2
     },
     {
       "id": "cmd.init",
@@ -663,7 +664,8 @@
           "passes": false
         }
       ],
-      "passes": "pending"
+      "passes": "passed",
+      "rounds": 2
     },
     {
       "id": "cmd.evalwiring",
@@ -708,7 +710,8 @@
           "passes": false
         }
       ],
-      "passes": "pending"
+      "passes": "passed",
+      "rounds": 2
     },
     {
       "id": "cmd.handoff",
@@ -753,7 +756,8 @@
           "passes": false
         }
       ],
-      "passes": "pending"
+      "passes": "passed",
+      "rounds": 2
     },
     {
       "id": "docs.schemas",

@@ -541,6 +541,9 @@ type ActivePlan struct {
 	Specs           []string `json:"specs"`
 	SpecCommits     []string `json:"spec_commits,omitempty"`
 	CodeSearchRoots []string `json:"code_search_roots"`
+	// Kind routes the implementation phase shift: "ui" → ui_implementing,
+	// "code"/absent → implementing. Carried unchanged from the plan-queue entry.
+	Kind string `json:"kind,omitempty"`
 }
 
 // PlanningState holds planning phase data.

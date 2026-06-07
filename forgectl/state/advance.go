@@ -372,6 +372,7 @@ func populatePlanningFromQueue(s *ForgeState) {
 			Specs:           entry.Specs,
 			SpecCommits:     entry.SpecCommits,
 			CodeSearchRoots: entry.CodeSearchRoots,
+			Kind:            entry.Kind,
 		}
 	}
 }
@@ -484,6 +485,7 @@ func advancePlanning(s *ForgeState, in AdvanceInput, dir string) error {
 				Specs:           entry.Specs,
 				SpecCommits:     entry.SpecCommits,
 				CodeSearchRoots: entry.CodeSearchRoots,
+				Kind:            entry.Kind,
 			}
 			s.State = StatePhaseShift
 			s.PhaseShift = &PhaseShiftInfo{From: PhasePlanning, To: PhasePlanning}
@@ -1203,6 +1205,65 @@ func archiveUIBatch(s *ForgeState) {
 	ui.CurrentBatch = nil
 }
 
+// ValidateUIConfigKeys returns one error per required ui_implementing config key
+// that is empty. These keys are validated at the phase boundary (init / phase
+// shift), not in ValidateConfig (which runs for every phase).
+func ValidateUIConfigKeys(cfg UIImplementingConfig) []string {
+	var errs []string
+	if cfg.App.LaunchCommand == "" {
+		errs = append(errs, "ui_implementing.app.launch_command is required but empty")
+	}
+	if cfg.App.URL == "" {
+		errs = append(errs, "ui_implementing.app.url is required but empty")
+	}
+	if cfg.E2E.TestCommand == "" {
+		errs = append(errs, "ui_implementing.e2e.test_command is required but empty")
+	}
+	if cfg.E2E.TestDir == "" {
+		errs = append(errs, "ui_implementing.e2e.test_dir is required but empty")
+	}
+	return errs
+}
+
+// routeImplementationDomainBoundary sets up the implementation phase for the next
+// plan at an all-first domain boundary, routing by the entry's kind: "ui" enters
+// ui_implementing (validating the required UI config keys), "code"/absent enters
+// implementing. The remaining queue is carried into the destination phase's state.
+func routeImplementationDomainBoundary(s *ForgeState, entry PlanQueueEntry, remaining []PlanQueueEntry) error {
+	if entry.Kind == "ui" {
+		if keyErrs := ValidateUIConfigKeys(s.Config.UIImplementing); len(keyErrs) > 0 {
+			return &ValidationError{Errors: keyErrs}
+		}
+		ui := NewUIImplementingState()
+		ui.CurrentPlanFile = entry.File
+		ui.CurrentPlanDomain = entry.Domain
+		ui.PlanQueue = remaining
+		s.UIImplementing = ui
+		s.Implementing = nil
+		s.Phase = PhaseUIImplementing
+	} else {
+		impl := NewImplementingState()
+		impl.CurrentPlanFile = entry.File
+		impl.PlanQueue = remaining
+		s.Implementing = impl
+		s.UIImplementing = nil
+		s.Phase = PhaseImplementing
+	}
+	if s.Planning != nil && s.Planning.CurrentPlan != nil {
+		s.Planning.CurrentPlan = &ActivePlan{
+			ID:              s.Planning.CurrentPlan.ID + 1,
+			Name:            entry.Name,
+			Domain:          entry.Domain,
+			File:            entry.File,
+			Specs:           entry.Specs,
+			SpecCommits:     entry.SpecCommits,
+			CodeSearchRoots: entry.CodeSearchRoots,
+			Kind:            entry.Kind,
+		}
+	}
+	return nil
+}
+
 // --- Phase Shift ---
 
 func advancePhaseShift(s *ForgeState, in AdvanceInput, dir string) error {
@@ -1309,10 +1370,23 @@ func advancePhaseShift(s *ForgeState, in AdvanceInput, dir string) error {
 			return fmt.Errorf("writing plan: %w", err)
 		}
 
-		s.Implementing = NewImplementingState()
-		s.Implementing.CurrentPlanFile = planPath
-		s.Implementing.CurrentPlanDomain = s.Planning.CurrentPlan.Domain
-		s.Phase = PhaseImplementing
+		// Route by the active plan's kind: "ui" → ui_implementing, else implementing.
+		if s.Planning.CurrentPlan.Kind == "ui" {
+			if keyErrs := ValidateUIConfigKeys(s.Config.UIImplementing); len(keyErrs) > 0 {
+				// Remain at PHASE_SHIFT so the operator can fix the config.
+				return &ValidationError{Errors: keyErrs}
+			}
+			s.UIImplementing = NewUIImplementingState()
+			s.UIImplementing.CurrentPlanFile = planPath
+			s.UIImplementing.CurrentPlanDomain = s.Planning.CurrentPlan.Domain
+			s.Implementing = nil
+			s.Phase = PhaseUIImplementing
+		} else {
+			s.Implementing = NewImplementingState()
+			s.Implementing.CurrentPlanFile = planPath
+			s.UIImplementing = nil
+			s.Phase = PhaseImplementing
+		}
 		s.State = StateOrient
 		s.PhaseShift = nil
 
@@ -1325,34 +1399,38 @@ func advancePhaseShift(s *ForgeState, in AdvanceInput, dir string) error {
 		s.PhaseShift = nil
 
 	case s.PhaseShift.From == PhaseImplementing && s.PhaseShift.To == PhaseImplementing:
-		// All-first mode: pop next plan from Implementing.PlanQueue.
-		impl := s.Implementing
-		if len(impl.PlanQueue) > 0 {
-			entry := impl.PlanQueue[0]
-			impl.PlanQueue = impl.PlanQueue[1:]
-			impl.CurrentPlanFile = entry.File
-			impl.CurrentPlanDomain = entry.Domain
-			impl.CurrentLayer = nil
-			impl.BatchNumber = 0
-			impl.CurrentBatch = nil
-			if s.Planning != nil {
-				s.Planning.CurrentPlan = &ActivePlan{
-					ID:              s.Planning.CurrentPlan.ID + 1,
-					Name:            entry.Name,
-					Domain:          entry.Domain,
-					File:            entry.File,
-					Specs:           entry.Specs,
-					SpecCommits:     entry.SpecCommits,
-					CodeSearchRoots: entry.CodeSearchRoots,
-				}
+		// All-first domain boundary: pop next plan from Implementing.PlanQueue and
+		// route by its kind (code → implementing, ui → ui_implementing).
+		if len(s.Implementing.PlanQueue) > 0 {
+			entry := s.Implementing.PlanQueue[0]
+			remaining := s.Implementing.PlanQueue[1:]
+			if err := routeImplementationDomainBoundary(s, entry, remaining); err != nil {
+				return err
 			}
+		} else {
+			s.Phase = PhaseImplementing
 		}
-		s.Phase = PhaseImplementing
 		s.State = StateOrient
 		s.PhaseShift = nil
 
-	case s.PhaseShift.From == PhaseImplementing && s.PhaseShift.To == PhasePlanning:
-		// Interleaved mode: next plan from Planning.Queue.
+	case s.PhaseShift.From == PhaseUIImplementing && s.PhaseShift.To == PhaseImplementing:
+		// All-first domain boundary from a ui plan: pop next plan from
+		// UIImplementing.PlanQueue and route by its kind.
+		if s.UIImplementing != nil && len(s.UIImplementing.PlanQueue) > 0 {
+			entry := s.UIImplementing.PlanQueue[0]
+			remaining := s.UIImplementing.PlanQueue[1:]
+			if err := routeImplementationDomainBoundary(s, entry, remaining); err != nil {
+				return err
+			}
+		} else {
+			s.Phase = PhaseImplementing
+		}
+		s.State = StateOrient
+		s.PhaseShift = nil
+
+	case s.PhaseShift.From == PhaseImplementing && s.PhaseShift.To == PhasePlanning,
+		s.PhaseShift.From == PhaseUIImplementing && s.PhaseShift.To == PhasePlanning:
+		// Interleaved mode: return to planning for the next plan from Planning.Queue.
 		if len(s.Planning.Queue) > 0 {
 			entry := s.Planning.Queue[0]
 			s.Planning.Queue = s.Planning.Queue[1:]
@@ -1366,6 +1444,7 @@ func advancePhaseShift(s *ForgeState, in AdvanceInput, dir string) error {
 				Specs:           entry.Specs,
 				SpecCommits:     entry.SpecCommits,
 				CodeSearchRoots: entry.CodeSearchRoots,
+				Kind:            entry.Kind,
 			}
 		}
 		s.Phase = PhasePlanning

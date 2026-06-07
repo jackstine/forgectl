@@ -24,7 +24,7 @@ var initCmd = &cobra.Command{
 
 func init() {
 	initCmd.Flags().StringVar(&initFrom, "from", "", "Path to input file (required for session init)")
-	initCmd.Flags().StringVar(&initPhase, "phase", "specifying", "Starting phase: specifying, planning, implementing, reverse_engineering")
+	initCmd.Flags().StringVar(&initPhase, "phase", "specifying", "Starting phase: specifying, planning, implementing, ui_implementing, reverse_engineering")
 	rootCmd.AddCommand(initCmd)
 }
 
@@ -61,9 +61,9 @@ func runInit(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("generate_planning_queue requires a completed specifying phase. Use --phase specifying instead.")
 	}
 
-	validPhases := map[string]bool{"specifying": true, "planning": true, "implementing": true, "reverse_engineering": true}
+	validPhases := map[string]bool{"specifying": true, "planning": true, "implementing": true, "ui_implementing": true, "reverse_engineering": true}
 	if !validPhases[initPhase] {
-		return fmt.Errorf("--phase must be specifying, planning, implementing, or reverse_engineering")
+		return fmt.Errorf("--phase must be specifying, planning, implementing, ui_implementing, or reverse_engineering")
 	}
 
 	// Load and validate config. Scaffolding guarantees the file exists; any read
@@ -202,6 +202,63 @@ func runInit(cmd *cobra.Command, args []string) error {
 			},
 		}
 
+	case state.PhaseUIImplementing:
+		// The QA and e2e loops require a launchable app and a test runner, so the
+		// required UI config keys must be present and non-empty before init.
+		var missing []string
+		if cfg.UIImplementing.App.LaunchCommand == "" {
+			missing = append(missing, "ui_implementing.app.launch_command")
+		}
+		if cfg.UIImplementing.App.URL == "" {
+			missing = append(missing, "ui_implementing.app.url")
+		}
+		if cfg.UIImplementing.E2E.TestCommand == "" {
+			missing = append(missing, "ui_implementing.e2e.test_command")
+		}
+		if cfg.UIImplementing.E2E.TestDir == "" {
+			missing = append(missing, "ui_implementing.e2e.test_dir")
+		}
+		if len(missing) > 0 {
+			for _, k := range missing {
+				fmt.Fprintf(out, "missing required UI config key: %s\n", k)
+			}
+			return fmt.Errorf("ui_implementing requires non-empty config keys: %v", missing)
+		}
+
+		// Otherwise identical to the implementing case: validate plan.json,
+		// reset tracking fields, and build the ui_implementing state.
+		validationErrs := state.ValidatePlanJSON(data, stateDir)
+		if len(validationErrs) > 0 {
+			printValidationErrors(out, validationErrs)
+			return fmt.Errorf("plan validation failed")
+		}
+		var plan state.PlanJSON
+		if err := json.Unmarshal(data, &plan); err != nil {
+			return fmt.Errorf("parsing plan: %w", err)
+		}
+
+		for i := range plan.Items {
+			plan.Items[i].Passes = "pending"
+			plan.Items[i].Rounds = 0
+		}
+
+		planData, err := json.MarshalIndent(plan, "", "  ")
+		if err != nil {
+			return fmt.Errorf("marshaling plan: %w", err)
+		}
+		if err := os.WriteFile(initFrom, planData, 0644); err != nil {
+			return fmt.Errorf("writing plan: %w", err)
+		}
+
+		s.UIImplementing = state.NewUIImplementingState()
+		s.Planning = &state.PlanningState{
+			CurrentPlan: &state.ActivePlan{
+				Name:   plan.Context.Module,
+				Domain: plan.Context.Domain,
+				File:   initFrom,
+			},
+		}
+
 	case state.PhaseReverseEngineering:
 		validationErrs := state.ValidateReverseEngineeringInput(data)
 		if len(validationErrs) > 0 {
@@ -258,6 +315,8 @@ func phaseRoundConfig(cfg state.ForgeConfig, phase state.PhaseName) (batchSize, 
 		return cfg.Planning.Batch, cfg.Planning.Eval.MinRounds, cfg.Planning.Eval.MaxRounds
 	case state.PhaseImplementing:
 		return cfg.Implementing.Batch, cfg.Implementing.Eval.MinRounds, cfg.Implementing.Eval.MaxRounds
+	case state.PhaseUIImplementing:
+		return cfg.UIImplementing.Batch, cfg.UIImplementing.Eval.MinRounds, cfg.UIImplementing.Eval.MaxRounds
 	case state.PhaseReverseEngineering:
 		// No batching in reverse engineering; rounds reflect the reconcile loop.
 		return 0, cfg.ReverseEngineering.Reconcile.MinRounds, cfg.ReverseEngineering.Reconcile.MaxRounds

@@ -349,6 +349,389 @@ func TestInitRejectsInvalidPhase(t *testing.T) {
 	}
 }
 
+// uiImplementingConfig is a TOML config with all four required ui_implementing
+// keys populated. Tests override individual sections to exercise rejection.
+const uiImplementingConfig = `[ui_implementing.app]
+launch_command = "npm run dev"
+url = "http://localhost:3000"
+
+[ui_implementing.e2e]
+test_command = "npx playwright test"
+test_dir = "e2e"
+`
+
+// writeUIPlan writes a minimal valid plan.json (no refs to validate on disk) and
+// returns its path. Items carry pre-existing passes/rounds to confirm init resets them.
+func writeUIPlan(t *testing.T, dir string) string {
+	t.Helper()
+	plan := state.PlanJSON{
+		Context: state.PlanContext{Domain: "ui", Module: "ui-mod"},
+		Layers:  []state.PlanLayerDef{{ID: "L0", Name: "Foundation", Items: []string{"item.1"}}},
+		Items: []state.PlanItem{
+			{
+				ID:          "item.1",
+				Name:        "First Item",
+				Description: "Renders the thing",
+				DependsOn:   []string{},
+				Refs:        []string{},
+				Passes:      "passed", // should be reset to "pending"
+				Rounds:      4,        // should be reset to 0
+				Tests:       []state.PlanTest{{Category: "functional", Description: "it works"}},
+			},
+		},
+	}
+	data, _ := json.Marshal(plan)
+	planPath := filepath.Join(dir, "plan.json")
+	if err := os.WriteFile(planPath, data, 0644); err != nil {
+		t.Fatal(err)
+	}
+	return planPath
+}
+
+// Functional: init at ui_implementing with all required UI config keys present
+// builds the ui_implementing state at ORIENT and resets plan item passes/rounds.
+func TestInitUIImplementing(t *testing.T) {
+	dir := setupProjectDir(t)
+	os.WriteFile(filepath.Join(dir, ".forgectl", "config"), []byte(uiImplementingConfig), 0644)
+	planPath := writeUIPlan(t, dir)
+
+	initFrom = planPath
+	initPhase = "ui_implementing"
+
+	var buf bytes.Buffer
+	rootCmd.SetOut(&buf)
+
+	if err := runInit(initCmd, nil); err != nil {
+		t.Fatalf("init at ui_implementing: %v", err)
+	}
+
+	sd := resolvedStateDir(dir)
+	s, err := state.Load(sd)
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	if s.Phase != state.PhaseUIImplementing {
+		t.Errorf("phase = %s, want ui_implementing", s.Phase)
+	}
+	if s.State != state.StateOrient {
+		t.Errorf("state = %s, want ORIENT", s.State)
+	}
+	if s.StartedAtPhase != state.PhaseUIImplementing {
+		t.Errorf("started_at_phase = %s, want ui_implementing", s.StartedAtPhase)
+	}
+	if s.UIImplementing == nil {
+		t.Fatal("ui_implementing state not built")
+	}
+
+	// plan.json items reset to passes:"pending", rounds:0.
+	planData, _ := os.ReadFile(planPath)
+	var plan state.PlanJSON
+	json.Unmarshal(planData, &plan)
+	if plan.Items[0].Passes != "pending" {
+		t.Errorf("item passes = %q, want pending", plan.Items[0].Passes)
+	}
+	if plan.Items[0].Rounds != 0 {
+		t.Errorf("item rounds = %d, want 0", plan.Items[0].Rounds)
+	}
+}
+
+// Rejection: init at ui_implementing fails when any required UI config key is
+// empty, naming the missing key. Exercised once per key.
+func TestInitUIImplementingRejectsMissingConfig(t *testing.T) {
+	cases := []struct {
+		name    string
+		config  string
+		wantKey string
+	}{
+		{
+			name: "missing launch_command",
+			config: `[ui_implementing.app]
+url = "http://localhost:3000"
+[ui_implementing.e2e]
+test_command = "npx playwright test"
+test_dir = "e2e"
+`,
+			wantKey: "ui_implementing.app.launch_command",
+		},
+		{
+			name: "missing url",
+			config: `[ui_implementing.app]
+launch_command = "npm run dev"
+[ui_implementing.e2e]
+test_command = "npx playwright test"
+test_dir = "e2e"
+`,
+			wantKey: "ui_implementing.app.url",
+		},
+		{
+			name: "missing test_command",
+			config: `[ui_implementing.app]
+launch_command = "npm run dev"
+url = "http://localhost:3000"
+[ui_implementing.e2e]
+test_dir = "e2e"
+`,
+			wantKey: "ui_implementing.e2e.test_command",
+		},
+		{
+			name: "missing test_dir",
+			config: `[ui_implementing.app]
+launch_command = "npm run dev"
+url = "http://localhost:3000"
+[ui_implementing.e2e]
+test_command = "npx playwright test"
+`,
+			wantKey: "ui_implementing.e2e.test_dir",
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := setupProjectDir(t)
+			os.WriteFile(filepath.Join(dir, ".forgectl", "config"), []byte(tc.config), 0644)
+			planPath := writeUIPlan(t, dir)
+
+			initFrom = planPath
+			initPhase = "ui_implementing"
+
+			var buf bytes.Buffer
+			rootCmd.SetOut(&buf)
+
+			err := runInit(initCmd, nil)
+			if err == nil {
+				t.Fatalf("expected error for %s", tc.name)
+			}
+			if !strings.Contains(buf.String(), tc.wantKey) {
+				t.Errorf("output should name missing key %q, got:\n%s", tc.wantKey, buf.String())
+			}
+			// No state file should be written on rejection.
+			if state.Exists(resolvedStateDir(dir)) {
+				t.Error("state file should not exist after rejection")
+			}
+		})
+	}
+}
+
+// Rejection: a plan queue entry with a kind other than code/ui is rejected at
+// planning init, naming the offending entry and value.
+func TestInitRejectsInvalidPlanQueueKind(t *testing.T) {
+	dir := setupProjectDir(t)
+
+	queueFile := filepath.Join(dir, "plans-queue.json")
+	os.WriteFile(queueFile, []byte(`{"plans":[{"name":"Bad Plan","domain":"ui","kind":"frontend","file":"ui/plan.json","specs":[],"spec_commits":[],"code_search_roots":[]}]}`), 0644)
+
+	initFrom = queueFile
+	initPhase = "planning"
+
+	var buf bytes.Buffer
+	rootCmd.SetOut(&buf)
+
+	err := runInit(initCmd, nil)
+	if err == nil {
+		t.Fatal("expected error for invalid plan queue kind")
+	}
+	if !strings.Contains(buf.String(), "frontend") {
+		t.Errorf("output should name the offending kind value, got:\n%s", buf.String())
+	}
+}
+
+// saveUISession builds a ui_implementing session in the given state with a
+// minimal valid plan on disk and saves the state file. Returns the project dir.
+func saveUISession(t *testing.T, st state.StateName) string {
+	t.Helper()
+	dir := setupProjectDir(t)
+	sd := resolvedStateDir(dir)
+	os.MkdirAll(sd, 0755)
+
+	planDir := filepath.Join(dir, "ui")
+	os.MkdirAll(planDir, 0755)
+	plan := state.PlanJSON{
+		Context: state.PlanContext{Domain: "portal", Module: "portal"},
+		Layers:  []state.PlanLayerDef{{ID: "L0", Name: "Shell", Items: []string{"shell.layout"}}},
+		Items: []state.PlanItem{
+			{ID: "shell.layout", Name: "App shell", Description: "shell", Passes: "done", Tests: []state.PlanTest{{Category: "functional", Description: "x"}}},
+		},
+	}
+	data, _ := json.Marshal(plan)
+	os.WriteFile(filepath.Join(planDir, "plan.json"), data, 0644)
+
+	cfg := state.DefaultForgeConfig()
+	cfg.UIImplementing.App.LaunchCommand = "npm run dev"
+	cfg.UIImplementing.App.URL = "http://localhost:5173"
+	cfg.UIImplementing.E2E.TestCommand = "npm run e2e"
+	cfg.UIImplementing.E2E.TestDir = "e2e/"
+
+	s := &state.ForgeState{
+		Phase:    state.PhaseUIImplementing,
+		State:    st,
+		Config:   cfg,
+		Planning: &state.PlanningState{CurrentPlan: &state.ActivePlan{ID: 1, Name: "Portal", Domain: "portal", File: "ui/plan.json"}},
+		UIImplementing: &state.UIImplementingState{
+			CurrentLayer:      &state.LayerRef{ID: "L0", Name: "Shell"},
+			BatchNumber:       1,
+			CurrentPlanFile:   "ui/plan.json",
+			CurrentPlanDomain: "portal",
+			CurrentBatch:      &state.UIBatchState{Items: []string{"shell.layout"}, CurrentItemIndex: 0},
+		},
+	}
+	if err := state.Save(sd, s); err != nil {
+		t.Fatal(err)
+	}
+	return dir
+}
+
+// Functional: eval in ui_implementing QA_TEST routes to the QA evaluator output.
+func TestEvalUIImplementingQATest(t *testing.T) {
+	saveUISession(t, state.StateQATest)
+
+	var buf bytes.Buffer
+	rootCmd.SetOut(&buf)
+	if err := runEval(evalCmd, nil); err != nil {
+		t.Fatalf("eval in QA_TEST: %v", err)
+	}
+	if !strings.Contains(buf.String(), "# UI QA Evaluation Prompt") {
+		t.Errorf("QA_TEST eval should embed the QA prompt, got:\n%s", buf.String())
+	}
+}
+
+// Functional: eval in ui_implementing E2E_VERIFY routes to the e2e evaluator output.
+func TestEvalUIImplementingE2EVerify(t *testing.T) {
+	saveUISession(t, state.StateE2EVerify)
+
+	var buf bytes.Buffer
+	rootCmd.SetOut(&buf)
+	if err := runEval(evalCmd, nil); err != nil {
+		t.Fatalf("eval in E2E_VERIFY: %v", err)
+	}
+	if !strings.Contains(buf.String(), "# UI E2E Verification Prompt") {
+		t.Errorf("E2E_VERIFY eval should embed the e2e prompt, got:\n%s", buf.String())
+	}
+}
+
+// Rejection: eval in a ui_implementing non-evaluator state (UI_REFINE) is rejected.
+func TestEvalUIImplementingRejectsNonEvalState(t *testing.T) {
+	saveUISession(t, state.StateUIRefine)
+
+	var buf bytes.Buffer
+	rootCmd.SetOut(&buf)
+	err := runEval(evalCmd, nil)
+	if err == nil {
+		t.Fatal("expected error for eval in UI_REFINE")
+	}
+	// The rejection must name both the current state and the phase.
+	if !strings.Contains(err.Error(), "UI_REFINE") || !strings.Contains(err.Error(), "ui_implementing") {
+		t.Errorf("error should name the current state and phase, got: %v", err)
+	}
+}
+
+// Functional: --verdict is accepted in ui_implementing QA_TEST and E2E_VERIFY.
+func TestAdvanceVerdictValidInUILoops(t *testing.T) {
+	for _, st := range []state.StateName{state.StateQATest, state.StateE2EVerify} {
+		s := &state.ForgeState{Phase: state.PhaseUIImplementing, State: st}
+		advanceVerdict = "PASS"
+		err := validateAdvanceFlags(s)
+		advanceVerdict = ""
+		if err != nil {
+			t.Errorf("--verdict should be valid in %s: %v", st, err)
+		}
+	}
+}
+
+// --- handoff command tests ---
+
+// Functional: handoff registers the named artifacts on the current batch and a
+// subsequent status surfaces them on a Review: line, with no verdict recorded.
+func TestHandoffRegistersArtifactsForReview(t *testing.T) {
+	dir := saveUISession(t, state.StateQATest)
+	qaReport := filepath.Join(dir, "ui", "qa", "batch-1-round-1.md")
+	stepList := filepath.Join(dir, "ui", "qa", "batch-1-steps.json")
+	os.MkdirAll(filepath.Dir(qaReport), 0755)
+	os.WriteFile(qaReport, []byte("# QA report"), 0644)
+	os.WriteFile(stepList, []byte(`{"scenarios":[]}`), 0644)
+
+	var buf bytes.Buffer
+	rootCmd.SetOut(&buf)
+	if err := runHandoff(handoffCmd, []string{qaReport, stepList}); err != nil {
+		t.Fatalf("handoff: %v", err)
+	}
+
+	// Artifacts recorded on the current batch (latest hand-off wins).
+	sd := resolvedStateDir(dir)
+	s, _ := state.Load(sd)
+	got := s.UIImplementing.CurrentBatch.HandedOffArtifacts
+	if len(got) != 2 || got[0] != qaReport || got[1] != stepList {
+		t.Errorf("handed-off artifacts = %v, want [%s %s]", got, qaReport, stepList)
+	}
+	// State unchanged — hand-off carries no verdict and does not transition.
+	if s.State != state.StateQATest {
+		t.Errorf("state = %s, want QA_TEST (no transition)", s.State)
+	}
+
+	// A subsequent status surfaces them on a Review: line.
+	buf.Reset()
+	if err := runStatus(statusCmd, nil); err != nil {
+		t.Fatalf("status: %v", err)
+	}
+	out := buf.String()
+	if !strings.Contains(out, "Review:") {
+		t.Errorf("status should show a Review: line, got:\n%s", out)
+	}
+	if !strings.Contains(out, qaReport) || !strings.Contains(out, stepList) {
+		t.Errorf("status Review: should list both artifacts, got:\n%s", out)
+	}
+}
+
+// Rejection: handoff in a non-evaluator state (UI_REFINE) is rejected, naming
+// the current state and phase, and registers nothing.
+func TestHandoffRejectedOutsideEvaluatorState(t *testing.T) {
+	dir := saveUISession(t, state.StateUIRefine)
+	f := filepath.Join(dir, "ui", "some.md")
+	os.MkdirAll(filepath.Dir(f), 0755)
+	os.WriteFile(f, []byte("x"), 0644)
+
+	var buf bytes.Buffer
+	rootCmd.SetOut(&buf)
+	err := runHandoff(handoffCmd, []string{f})
+	if err == nil {
+		t.Fatal("expected error for handoff in UI_REFINE")
+	}
+	if !strings.Contains(err.Error(), "UI_REFINE") || !strings.Contains(err.Error(), "ui_implementing") {
+		t.Errorf("error should name current state and phase, got: %v", err)
+	}
+	s, _ := state.Load(resolvedStateDir(dir))
+	if len(s.UIImplementing.CurrentBatch.HandedOffArtifacts) != 0 {
+		t.Error("no artifacts should be registered on rejection")
+	}
+}
+
+// Rejection: handoff naming a file that does not exist is rejected, naming the
+// path, and registers nothing.
+func TestHandoffRejectsNonExistentFile(t *testing.T) {
+	dir := saveUISession(t, state.StateE2EVerify)
+	missing := filepath.Join(dir, "ui", "e2e", "batch-1-round-1.md")
+
+	var buf bytes.Buffer
+	rootCmd.SetOut(&buf)
+	err := runHandoff(handoffCmd, []string{missing})
+	if err == nil {
+		t.Fatal("expected error for non-existent file")
+	}
+	if !strings.Contains(err.Error(), missing) {
+		t.Errorf("error should name the missing path, got: %v", err)
+	}
+	s, _ := state.Load(resolvedStateDir(dir))
+	if len(s.UIImplementing.CurrentBatch.HandedOffArtifacts) != 0 {
+		t.Error("no artifacts should be registered when a file is missing")
+	}
+}
+
+// Rejection: handoff with no file arguments is rejected by arg validation.
+func TestHandoffRejectsNoArgs(t *testing.T) {
+	if err := handoffCmd.Args(handoffCmd, []string{}); err == nil {
+		t.Error("expected error for handoff with no file arguments")
+	}
+}
+
 // Functional: a valid {concept, domains} input initializes a reverse_engineering
 // session — RE state built with domain index 1, count N, ORIENT, and
 // colleague_review carried from the locked config.
