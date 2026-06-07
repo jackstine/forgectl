@@ -86,6 +86,55 @@ func TestValidatePlanQueue_MissingField(t *testing.T) {
 	}
 }
 
+// Functional: kind "code", kind "ui", and an absent kind field are all accepted
+// (absent defaults to code). kind routes the phase shift to the implementation
+// phase, so the queue must carry it through without rejection.
+func TestValidatePlanQueue_KindAccepted(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		kind string // "" means the field is omitted
+	}{
+		{"code", "code"},
+		{"ui", "ui"},
+		{"absent", ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			entry := map[string]any{
+				"name":              "Test Plan",
+				"domain":            "test",
+				"file":              "test/plan.json",
+				"specs":             []string{"spec.md"},
+				"spec_commits":      []string{},
+				"code_search_roots": []string{"test/"},
+			}
+			if tc.kind != "" {
+				entry["kind"] = tc.kind
+			}
+			data, _ := json.Marshal(map[string]any{"plans": []any{entry}})
+			errs := ValidatePlanQueue(data)
+			if len(errs) > 0 {
+				t.Errorf("expected no errors, got %v", errs)
+			}
+		})
+	}
+}
+
+// Rejection: a kind other than code/ui is rejected, naming the entry index and
+// the offending value.
+func TestValidatePlanQueue_KindInvalid(t *testing.T) {
+	data := []byte(`{"plans": [{"name": "Test Plan", "domain": "test", "file": "test/plan.json", "specs": ["spec.md"], "spec_commits": [], "code_search_roots": ["test/"], "kind": "frontend"}]}`)
+	errs := ValidatePlanQueue(data)
+	found := false
+	for _, e := range errs {
+		if strings.Contains(e, "plans[0]") && strings.Contains(e, "frontend") {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("expected rejection naming plans[0] and \"frontend\", got %v", errs)
+	}
+}
+
 func TestValidatePlanJSON_Valid(t *testing.T) {
 	dir := t.TempDir()
 

@@ -8,6 +8,7 @@ const (
 	PhasePlanning              PhaseName = "planning"
 	PhaseGeneratePlanningQueue PhaseName = "generate_planning_queue"
 	PhaseImplementing          PhaseName = "implementing"
+	PhaseUIImplementing        PhaseName = "ui_implementing"
 	PhaseReverseEngineering    PhaseName = "reverse_engineering"
 )
 
@@ -15,29 +16,38 @@ const (
 type StateName string
 
 const (
-	StateOrient                StateName = "ORIENT"
-	StateSelect                StateName = "SELECT"
-	StateDraft                 StateName = "DRAFT"
-	StateEvaluate              StateName = "EVALUATE"
-	StateRefine                StateName = "REFINE"
-	StateAccept                StateName = "ACCEPT"
-	StateDone                  StateName = "DONE"
-	StateReconcile             StateName = "RECONCILE"
-	StateReconcileEval         StateName = "RECONCILE_EVAL"
-	StateReconcileReview       StateName = "RECONCILE_REVIEW"
-	StateCrossReference        StateName = "CROSS_REFERENCE"
-	StateCrossReferenceEval    StateName = "CROSS_REFERENCE_EVAL"
-	StateCrossReferenceReview  StateName = "CROSS_REFERENCE_REVIEW"
-	StateComplete              StateName = "COMPLETE"
-	StatePhaseShift            StateName = "PHASE_SHIFT"
-	StateStudySpecs            StateName = "STUDY_SPECS"
-	StateStudyCode             StateName = "STUDY_CODE"
-	StateStudyPackages         StateName = "STUDY_PACKAGES"
-	StateReview                StateName = "REVIEW"
-	StateValidate              StateName = "VALIDATE"
-	StateImplement             StateName = "IMPLEMENT"
-	StateCommit                StateName = "COMMIT"
-	StateSelfReview            StateName = "SELF_REVIEW"
+	StateOrient               StateName = "ORIENT"
+	StateSelect               StateName = "SELECT"
+	StateDraft                StateName = "DRAFT"
+	StateEvaluate             StateName = "EVALUATE"
+	StateRefine               StateName = "REFINE"
+	StateAccept               StateName = "ACCEPT"
+	StateDone                 StateName = "DONE"
+	StateReconcile            StateName = "RECONCILE"
+	StateReconcileEval        StateName = "RECONCILE_EVAL"
+	StateReconcileReview      StateName = "RECONCILE_REVIEW"
+	StateCrossReference       StateName = "CROSS_REFERENCE"
+	StateCrossReferenceEval   StateName = "CROSS_REFERENCE_EVAL"
+	StateCrossReferenceReview StateName = "CROSS_REFERENCE_REVIEW"
+	StateComplete             StateName = "COMPLETE"
+	StatePhaseShift           StateName = "PHASE_SHIFT"
+	StateStudySpecs           StateName = "STUDY_SPECS"
+	StateStudyCode            StateName = "STUDY_CODE"
+	StateStudyPackages        StateName = "STUDY_PACKAGES"
+	StateReview               StateName = "REVIEW"
+	StateValidate             StateName = "VALIDATE"
+	StateImplement            StateName = "IMPLEMENT"
+	StateCommit               StateName = "COMMIT"
+	StateSelfReview           StateName = "SELF_REVIEW"
+
+	// ui_implementing phase states. ORIENT, IMPLEMENT, EVALUATE, COMMIT, DONE,
+	// and PHASE_SHIFT are reused from the constants above; the code-eval loop
+	// shares EVALUATE while the QA and e2e loops add the five states below.
+	StateQATest       StateName = "QA_TEST"
+	StateUIRefine     StateName = "UI_REFINE"
+	StateE2EAuthor    StateName = "E2E_AUTHOR"
+	StateE2EVerify    StateName = "E2E_VERIFY"
+	StateE2ERemediate StateName = "E2E_REMEDIATE"
 
 	// Reverse engineering phase states. ORIENT, RECONCILE, RECONCILE_EVAL, and
 	// DONE are reused from the constants above.
@@ -162,9 +172,9 @@ type LogsConfig struct {
 
 // GeneralConfig holds top-level behavioral flags.
 type GeneralConfig struct {
-	EnableCommits   bool `json:"enable_commits"`
+	EnableCommits    bool `json:"enable_commits"`
 	EnableEvalOutput bool `json:"enable_eval_output"`
-	UserGuided      bool `json:"user_guided"`
+	UserGuided       bool `json:"user_guided"`
 }
 
 // ForgeConfig is the full project configuration loaded from .forgectl/config.
@@ -318,6 +328,9 @@ type PlanQueueEntry struct {
 	Specs           []string `json:"specs"`
 	SpecCommits     []string `json:"spec_commits"`
 	CodeSearchRoots []string `json:"code_search_roots"`
+	// Kind routes the phase shift to the implementation phase: "ui" enters
+	// ui_implementing; "code" or absent enters implementing.
+	Kind string `json:"kind,omitempty"`
 }
 
 // PlanQueueInput is the schema for --from at specifying→planning phase shift.
@@ -371,16 +384,16 @@ type PlanLayerDef struct {
 
 // PlanJSON is the full plan.json structure.
 type PlanJSON struct {
-	Context PlanContext  `json:"context"`
-	Refs    []PlanRef    `json:"refs,omitempty"`
+	Context PlanContext    `json:"context"`
+	Refs    []PlanRef      `json:"refs,omitempty"`
 	Layers  []PlanLayerDef `json:"layers"`
-	Items   []PlanItem   `json:"items"`
+	Items   []PlanItem     `json:"items"`
 }
 
 // GeneratePlanningQueueState holds state for the generate_planning_queue phase.
 type GeneratePlanningQueueState struct {
-	PlanQueueFile string       `json:"plan_queue_file"`    // path to generated plan-queue.json
-	Evals         []EvalRecord `json:"evals,omitempty"`    // reserved for future use
+	PlanQueueFile string       `json:"plan_queue_file"` // path to generated plan-queue.json
+	Evals         []EvalRecord `json:"evals,omitempty"` // reserved for future use
 }
 
 // CompletedPlan is a plan that has been accepted in the planning phase.
@@ -514,12 +527,12 @@ type LayerHistory struct {
 
 // ImplementingState holds implementing phase data.
 type ImplementingState struct {
-	CurrentLayer    *LayerRef      `json:"current_layer"`
-	BatchNumber     int            `json:"batch_number"`
-	CurrentBatch    *BatchState    `json:"current_batch"`
-	LayerHistory    []LayerHistory `json:"layer_history,omitempty"`
-	CurrentPlanFile   string           `json:"current_plan_file"`
-	CurrentPlanDomain string           `json:"current_plan_domain"`
+	CurrentLayer      *LayerRef        `json:"current_layer"`
+	BatchNumber       int              `json:"batch_number"`
+	CurrentBatch      *BatchState      `json:"current_batch"`
+	LayerHistory      []LayerHistory   `json:"layer_history,omitempty"`
+	CurrentPlanFile   string           `json:"current_plan_file,omitempty"`
+	CurrentPlanDomain string           `json:"current_plan_domain,omitempty"`
 	PlanQueue         []PlanQueueEntry `json:"plan_queue,omitempty"`
 }
 

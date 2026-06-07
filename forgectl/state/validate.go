@@ -108,10 +108,21 @@ func ValidatePlanQueue(data []byte) []string {
 		allowedFields := map[string]bool{
 			"name": true, "domain": true,
 			"file": true, "specs": true, "spec_commits": true, "code_search_roots": true,
+			"kind": true,
 		}
 		for k := range entry {
 			if !allowedFields[k] {
 				errs = append(errs, fmt.Sprintf("plans[%d]: unexpected field %q", i, k))
+			}
+		}
+		// kind, when present, routes the phase shift: only "code" or "ui" are
+		// valid (absent defaults to code).
+		if kindRaw, ok := entry["kind"]; ok {
+			var kind string
+			if err := json.Unmarshal(kindRaw, &kind); err != nil {
+				errs = append(errs, fmt.Sprintf("plans[%d]: \"kind\" must be a string: %s", i, err))
+			} else if kind != "code" && kind != "ui" {
+				errs = append(errs, fmt.Sprintf("plans[%d]: invalid kind %q (must be \"code\" or \"ui\")", i, kind))
 			}
 		}
 	}

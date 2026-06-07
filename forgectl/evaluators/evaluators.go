@@ -26,3 +26,13 @@ var ReconcileEval string
 //
 //go:embed cross-reference-eval.md
 var CrossRefEval string
+
+// UIQAEval contains the UI QA evaluation prompt.
+//
+//go:embed ui-qa-eval.md
+var UIQAEval string
+
+// UIE2EEval contains the UI e2e verification prompt.
+//
+//go:embed ui-e2e-eval.md
+var UIE2EEval string
