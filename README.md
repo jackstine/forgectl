@@ -5,10 +5,28 @@ Specs are the source of truth, the new form of code.   Agents take diffs in the 
 Forgectl is a compiler of specs into executable code, built for Agents.
 
 ## Use with Claude Code
+
+### Install the binary
 - install Golang
 - run `make install-global`
 - run `forgectl --version` to confirm it works
-- install using `scripts/install-claude.sh <path>` for now.  Plugin coming soon!
+
+### Install the Claude Code plugin (recommended)
+
+The skills and commands ship as a Claude Code plugin. Add the marketplace and install:
+
+```
+/plugin marketplace add jackstine/forgectl
+/plugin install forgectl@forgectl
+```
+
+This makes the spec-driven development skills (`planner`, `specs`, `implementation_planning`,
+`implementation`, `implement_from_specs`, `reverse_engineering`) and the `meta`, `q`, and `review`
+commands available — namespaced under the `forgectl` plugin. The plugin is defined by
+`.claude-plugin/plugin.json` and published via `.claude-plugin/marketplace.json`.
+
+### Legacy install (symlinks)
+- install using `scripts/install-claude.sh <path>` for now.
   - this creates a `.claude` folder with symlinks, it will not delete an existing `.claude` folder.
   - you will need to remove your `.claude` or move it, to use for now.
 
