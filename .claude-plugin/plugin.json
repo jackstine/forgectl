@@ -1,0 +1,21 @@
+{
+  "name": "forgectl",
+  "displayName": "Forgectl — Spec-Driven Development",
+  "version": "0.0.1",
+  "description": "Skills and commands for the forgectl spec-driven development harness: planning, specifying, implementation planning, implementing, and reverse engineering code into specs.",
+  "author": {
+    "name": "Jake Cukjati",
+    "email": "jakecukjati@gmail.com"
+  },
+  "homepage": "https://github.com/jackstine/forgectl",
+  "repository": "https://github.com/jackstine/forgectl",
+  "license": "MIT",
+  "keywords": [
+    "spec-driven-development",
+    "forgectl",
+    "specifications",
+    "planning",
+    "reverse-engineering",
+    "code-generation"
+  ]
+}

@@ -1,0 +1,21 @@
+{
+  "name": "forgectl",
+  "owner": {
+    "name": "Jake Cukjati",
+    "email": "jakecukjati@gmail.com"
+  },
+  "description": "Marketplace for the forgectl spec-driven development harness plugin.",
+  "plugins": [
+    {
+      "name": "forgectl",
+      "source": "./",
+      "description": "Skills and commands for spec-driven development with forgectl: planning, specifying, implementation planning, implementing, and reverse engineering.",
+      "category": "development",
+      "keywords": [
+        "spec-driven-development",
+        "forgectl",
+        "specifications"
+      ]
+    }
+  ]
+}
