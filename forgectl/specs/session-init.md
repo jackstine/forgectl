@@ -5,7 +5,7 @@
 
 ## Context
 
-The `init` command creates a new `forgectl-state.json` from a user-provided input file and the project's `.forgectl/config`. The input schema varies by phase: a spec queue for specifying, a plans queue for planning, or a plan.json for implementing. The scaffold discovers the project root by walking up the directory hierarchy to find `.forgectl/`, reads the TOML config, validates the input, rejects malformed data with actionable errors, and sets the starting state for the chosen phase.
+The `init` command creates a new `forgectl-state.json` from a user-provided input file and the project's `.forgectl/config`. The input schema varies by phase: a spec queue for specifying, a plans queue for planning, or a plan.json for implementing. Before loading config, `init` invokes configuration scaffolding, which guarantees `.forgectl/` and a default `.forgectl/config` exist — creating them when absent so a brand-new project can be initialized without manual setup. The scaffold then reads the TOML config, validates the input, rejects malformed data with actionable errors, and sets the starting state for the chosen phase.
 
 All configuration is read from `.forgectl/config` at init time and locked into the state file. CLI flags on `init` are limited to `--from` and `--phase`. See `docs/configurations.md` for the full configuration reference.
 
@@ -13,11 +13,13 @@ Sessions can begin at any of three phases — specifying, planning, or implement
 
 ## Depends On
 - **state-persistence** — provides the write mechanism and file layout for the state file.
+- **config-scaffolding** — guarantees `.forgectl/` and `.forgectl/config` exist before config is loaded; establishes the project root.
 
 ## Integration Points
 
 | Spec | Relationship |
 |------|-------------|
+| config-scaffolding | Runs first; ensures `.forgectl/` and a default config exist and returns the project root. Session-init then loads, parses, and validates that config. |
 | spec-lifecycle | Consumes the spec queue populated during specifying init |
 | plan-production | Consumes the plan queue populated during planning init |
 | batch-implementation | Consumes the plan.json validated during implementing init |
@@ -120,8 +122,8 @@ The scaffold exits with a non-zero code on validation failure.
 
 | Condition | Signal | Rationale |
 |-----------|--------|-----------|
-| `.forgectl/` directory not found in hierarchy | Error: "No .forgectl directory found." Exit code 1. | Project root must be established |
-| `.forgectl/config` missing or unparseable | Error with parse details. Exit code 1. | Config must exist and be valid TOML |
+| `.forgectl/` or `.forgectl/config` cannot be created | Error with the OS failure detail. Exit code 1. | Scaffolding must establish the project root and config (see config-scaffolding) |
+| `.forgectl/config` exists but is unparseable TOML | Error with parse details. Exit code 1. | An existing config must be valid TOML; scaffolding never overwrites it |
 | Config constraint violation (e.g., eval.min_rounds > eval.max_rounds, invalid commit_strategy, nested domain paths) | Error listing violations. Exit code 1. | Invalid configuration |
 | `init` called when state file already exists | Error: "State file already exists. Delete it to reinitialize." Exit code 1. | Prevents accidental loss of in-progress state |
 | `--from` file fails schema validation | Error listing violations. Prints full valid schema. Exit code 1. | User needs to see what's wrong |
@@ -135,15 +137,15 @@ The scaffold exits with a non-zero code on validation failure.
 ### Initializing a Session
 
 #### Preconditions
-- `.forgectl/` directory exists in the current directory or an ancestor.
-- `.forgectl/config` exists and contains valid TOML.
 - No state file exists at the configured `state_dir` location.
 - `--from` is provided.
 - `--phase` is one of `specifying`, `planning`, `implementing` (default: `specifying`). `generate_planning_queue` is not valid.
 
+(`.forgectl/` and `.forgectl/config` need not pre-exist — configuration scaffolding creates them when absent.)
+
 #### Steps
-1. Walk up the directory hierarchy to find `.forgectl/`. This establishes the project root.
-2. Read and parse `.forgectl/config` (TOML).
+1. Run configuration scaffolding (see config-scaffolding): establish the project root, creating `.forgectl/` and writing a default `.forgectl/config` if either is missing. An existing config is left untouched.
+2. Read and parse `.forgectl/config` (TOML). Because step 1 guarantees the file exists, absence is impossible here; any read failure is a permission or I/O error, and a parse failure means an existing user-authored config is malformed.
 3. Validate all config constraints (e.g., `eval.min_rounds <= eval.max_rounds` per phase, `batch >= 1`).
 4. If config validation fails: print errors, exit code 1.
 5. Read and parse the file at `--from`.
@@ -161,6 +163,7 @@ The scaffold exits with a non-zero code on validation failure.
    - Write the `init` log entry.
 
 #### Postconditions
+- `.forgectl/` and `.forgectl/config` exist at the project root (created by scaffolding if they were absent).
 - State file exists at the configured `state_dir` with `config` object mirroring the TOML structure.
 - `session_id` is a UUID v4 stored at the state file root.
 - Phase and state reflect the starting point.
@@ -168,8 +171,8 @@ The scaffold exits with a non-zero code on validation failure.
 - If logging is enabled: log file exists and contains the init entry.
 
 #### Error Handling
-- `.forgectl/` not found: error. Exit code 1.
-- Config file missing or invalid TOML: error with parse details. Exit code 1.
+- `.forgectl/` or `.forgectl/config` cannot be created by scaffolding: error with the OS failure detail. Exit code 1.
+- Existing config file is invalid TOML: error with parse details. Exit code 1.
 - Config constraint violation: error listing violations. Exit code 1.
 - Input file not found: error with path. Exit code 1.
 - Invalid JSON: error with parse details. Exit code 1.
@@ -222,7 +225,7 @@ The `[logs]` section in `.forgectl/config` is validated at init:
 
 1. **No implicit state.** All information for transitions is in the state file (and plan.json during implementing).
 2. **Config locked at init.** The state file's `config` object is the single source of truth for the session. `.forgectl/config` is not re-read after init.
-3. **Project root required.** `.forgectl/` must exist. The scaffold does not create it.
+3. **Reuse over create; never overwrite.** When a `.forgectl/` exists anywhere in the directory hierarchy it is always reused as the project root rather than creating another; a new `.forgectl/` is created only when none exists in the hierarchy. An existing `.forgectl/config` is never read, modified, or overwritten by init. (See config-scaffolding.)
 4. **Session ID generated once.** `session_id` is a UUID v4 created at init and never changes for the lifetime of the session.
 5. **Logging is best-effort.** Log file creation failure prints a warning but does not prevent init from completing.
 
@@ -280,11 +283,11 @@ The `[logs]` section in `.forgectl/config` is validated at init:
 - **When:** `forgectl init --phase implementing --from plan.json`
 - **Then:** `phase: "implementing"`, `state: "ORIENT"`. plan.json items have `passes` and `rounds`.
 
-### Init rejects missing .forgectl directory
-- **Verifies:** Project root discovery failure.
-- **Given:** No `.forgectl/` in current directory or any ancestor.
+### Init creates .forgectl and default config when none exists
+- **Verifies:** Scaffolding bootstrap during init.
+- **Given:** No `.forgectl/` in current directory or any ancestor; a valid `--from` file.
 - **When:** `forgectl init --from specs-queue.json`
-- **Then:** Exit code 1.
+- **Then:** `.forgectl/` and a default `.forgectl/config` are created at the current directory, init proceeds against the default config, and the state file is created. Exit code 0.
 
 ### Init rejects invalid config
 - **Verifies:** Config validation catches constraint violations.

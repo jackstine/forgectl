@@ -18,6 +18,11 @@
   │   │    --guided       Enable guided mode (user checkpoints)
   │   │    --no-guided    Disable guided mode
   │   │
+  │   │  Bootstrap:
+  │   │    Creates .forgectl/ and a default .forgectl/config (from the
+  │   │    embedded template) when missing. Reuses an ancestor .forgectl/
+  │   │    if found; never overwrites an existing config.
+  │   │
   │   │  Configuration:
   │   │    All config (batch, eval.min_rounds, eval.max_rounds) read from
   │   │    .forgectl/config (TOML). Phase-scoped:
