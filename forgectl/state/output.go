@@ -244,12 +244,12 @@ func printSpecifyingOutput(w io.Writer, s *ForgeState, dir string) {
 		for i, bcs := range spec.CurrentSpecs {
 			fmt.Fprintf(w, "  [%d] %s\n", i+1, bcs.File)
 		}
-		specEvalType := s.Config.Specifying.Eval.Type
+		specEval := s.Config.Specifying.Eval.AgentConfig
 		writeEvalEntryAction(w, EvalModeFor(s.Config.Specifying.Eval, s.Config.General), evalEntryAction{
 			label:        "Action:  ",
 			indent:       "         ",
-			spawnEval:    fmt.Sprintf("Please spawn 1 %s sub-agent to evaluate the spec batch.", specEvalType),
-			spawnCorrect: fmt.Sprintf("Please spawn 1 %s sub-agent to evaluate and correct the spec.", specEvalType),
+			spawnEval:    fmt.Sprintf("Please spawn %d %s %s %s to evaluate the spec batch.", specEval.Count, specEval.Model, specEval.Type, subAgentNoun(specEval.Count)),
+			spawnCorrect: fmt.Sprintf("Please spawn %d %s %s %s to evaluate and correct the spec.", specEval.Count, specEval.Model, specEval.Type, subAgentNoun(specEval.Count)),
 			runEval:      "The sub-agent should run: forgectl eval",
 			stagedNote:   "Spec files have been staged. Sub-agent makes corrections directly.",
 			reportTail:   "advance with --verdict PASS|FAIL --eval-report <path>",
@@ -325,9 +325,8 @@ func printSpecifyingOutput(w io.Writer, s *ForgeState, dir string) {
 		}
 
 		fmt.Fprintln(w)
-		agentCount := s.Config.Specifying.CrossReference.Count
-		agentType := s.Config.Specifying.CrossReference.Type
-		fmt.Fprintf(w, "Action:  Please spawn %d %s sub-agent(s) to cross-reference ALL specs in this domain.\n", agentCount, agentType)
+		crAgent := s.Config.Specifying.CrossReference.AgentConfig
+		fmt.Fprintf(w, "Action:  Please spawn %d %s %s %s to cross-reference ALL specs in this domain.\n", crAgent.Count, crAgent.Model, crAgent.Type, subAgentNoun(crAgent.Count))
 		fmt.Fprintf(w, "         Assign each sub-agent a subset of specs to review against the others.\n")
 		fmt.Fprintf(w, "         Fix any findings.\n")
 		fmt.Fprintf(w, "         After completion of the above, advance to begin evaluation.\n")
@@ -336,9 +335,15 @@ func printSpecifyingOutput(w io.Writer, s *ForgeState, dir string) {
 		currentDomain := spec.CurrentDomain
 		cr := spec.CrossReference[currentDomain]
 		evalFile := filepath.Join(currentDomain, "specs", ".eval", fmt.Sprintf("cross-reference-r%d.md", cr.Round))
-		evalAgentType := s.Config.Specifying.CrossReference.Eval.Type
-		if evalAgentType == "" {
-			evalAgentType = "opus"
+		crEval := s.Config.Specifying.CrossReference.Eval
+		if crEval.Model == "" {
+			crEval.Model = "opus"
+		}
+		if crEval.Type == "" {
+			crEval.Type = "eval"
+		}
+		if crEval.Count == 0 {
+			crEval.Count = 1
 		}
 		fmt.Fprintf(w, "State:   CROSS_REFERENCE_EVAL\n")
 		fmt.Fprintf(w, "Phase:   specifying\n")
@@ -350,8 +355,8 @@ func printSpecifyingOutput(w io.Writer, s *ForgeState, dir string) {
 		writeEvalEntryAction(w, EvalModeFor(s.Config.Specifying.Eval, s.Config.General), evalEntryAction{
 			label:        "Action:  ",
 			indent:       "         ",
-			spawnEval:    fmt.Sprintf("Please spawn 1 %s sub-agent to evaluate cross-reference consistency.", evalAgentType),
-			spawnCorrect: fmt.Sprintf("Please spawn 1 %s sub-agent to evaluate and correct cross-references.", evalAgentType),
+			spawnEval:    fmt.Sprintf("Please spawn %d %s %s %s to evaluate cross-reference consistency.", crEval.Count, crEval.Model, crEval.Type, subAgentNoun(crEval.Count)),
+			spawnCorrect: fmt.Sprintf("Please spawn %d %s %s %s to evaluate and correct cross-references.", crEval.Count, crEval.Model, crEval.Type, subAgentNoun(crEval.Count)),
 			runEval:      "The sub-agent should run: forgectl eval",
 			stagedNote:   "Spec files have been staged. Sub-agent makes corrections directly.",
 			reportTail:   "advance with --verdict PASS|FAIL --eval-report <path>",
@@ -414,11 +419,12 @@ func printSpecifyingOutput(w io.Writer, s *ForgeState, dir string) {
 		fmt.Fprintf(w, "Phase:   specifying\n")
 		fmt.Fprintf(w, "Round:   %d/%d\n", spec.Reconcile.Round, maxRounds)
 		fmt.Fprintf(w, "Specs:   %d completed across %d domains\n", len(spec.Completed), len(domains))
+		reconEval := s.Config.Specifying.Reconciliation.AgentConfig
 		writeEvalEntryAction(w, EvalModeFor(s.Config.Specifying.Eval, s.Config.General), evalEntryAction{
 			label:        "Action:  ",
 			indent:       "         ",
-			spawnEval:    "Please spawn 1 opus sub-agent to evaluate cross-domain reconciliation.",
-			spawnCorrect: "Please spawn 1 opus sub-agent to evaluate and correct the reconciliation.",
+			spawnEval:    fmt.Sprintf("Please spawn %d %s %s %s to evaluate cross-domain reconciliation.", reconEval.Count, reconEval.Model, reconEval.Type, subAgentNoun(reconEval.Count)),
+			spawnCorrect: fmt.Sprintf("Please spawn %d %s %s %s to evaluate and correct the reconciliation.", reconEval.Count, reconEval.Model, reconEval.Type, subAgentNoun(reconEval.Count)),
 			runEval:      "The sub-agent should run: forgectl eval",
 			stagedNote:   "Spec files have been staged. Sub-agent makes corrections directly.",
 			reportTail:   "advance with --verdict PASS|FAIL --eval-report <path>",
@@ -487,6 +493,13 @@ func findExistingSpecs(dir, domain string, spec *SpecifyingState) []string {
 		}
 	}
 	return existing
+}
+
+func subAgentNoun(count int) string {
+	if count == 1 {
+		return "sub-agent"
+	}
+	return "sub-agents"
 }
 
 // uniqueDomains returns the set of unique domain names from completed specs.
@@ -568,10 +581,11 @@ func printPlanningOutput(w io.Writer, s *ForgeState, dir string) {
 				fmt.Fprintf(w, "         %s\n", spec)
 			}
 		}
-		fmt.Fprintf(w, "Action:  Explore the codebase in relation to the specs under study.\n")
-		fmt.Fprintf(w, "         Sub-agents: 3. Search roots: %s.\n", strings.Join(cp.CodeSearchRoots, ", "))
+		sc := s.Config.Planning.StudyCode.AgentConfig
+		fmt.Fprintf(w, "Action:  Please spawn %d %s %s %s to explore the codebase.\n", sc.Count, sc.Model, sc.Type, subAgentNoun(sc.Count))
+		fmt.Fprintf(w, "         Search roots: %s.\n", strings.Join(cp.CodeSearchRoots, ", "))
 		fmt.Fprintf(w, "         Focus: find code relevant to the specs listed above.\n")
-		fmt.Fprintf(w, "         Advance when done.\n")
+		fmt.Fprintf(w, "         After completion of the above, advance to continue.\n")
 
 	case StateStudyPackages:
 		fmt.Fprintf(w, "State:   STUDY_PACKAGES\n")
@@ -644,12 +658,12 @@ func printPlanningOutput(w io.Writer, s *ForgeState, dir string) {
 		fmt.Fprintf(w, "Domain:  %s\n", cp.Domain)
 		fmt.Fprintf(w, "File:    %s\n", cp.File)
 		fmt.Fprintf(w, "Round:   %d/%d\n", plan.Round, s.Config.Planning.Eval.MaxRounds)
-		planEvalType := s.Config.Planning.Eval.Type
+		planEval := s.Config.Planning.Eval.AgentConfig
 		writeEvalEntryAction(w, EvalModeFor(s.Config.Planning.Eval, s.Config.General), evalEntryAction{
 			label:        "Action:  ",
 			indent:       "         ",
-			spawnEval:    fmt.Sprintf("Please spawn 1 %s sub-agent to evaluate the plan.", planEvalType),
-			spawnCorrect: fmt.Sprintf("Please spawn 1 %s sub-agent to evaluate and correct the plan.", planEvalType),
+			spawnEval:    fmt.Sprintf("Please spawn %d %s %s %s to evaluate the plan.", planEval.Count, planEval.Model, planEval.Type, subAgentNoun(planEval.Count)),
+			spawnCorrect: fmt.Sprintf("Please spawn %d %s %s %s to evaluate and correct the plan.", planEval.Count, planEval.Model, planEval.Type, subAgentNoun(planEval.Count)),
 			runEval:      "Sub-agent runs: forgectl eval",
 			stagedNote:   "Plan files have been staged. Sub-agent makes corrections directly.",
 			reportTail:   "advance with --verdict PASS|FAIL --eval-report <path>",
@@ -1008,12 +1022,12 @@ func printImplementingOutput(w io.Writer, s *ForgeState, dir string) {
 			}
 		}
 
-		implEvalType := s.Config.Implementing.Eval.Type
+		implEval := s.Config.Implementing.Eval.AgentConfig
 		writeEvalEntryAction(w, EvalModeFor(s.Config.Implementing.Eval, s.Config.General), evalEntryAction{
 			label:        "Action:   ",
 			indent:       "          ",
-			spawnEval:    fmt.Sprintf("Please spawn 1 %s sub-agent to evaluate the implementation batch.", implEvalType),
-			spawnCorrect: fmt.Sprintf("Please spawn 1 %s sub-agent to evaluate and correct the batch.", implEvalType),
+			spawnEval:    fmt.Sprintf("Please spawn %d %s %s %s to evaluate the implementation batch.", implEval.Count, implEval.Model, implEval.Type, subAgentNoun(implEval.Count)),
+			spawnCorrect: fmt.Sprintf("Please spawn %d %s %s %s to evaluate and correct the batch.", implEval.Count, implEval.Model, implEval.Type, subAgentNoun(implEval.Count)),
 			runEval:      "The sub-agent should run: forgectl eval",
 			stagedNote:   "Batch files have been staged. Sub-agent makes corrections directly.",
 			reportTail:   "advance with --eval-report <path> --verdict PASS|FAIL",
@@ -1184,7 +1198,7 @@ func printReverseEngineeringOutput(w io.Writer, s *ForgeState, dir string) {
 
 	// spawnLine renders the configured sub-agent spawn instruction for a block.
 	spawn := func(ac AgentConfig) string {
-		return fmt.Sprintf("Spawn %d %s %s sub-agents", ac.Count, ac.Model, ac.Type)
+		return fmt.Sprintf("Please spawn %d %s %s %s", ac.Count, ac.Model, ac.Type, subAgentNoun(ac.Count))
 	}
 	// topicRules emits the shared topic-of-concern formatting rules.
 	topicRules := func() {
@@ -1253,7 +1267,8 @@ func printReverseEngineeringOutput(w io.Writer, s *ForgeState, dir string) {
 		fmt.Fprintf(w, "\nAction:\n")
 		fmt.Fprintf(w, "  Identify unspecified behavior in the %s source code\n", domain)
 		fmt.Fprintf(w, "  that pertains to the concept.\n")
-		fmt.Fprintf(w, "\n  %s scoped to the %s source code.\n", spawn(cfg.GapAnalysis), domain)
+		fmt.Fprintf(w, "\n  %s\n", spawn(cfg.GapAnalysis))
+		fmt.Fprintf(w, "  scoped to the %s source code.\n", domain)
 		fmt.Fprintf(w, "\n  For each behavior found in code that is not covered by an existing spec:\n")
 		fmt.Fprintf(w, "    - Describe what the behavior does\n")
 		fmt.Fprintf(w, "    - Identify a topic of concern for it:\n")
@@ -1430,7 +1445,8 @@ func printReverseEngineeringOutput(w io.Writer, s *ForgeState, dir string) {
 		fmt.Fprintf(w, "Round: %d/%d\n", re.ReconcileRound, maxRounds)
 		fmt.Fprintf(w, "\nAction:\n")
 		fmt.Fprintf(w, "  Evaluate cross-spec consistency for domain %s.\n", domain)
-		fmt.Fprintf(w, "\n  %s to evaluate the reconciliation.\n", spawn(cfg.Reconcile.Eval))
+		fmt.Fprintf(w, "\n  %s\n", spawn(cfg.Reconcile.Eval))
+		fmt.Fprintf(w, "  to evaluate the reconciliation.\n")
 		fmt.Fprintf(w, "\n  Instruct your sub-agents to run:\n")
 		fmt.Fprintf(w, "    forgectl eval\n")
 		fmt.Fprintf(w, "\n  This outputs the evaluation prompt with the full spec files\n")

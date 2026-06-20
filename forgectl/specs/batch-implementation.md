@@ -224,7 +224,7 @@ Round:    1/3
 Items:
   - [config.types] ServiceEndpoint and ServicesConfig structs
   - [config.load] Load YAML, apply defaults, validate strictly
-Action:   Please spawn 1 opus sub-agent to evaluate the implementation batch.
+Action:   Please spawn 1 opus eval sub-agent to evaluate the implementation batch.
           The sub-agent should run: forgectl eval
           After completion of the above, advance with --eval-report <path> --verdict PASS|FAIL
 ```
@@ -240,7 +240,7 @@ Round:    1/3
 Items:
   - [config.types] ServiceEndpoint and ServicesConfig structs
   - [config.load] Load YAML, apply defaults, validate strictly
-Action:   Please spawn 1 opus sub-agent to evaluate and correct the batch.
+Action:   Please spawn 1 opus eval sub-agent to evaluate and correct the batch.
           Sub-agent runs: forgectl eval
           Batch files have been staged. Sub-agent makes corrections directly.
           After completion of the above, advance with --verdict PASS|FAIL
@@ -257,7 +257,7 @@ Round:    1/3
 Items:
   - [config.types] ServiceEndpoint and ServicesConfig structs
   - [config.load] Load YAML, apply defaults, validate strictly
-Action:   Please spawn 1 opus sub-agent to evaluate the implementation batch.
+Action:   Please spawn 1 opus eval sub-agent to evaluate the implementation batch.
           The sub-agent should run: forgectl eval
           After completion of the above, advance with --verdict PASS|FAIL
 ```
@@ -709,7 +709,7 @@ When `enable_commits` is `true`, the engineer runs `forgectl advance --message <
 10. **Min rounds enforced.** PASS below `implementing.eval.min_rounds` forces another implementation cycle.
 11. **Max rounds enforced.** FAIL at `implementing.eval.max_rounds` forces acceptance.
 12. **Guided pauses.** When `config.general.user_guided` is true, ORIENT output includes "STOP please review and discuss with user before continuing."
-13. **Auto-commit at commit points.** When `enable_commits` is `true`, `--message` is required at IMPLEMENT (first round) and COMMIT states. The scaffold stages files per `implementing.commit_strategy` (default: `scoped`) and runs `git commit -m <message>`. When `enable_commits` is `false`, `--message` is not shown in output; if provided, a warning is printed: `--message is ignored, commits are not enabled`. The warning does not instruct how to enable commits. See `docs/auto-committing.md`.
+13. **Auto-commit at commit points.** When `enable_commits` is `true`, `--message` is required at IMPLEMENT (first round) and COMMIT states. The scaffold runs `git add` with strategy-appropriate targets (per `implementing.commit_strategy`, default: `scoped`) to stage files, then runs `git commit -m <message>`. The `git add` step must precede `git commit` — committing without staging produces "no changes added to commit" and no commit is created. When `enable_commits` is `false`, `--message` is not shown in output; if provided, a warning is printed: `--message is ignored, commits are not enabled`. The warning does not instruct how to enable commits. See `docs/auto-committing.md`.
 14. **Spec `Read:` command is bounded.** When the current plan's `spec_commits` is non-empty, every `Specs:` entry in IMPLEMENT output is followed by a `Read:` line of the form `git show <commits> -- '**/<file>'`, using `git show` (not `git log -p`) so the command resolves to exactly the named spec commits. When `spec_commits` is empty, no `Read:` line is emitted.
 15. **Spec review reminder always present.** Every IMPLEMENT action, on every round, includes the spec-review reminder. The Refs-review reminder is present if and only if the item has `Refs`.
 
@@ -792,6 +792,18 @@ When `enable_commits` is `true`, the engineer runs `forgectl advance --message <
 - **Given:** IMPLEMENT, entered after EVALUATE (round 2+).
 - **When:** `advance`
 - **Then:** Advances without committing. No error.
+
+### First-round IMPLEMENT stages files before committing
+- **Verifies:** `git add` runs before `git commit` on first-round advance.
+- **Given:** IMPLEMENT, first round, `enable_commits: true`, `commit_strategy: "scoped"`, domain `"api"`.
+- **When:** `advance --message "Implement config types"`
+- **Then:** `git add api/` is run before `git commit -m "Implement config types"`. The commit succeeds. No error.
+
+### COMMIT state stages files before committing
+- **Verifies:** `git add` runs before `git commit` in COMMIT state.
+- **Given:** COMMIT, `enable_commits: true`, `commit_strategy: "scoped"`, domain `"api"`.
+- **When:** `advance --message "Batch 1 corrections"`
+- **Then:** `git add api/` is run before `git commit -m "Batch 1 corrections"`. The commit succeeds. No error.
 
 ### IMPLEMENT renders a Read command per spec when spec_commits exist
 - **Verifies:** Spec `Read:` line is emitted with a bounded `git show` command.

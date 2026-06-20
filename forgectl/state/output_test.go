@@ -584,14 +584,14 @@ func TestEvalOutputSpecEvaluateRejectsWrongState(t *testing.T) {
 }
 
 // specEvaluateState builds a specifying EVALUATE ForgeState with the given
-// eval_mode and eval agent type.
-func specEvaluateState(mode, atype string) *ForgeState {
+// eval_mode and eval agent model. Count is 1, Type is "eval".
+func specEvaluateState(mode, model string) *ForgeState {
 	return &ForgeState{
 		Phase: PhaseSpecifying,
 		State: StateEvaluate,
 		Config: ForgeConfig{
 			Specifying: SpecifyingConfig{
-				Eval: EvalConfig{MinRounds: 1, MaxRounds: 3, AgentConfig: AgentConfig{Type: atype}, EvalMode: mode},
+				Eval: EvalConfig{MinRounds: 1, MaxRounds: 3, AgentConfig: AgentConfig{Model: model, Type: "eval", Count: 1}, EvalMode: mode},
 			},
 		},
 		Specifying: &SpecifyingState{
@@ -604,14 +604,15 @@ func specEvaluateState(mode, atype string) *ForgeState {
 	}
 }
 
-// planEvaluateState builds a planning EVALUATE ForgeState with the given eval_mode.
-func planEvaluateState(mode, atype string) *ForgeState {
+// planEvaluateState builds a planning EVALUATE ForgeState with the given eval_mode and agent model.
+// Count is 1, Type is "eval".
+func planEvaluateState(mode, model string) *ForgeState {
 	return &ForgeState{
 		Phase: PhasePlanning,
 		State: StateEvaluate,
 		Config: ForgeConfig{
 			Planning: PlanningConfig{
-				Eval: EvalConfig{MinRounds: 1, MaxRounds: 3, AgentConfig: AgentConfig{Type: atype}, EvalMode: mode},
+				Eval: EvalConfig{MinRounds: 1, MaxRounds: 3, AgentConfig: AgentConfig{Model: model, Type: "eval", Count: 1}, EvalMode: mode},
 			},
 		},
 		Planning: &PlanningState{
@@ -622,12 +623,15 @@ func planEvaluateState(mode, atype string) *ForgeState {
 }
 
 // implEvaluateState builds an implementing EVALUATE ForgeState with the given
-// eval_mode, driving the in-memory plan from ORIENT through to EVALUATE.
-func implEvaluateState(t *testing.T, dir, mode, atype string) *ForgeState {
+// eval_mode and agent model, driving the in-memory plan from ORIENT through to EVALUATE.
+// Count is 1, Type is "eval".
+func implEvaluateState(t *testing.T, dir, mode, model string) *ForgeState {
 	t.Helper()
 	s := newImplementingState(dir, 1, 1)
 	s.Config.Implementing.Eval.EvalMode = mode
-	s.Config.Implementing.Eval.Type = atype
+	s.Config.Implementing.Eval.Model = model
+	s.Config.Implementing.Eval.Type = "eval"
+	s.Config.Implementing.Eval.Count = 1
 	advanceImplToEvaluate(t, s, dir)
 	return s
 }
@@ -639,7 +643,7 @@ func TestEvalEntryActionReportMode(t *testing.T) {
 	dir := t.TempDir()
 
 	spec := outputOf(specEvaluateState("report", "opus"), ".")
-	if !strings.Contains(spec, "Please spawn 1 opus sub-agent to evaluate the spec batch.") {
+	if !strings.Contains(spec, "Please spawn 1 opus eval sub-agent to evaluate the spec batch.") {
 		t.Errorf("specifying report spawn line missing, got:\n%s", spec)
 	}
 	if !strings.Contains(spec, "The sub-agent should run: forgectl eval") {
@@ -650,7 +654,7 @@ func TestEvalEntryActionReportMode(t *testing.T) {
 	}
 
 	plan := outputOf(planEvaluateState("report", "opus"), ".")
-	if !strings.Contains(plan, "Please spawn 1 opus sub-agent to evaluate the plan.") {
+	if !strings.Contains(plan, "Please spawn 1 opus eval sub-agent to evaluate the plan.") {
 		t.Errorf("planning report spawn line missing, got:\n%s", plan)
 	}
 	if !strings.Contains(plan, "Sub-agent runs: forgectl eval") {
@@ -661,7 +665,7 @@ func TestEvalEntryActionReportMode(t *testing.T) {
 	}
 
 	impl := outputOf(implEvaluateState(t, dir, "report", "opus"), dir)
-	if !strings.Contains(impl, "Please spawn 1 opus sub-agent to evaluate the implementation batch.") {
+	if !strings.Contains(impl, "Please spawn 1 opus eval sub-agent to evaluate the implementation batch.") {
 		t.Errorf("implementing report spawn line missing, got:\n%s", impl)
 	}
 	if !strings.Contains(impl, "advance with --eval-report <path> --verdict PASS|FAIL") {
@@ -676,7 +680,7 @@ func TestEvalEntryActionDirectMode(t *testing.T) {
 	dir := t.TempDir()
 
 	spec := outputOf(specEvaluateState("direct", "opus"), ".")
-	if !strings.Contains(spec, "Please spawn 1 opus sub-agent to evaluate and correct the spec.") {
+	if !strings.Contains(spec, "Please spawn 1 opus eval sub-agent to evaluate and correct the spec.") {
 		t.Errorf("specifying direct spawn line missing, got:\n%s", spec)
 	}
 	if !strings.Contains(spec, "Spec files have been staged. Sub-agent makes corrections directly.") {
@@ -716,7 +720,7 @@ func TestEvalEntryActionConversationalMode(t *testing.T) {
 	dir := t.TempDir()
 
 	spec := outputOf(specEvaluateState("conversational", "opus"), ".")
-	if !strings.Contains(spec, "Please spawn 1 opus sub-agent to evaluate the spec batch.") {
+	if !strings.Contains(spec, "Please spawn 1 opus eval sub-agent to evaluate the spec batch.") {
 		t.Errorf("specifying conversational spawn line missing, got:\n%s", spec)
 	}
 	if strings.Contains(spec, "--eval-report") {
@@ -730,7 +734,7 @@ func TestEvalEntryActionConversationalMode(t *testing.T) {
 	}
 
 	plan := outputOf(planEvaluateState("conversational", "opus"), ".")
-	if !strings.Contains(plan, "Please spawn 1 opus sub-agent to evaluate the plan.") {
+	if !strings.Contains(plan, "Please spawn 1 opus eval sub-agent to evaluate the plan.") {
 		t.Errorf("planning conversational spawn line missing, got:\n%s", plan)
 	}
 	if strings.Contains(plan, "--eval-report") {
@@ -738,7 +742,7 @@ func TestEvalEntryActionConversationalMode(t *testing.T) {
 	}
 
 	impl := outputOf(implEvaluateState(t, dir, "conversational", "opus"), dir)
-	if !strings.Contains(impl, "Please spawn 1 opus sub-agent to evaluate the implementation batch.") {
+	if !strings.Contains(impl, "Please spawn 1 opus eval sub-agent to evaluate the implementation batch.") {
 		t.Errorf("implementing conversational spawn line missing, got:\n%s", impl)
 	}
 	if strings.Contains(impl, "--eval-report") {
@@ -757,7 +761,7 @@ func TestEvalEntryActionEdgeCases(t *testing.T) {
 		Config: ForgeConfig{
 			Specifying: SpecifyingConfig{
 				Eval:           EvalConfig{MinRounds: 1, MaxRounds: 3, EvalMode: "direct"},
-				CrossReference: CrossRefConfig{MinRounds: 1, MaxRounds: 2, Eval: AgentConfig{Type: "opus"}},
+				CrossReference: CrossRefConfig{MinRounds: 1, MaxRounds: 2, Eval: AgentConfig{Model: "opus", Type: "eval", Count: 1}},
 			},
 		},
 		Specifying: &SpecifyingState{
@@ -767,7 +771,7 @@ func TestEvalEntryActionEdgeCases(t *testing.T) {
 		},
 	}
 	cr := outputOf(crEval, ".")
-	if !strings.Contains(cr, "Please spawn 1 opus sub-agent to evaluate and correct cross-references.") {
+	if !strings.Contains(cr, "Please spawn 1 opus eval sub-agent to evaluate and correct cross-references.") {
 		t.Errorf("cross-ref direct spawn line missing, got:\n%s", cr)
 	}
 	if !strings.Contains(cr, "Spec files have been staged. Sub-agent makes corrections directly.") {
@@ -781,7 +785,7 @@ func TestEvalEntryActionEdgeCases(t *testing.T) {
 		Config: ForgeConfig{
 			Specifying: SpecifyingConfig{
 				Eval:           EvalConfig{MinRounds: 1, MaxRounds: 3, EvalMode: "conversational"},
-				Reconciliation: ReconciliationConfig{MinRounds: 0, MaxRounds: 3},
+				Reconciliation: ReconciliationConfig{MinRounds: 0, MaxRounds: 3, AgentConfig: AgentConfig{Model: "opus", Type: "eval", Count: 1}},
 			},
 		},
 		Specifying: &SpecifyingState{
@@ -790,7 +794,7 @@ func TestEvalEntryActionEdgeCases(t *testing.T) {
 		},
 	}
 	rc := outputOf(rcEval, ".")
-	if !strings.Contains(rc, "Please spawn 1 opus sub-agent to evaluate cross-domain reconciliation.") {
+	if !strings.Contains(rc, "Please spawn 1 opus eval sub-agent to evaluate cross-domain reconciliation.") {
 		t.Errorf("reconcile conversational spawn line missing, got:\n%s", rc)
 	}
 	if strings.Contains(rc, "--eval-report") {
@@ -1288,7 +1292,7 @@ func TestREOutputSurveyAndGapAnalysisConfig(t *testing.T) {
 	dir := t.TempDir()
 
 	survey := outputOf(reOutputState(StateSurvey, []string{"optimizer"}, 1, nil), dir)
-	if !strings.Contains(survey, "Spawn 2 haiku explorer sub-agents") {
+	if !strings.Contains(survey, "Please spawn 2 haiku explorer sub-agents") {
 		t.Errorf("SURVEY should reflect configured sub-agents, got:\n%s", survey)
 	}
 	if !strings.Contains(survey, "optimizer/specs/") {
@@ -1296,7 +1300,7 @@ func TestREOutputSurveyAndGapAnalysisConfig(t *testing.T) {
 	}
 
 	gap := outputOf(reOutputState(StateGapAnalysis, []string{"optimizer"}, 1, nil), dir)
-	if !strings.Contains(gap, "Spawn 5 sonnet explorer sub-agents") {
+	if !strings.Contains(gap, "Please spawn 5 sonnet explorer sub-agents") {
 		t.Errorf("GAP_ANALYSIS should reflect configured sub-agents, got:\n%s", gap)
 	}
 	if !strings.Contains(gap, "Must not contain \"and\" conjoining unrelated capabilities") {
@@ -1325,7 +1329,7 @@ func TestREOutputExecuteItem(t *testing.T) {
 		"- optimizer/src/repo/",
 		"- optimizer/src/config/",
 		"root of the core",
-		"Spawn 3 haiku explorer sub-agents",
+		"Please spawn 3 haiku explorer sub-agents",
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("EXECUTE output missing %q, got:\n%s", want, out)
@@ -1361,7 +1365,7 @@ func TestREOutputReconcileAndEval(t *testing.T) {
 	if !strings.Contains(evOut, "forgectl eval") {
 		t.Errorf("RECONCILE_EVAL should instruct running forgectl eval, got:\n%s", evOut)
 	}
-	if !strings.Contains(evOut, "Spawn 1 opus general-purpose sub-agents") {
+	if !strings.Contains(evOut, "Please spawn 1 opus general-purpose sub-agent") {
 		t.Errorf("RECONCILE_EVAL should reflect configured eval sub-agents, got:\n%s", evOut)
 	}
 	if !strings.Contains(evOut, filepath.Join("optimizer", "specs", ".eval", "reconciliation-r2.md")) {

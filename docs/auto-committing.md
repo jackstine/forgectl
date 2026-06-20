@@ -116,13 +116,15 @@ commit_strategy = "scoped"      # strict | all-specs | scoped | tracked | all
 When a commit point is reached and `enable_commits` is `true`:
 
 1. Determine the staging strategy from `<phase>.commit_strategy`.
-2. Stage files according to the strategy.
-3. Check `git status --porcelain` for staged changes.
-4. If no staged changes: skip commit, print notice, continue.
-5. If staged changes exist: run `git commit -m <message>`.
-6. Capture the commit hash from git output.
+2. Run `git add` with strategy-appropriate arguments to stage files.
+3. Run `git commit -m <message>`.
+4. If `git commit` exits with "nothing to commit" or "nothing added to commit": skip the commit, print a notice to stderr, continue with an empty hash.
+5. If `git commit` fails for any other reason: print the error and exit with code 1.
+6. Capture the resulting commit hash via `git rev-parse HEAD`.
 7. Register the hash in the state file against relevant entries.
 8. Write the updated state file.
+
+`git add` must run before `git commit`. `git commit` without `-a` only includes files already in the index — skipping `git add` causes git to report "no changes added to commit" and the commit silently fails.
 
 If any git operation fails (staging, committing), the scaffold prints the error and exits with code 1. Git failures are not recoverable — the user must resolve the issue manually.
 

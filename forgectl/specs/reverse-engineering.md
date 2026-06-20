@@ -207,7 +207,7 @@ Concept: "{concept}"
 Action:
   Survey existing specifications in {domain}/specs/.
 
-  Spawn {survey.count} {survey.model} {survey.type} sub-agents
+  Please spawn {survey.count} {survey.model} {survey.type} sub-agent(s)
   scoped to {domain}/specs/.
 
   Read all spec files in the directory to understand what is specified.
@@ -254,8 +254,8 @@ Action:
   Identify unspecified behavior in the {domain} source code
   that pertains to the concept.
 
-  Spawn {gap_analysis.count} {gap_analysis.model} {gap_analysis.type}
-  sub-agents scoped to the {domain} source code.
+  Please spawn {gap_analysis.count} {gap_analysis.model} {gap_analysis.type}
+  sub-agent(s) scoped to the {domain} source code.
 
   For each behavior found in code that is not covered by an existing spec:
     - Describe what the behavior does
@@ -494,7 +494,7 @@ Action:
   {action == create: Create | action == update: Update} the specification
   at {domain}/{file} from the code under the search roots above.
 
-  Spawn {execute.count} {execute.model} {execute.type} sub-agents
+  Please spawn {execute.count} {execute.model} {execute.type} sub-agent(s)
   scoped to the search roots to examine the implementation.
 
   Write the specification in the standard spec format, capturing the
@@ -671,8 +671,8 @@ Round: {round}
 Action:
   Evaluate cross-spec consistency for domain {domain}.
 
-  Spawn {reconcile.eval.count} {reconcile.eval.model} {reconcile.eval.type}
-  sub-agents to evaluate the reconciliation.
+  Please spawn {reconcile.eval.count} {reconcile.eval.model} {reconcile.eval.type}
+  sub-agent(s) to evaluate the reconciliation.
 
   Instruct your sub-agents to run:
     forgectl eval
@@ -941,13 +941,13 @@ All configuration blocks are consumed by forgectl, either to drive the state mac
 - **Verifies:** SURVEY action output reflects config.
 - **Given:** Config with `survey.count = 4`, `survey.model = "sonnet"`, `survey.type = "explorer"`.
 - **When:** State is SURVEY, `forgectl status` is run.
-- **Then:** Action output says "Spawn 4 sonnet explorer sub-agents".
+- **Then:** Action output says "Please spawn 4 sonnet explorer sub-agents".
 
 ### GAP_ANALYSIS action uses configured sub-agents
 - **Verifies:** GAP_ANALYSIS action output reflects config.
 - **Given:** Config with `gap_analysis.count = 3`, `gap_analysis.model = "opus"`, `gap_analysis.type = "explorer"`.
 - **When:** State is GAP_ANALYSIS, `forgectl status` is run.
-- **Then:** Action output says "Spawn 3 opus explorer sub-agents".
+- **Then:** Action output says "Please spawn 3 opus explorer sub-agents".
 
 ### GAP_ANALYSIS action includes topic-of-concern rules
 - **Verifies:** GAP_ANALYSIS action output includes topic formatting rules.
@@ -1037,7 +1037,7 @@ All configuration blocks are consumed by forgectl, either to drive the state mac
 - **Verifies:** Per-item action output.
 - **Given:** Config with `execute.count = 3`, `execute.model = "haiku"`, `execute.type = "explorer"`. Current item is spec "Repository Loading" (domain "optimizer", action "create", file "specs/repository-loading.md", roots ["src/repo/"]).
 - **When:** State is EXECUTE_REVERSE_ENGINEER, `forgectl status` is run.
-- **Then:** Action output shows the item index, domain, spec name, action, target file, topic, and the `code_search_roots` with the root-of-core-code definition. It says "Spawn 3 haiku explorer sub-agents".
+- **Then:** Action output shows the item index, domain, spec name, action, target file, topic, and the `code_search_roots` with the root-of-core-code definition. It says "Please spawn 3 haiku explorer sub-agents".
 
 ### EXECUTE_REVERSE_ENGINEER advances to POST_REVERSE_ENGINEER
 - **Verifies:** Per-item transition into the checkpoint state.
