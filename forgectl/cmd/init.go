@@ -192,6 +192,8 @@ func runInit(cmd *cobra.Command, args []string) error {
 		}
 
 		s.Implementing = state.NewImplementingState()
+		s.Implementing.CurrentPlanFile = initFrom
+		s.Implementing.CurrentPlanDomain = plan.Context.Domain
 		s.Planning = &state.PlanningState{
 			CurrentPlan: &state.ActivePlan{
 				Name:   plan.Context.Module,

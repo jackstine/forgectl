@@ -518,8 +518,8 @@ type ImplementingState struct {
 	BatchNumber     int            `json:"batch_number"`
 	CurrentBatch    *BatchState    `json:"current_batch"`
 	LayerHistory    []LayerHistory `json:"layer_history,omitempty"`
-	CurrentPlanFile   string           `json:"current_plan_file,omitempty"`
-	CurrentPlanDomain string           `json:"current_plan_domain,omitempty"`
+	CurrentPlanFile   string           `json:"current_plan_file"`
+	CurrentPlanDomain string           `json:"current_plan_domain"`
 	PlanQueue         []PlanQueueEntry `json:"plan_queue,omitempty"`
 }
 

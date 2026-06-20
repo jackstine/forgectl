@@ -35,7 +35,9 @@ func AutoCommit(projectRoot string, strategy string, stageTargets []string, mess
 	var addArgs []string
 	switch strategy {
 	case "strict", "all-specs", "scoped":
-		// Stage specific paths passed in stageTargets.
+		if len(absTargets) == 0 {
+			return "", fmt.Errorf("commit strategy %q requires at least one stage target, but none were provided (CurrentPlanDomain may be empty)", strategy)
+		}
 		addArgs = append([]string{"-C", gitRoot, "add"}, absTargets...)
 	case "tracked":
 		addArgs = []string{"-C", gitRoot, "add", "-u"}

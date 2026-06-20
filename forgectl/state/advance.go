@@ -589,6 +589,20 @@ func advancePlanningFromSelfReview(s *ForgeState, dir string) error {
 func advanceImplementing(s *ForgeState, in AdvanceInput, dir string) error {
 	impl := s.Implementing
 
+	// Derive CurrentPlanDomain when missing — handles state files created before
+	// the field was added to the phase-shift path. Persists via the normal Save
+	// call at the end of the advance loop.
+	if impl.CurrentPlanDomain == "" {
+		if s.Planning != nil && s.Planning.CurrentPlan != nil && s.Planning.CurrentPlan.Domain != "" {
+			impl.CurrentPlanDomain = s.Planning.CurrentPlan.Domain
+		} else if impl.CurrentPlanFile != "" {
+			parts := strings.SplitN(impl.CurrentPlanFile, "/", 3)
+			if len(parts) >= 2 {
+				impl.CurrentPlanDomain = filepath.Join(parts[0], parts[1])
+			}
+		}
+	}
+
 	switch s.State {
 	case StateOrient:
 		return advanceImplFromOrient(s, dir)
@@ -713,16 +727,14 @@ func advanceImplFromImplement(s *ForgeState, in AdvanceInput, dir string) error 
 		return fmt.Errorf("--message is required for first-round implementation when enable_commits is true")
 	}
 
-	// Mark current item as done.
+	// Mark current item as done — saved after commit succeeds to keep
+	// plan.json and state consistent on commit failure.
 	itemID := batch.Items[batch.CurrentItemIndex]
 	setItemPasses(plan, itemID, "done")
 
-	// Save plan.
-	if err := savePlan(s, dir, plan); err != nil {
-		return err
-	}
-
 	// First-round auto-commit: one commit per item for crash safety.
+	// Save plan only after commit succeeds so plan.json stays consistent with
+	// the state file if the commit fails.
 	if batch.EvalRound == 0 && s.Config.General.EnableCommits {
 		strategy := effectiveImplStrategy(s)
 		item := findItem(plan, itemID)
@@ -730,6 +742,10 @@ func advanceImplFromImplement(s *ForgeState, in AdvanceInput, dir string) error 
 		if _, err := AutoCommit(dir, strategy, stageTargets, in.Message); err != nil {
 			return fmt.Errorf("Error: STOP there was a failure with auto committing in forgectl, please tell the user: %s", err)
 		}
+	}
+
+	if err := savePlan(s, dir, plan); err != nil {
+		return err
 	}
 
 	if batch.CurrentItemIndex < len(batch.Items)-1 {
