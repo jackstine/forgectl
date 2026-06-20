@@ -2175,6 +2175,7 @@ func TestCommitNoMessageRequiredWithoutEnableCommits(t *testing.T) {
 
 func TestCommitRequiresMessageWhenEnableCommits(t *testing.T) {
 	dir := t.TempDir()
+	initTestGitRepo(t, dir)
 	s := newImplementingState(dir, 1, 1)
 	s.Config.General.EnableCommits = true
 
@@ -2412,6 +2413,9 @@ func newImplementingState(dir string, numItems, batchSize int) *ForgeState {
 	notesDir := filepath.Join(dir, "impl", "notes")
 	os.MkdirAll(notesDir, 0755)
 	os.WriteFile(filepath.Join(notesDir, "n.md"), []byte("notes"), 0644)
+	// Create domain directory so scoped git add has something to stage.
+	os.MkdirAll(filepath.Join(dir, "test"), 0755)
+	os.WriteFile(filepath.Join(dir, "test", "main.go"), []byte("package main"), 0644)
 
 	var items []PlanItem
 	var itemIDs []string
@@ -2464,7 +2468,9 @@ func newImplementingState(dir string, numItems, batchSize int) *ForgeState {
 				File:   "impl/plan.json",
 			},
 		},
-		Implementing: NewImplementingState(),
+		Implementing: &ImplementingState{
+			CurrentPlanDomain: "test",
+		},
 	}
 }
 

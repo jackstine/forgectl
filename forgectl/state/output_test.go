@@ -20,6 +20,7 @@ func outputOf(s *ForgeState, dir string) string {
 // instructs the user to advance with --message.
 func TestOutputCommitEnableCommitsShowsMessage(t *testing.T) {
 	dir := t.TempDir()
+	initTestGitRepo(t, dir)
 	s := newImplementingState(dir, 1, 1)
 	s.Config.General.EnableCommits = true
 	advanceImplToCommit(t, s, dir)

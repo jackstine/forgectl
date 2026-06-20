@@ -596,6 +596,13 @@ func advanceImplementing(s *ForgeState, in AdvanceInput, dir string) error {
 		if s.Config.General.EnableCommits && in.Message == "" {
 			return fmt.Errorf("--message is required in COMMIT state when enable_commits is true")
 		}
+		if s.Config.General.EnableCommits {
+			strategy := effectiveImplStrategy(s)
+			stageTargets := implScopeTargets(impl, nil, strategy)
+			if _, err := AutoCommit(dir, strategy, stageTargets, in.Message); err != nil {
+				return fmt.Errorf("Error: STOP there was a failure with auto committing in forgectl, please tell the user: %s", err)
+			}
+		}
 		// Archive batch to history.
 		archiveBatch(s)
 
@@ -706,6 +713,16 @@ func advanceImplFromImplement(s *ForgeState, in AdvanceInput, dir string) error 
 	// Save plan.
 	if err := savePlan(s, dir, plan); err != nil {
 		return err
+	}
+
+	// First-round auto-commit: one commit per item for crash safety.
+	if batch.EvalRound == 0 && s.Config.General.EnableCommits {
+		strategy := effectiveImplStrategy(s)
+		item := findItem(plan, itemID)
+		stageTargets := implScopeTargets(impl, item, strategy)
+		if _, err := AutoCommit(dir, strategy, stageTargets, in.Message); err != nil {
+			return fmt.Errorf("Error: STOP there was a failure with auto committing in forgectl, please tell the user: %s", err)
+		}
 	}
 
 	if batch.CurrentItemIndex < len(batch.Items)-1 {
@@ -906,6 +923,7 @@ func advancePhaseShift(s *ForgeState, in AdvanceInput, dir string) error {
 
 		s.Implementing = NewImplementingState()
 		s.Implementing.CurrentPlanFile = planPath
+		s.Implementing.CurrentPlanDomain = s.Planning.CurrentPlan.Domain
 		s.Phase = PhaseImplementing
 		s.State = StateOrient
 		s.PhaseShift = nil
@@ -925,6 +943,7 @@ func advancePhaseShift(s *ForgeState, in AdvanceInput, dir string) error {
 			entry := impl.PlanQueue[0]
 			impl.PlanQueue = impl.PlanQueue[1:]
 			impl.CurrentPlanFile = entry.File
+			impl.CurrentPlanDomain = entry.Domain
 			impl.CurrentLayer = nil
 			impl.BatchNumber = 0
 			impl.CurrentBatch = nil
@@ -1453,6 +1472,39 @@ func advanceREQueue(s *ForgeState, in AdvanceInput, dir string) error {
 	re.ExecuteItemIndex = 1
 	s.State = StateExecuteReverseEngineer
 	return ensureItemSpecsDir(re, dir)
+}
+
+// effectiveImplStrategy returns the implementing commit strategy, falling back to "scoped".
+func effectiveImplStrategy(s *ForgeState) string {
+	if s.Config.Implementing.CommitStrategy != "" {
+		return s.Config.Implementing.CommitStrategy
+	}
+	return "scoped"
+}
+
+// implScopeTargets returns the git staging targets for implementing phase commits.
+// item is the specific plan item being committed (used by strict strategy); nil
+// means use all items in the current batch (used at COMMIT time).
+func implScopeTargets(impl *ImplementingState, item *PlanItem, strategy string) []string {
+	switch strategy {
+	case "strict":
+		if item != nil {
+			return item.Files
+		}
+		return nil
+	case "scoped":
+		if impl.CurrentPlanDomain != "" {
+			return []string{impl.CurrentPlanDomain + "/"}
+		}
+		return nil
+	case "all-specs":
+		if impl.CurrentPlanDomain != "" {
+			return []string{impl.CurrentPlanDomain + "/specs/"}
+		}
+		return nil
+	default:
+		return nil
+	}
 }
 
 // ValidationError wraps multiple validation errors.
