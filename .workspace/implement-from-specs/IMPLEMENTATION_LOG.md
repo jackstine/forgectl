@@ -6,6 +6,16 @@ Log of implementation updates across sessions.
 
 ## Entries
 
+### 2026-06-19 — IMPLEMENT output: per-spec git-show Read command + review reminders
+- **Errors:** None
+- **All Tests Pass:** Yes (`go test ./...`)
+- **Notes:** Implemented spec 236a69e (batch-implementation.md). In `state/output.go` `StateImplement` rendering: (1) under each `Specs:` entry, when the current plan's `spec_commits` is non-empty, emit an indented `Read: git show <commits> -- '**/<file>'` line — `<commits>` is the space-joined `spec_commits`, `<file>` is the spec entry with its `#anchor` stripped (`strings.Cut(spec, "#")`) and wrapped in a `'**/<file>'` pathspec glob. Uses `git show` (not `git log -p`) so output is bounded to exactly the named commits; the glob self-filters. When `spec_commits` is empty, the line is omitted. (2) Added `writeImplementReviewReminders(w, indent, hasSpecCommits, hasRefs)` helper, called in both IMPLEMENT action branches (first round and post-eval round 2+). Always emits the spec-review reminder — git-command variant when spec_commits present, "read the spec file(s) listed above" fallback when empty — and the Refs-review reminder iff the item has `Refs`. Added 5 tests to `state/output_test.go` (`implSpecReadState` helper + per-criterion tests). The `docs/diagrams/03-implementing-phase.txt` diagram was already updated as part of the spec commit, so no derived-doc work was needed.
+
+### 2026-06-19 — git-root boundary in config-scaffolding ancestor walk
+- **Errors:** None
+- **All Tests Pass:** Yes (`go test ./...`)
+- **Notes:** Implemented spec a424859 (git-root boundary for `FindProjectRoot`). Modified `state/config.go`: within the walk loop, after checking for `.forgectl/`, now also checks for `.git/` — if found without `.forgectl/`, returns "not found" immediately, preventing inheritance of a `.forgectl/` above the repository boundary. A `.forgectl/` co-located with `.git/` is still recognized (checked first). Outside a git repo, the walk continues to the filesystem root unchanged. Added three new tests to `state/scaffold_test.go`: `TestScaffoldStopsWalkAtGitRoot`, `TestScaffoldUsesForgetclColocatedWithGitDir`, `TestScaffoldFallsBackToFullWalkOutsideGitRepo` — covering all three new spec edge-case scenarios.
+
 ### 2026-06-19 — scaffold-only mode + --phase-without-from rejection
 - **Errors:** None
 - **All Tests Pass:** Yes (`go test ./...`)

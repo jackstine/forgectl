@@ -161,6 +161,140 @@ func TestOutputImplementSpecsAndRefsMultiline(t *testing.T) {
 	}
 }
 
+// implSpecReadState builds an implementing ForgeState at IMPLEMENT (round 1)
+// whose single item carries the given specs/refs and whose current plan carries
+// the given spec_commits. Used to exercise the per-spec `Read:` git command and
+// the IMPLEMENT review reminders.
+func implSpecReadState(t *testing.T, dir string, specs, refs, commits []string) *ForgeState {
+	t.Helper()
+	planPath := filepath.Join(dir, "impl", "plan.json")
+	os.MkdirAll(filepath.Dir(planPath), 0755)
+
+	plan := PlanJSON{
+		Context: PlanContext{Domain: "test", Module: "mod"},
+		Layers:  []PlanLayerDef{{ID: "L0", Name: "Base", Items: []string{"x.item"}}},
+		Items: []PlanItem{
+			{
+				ID:          "x.item",
+				Name:        "X Item",
+				Description: "desc",
+				DependsOn:   []string{},
+				Passes:      "pending",
+				Specs:       specs,
+				Refs:        refs,
+				Tests:       []PlanTest{{Category: "functional", Description: "works"}},
+			},
+		},
+	}
+	data, _ := json.Marshal(plan)
+	os.WriteFile(planPath, data, 0644)
+
+	s := &ForgeState{
+		Phase: PhaseImplementing,
+		State: StateOrient,
+		Config: ForgeConfig{
+			Implementing: ImplementingConfig{
+				Batch: 1,
+				Eval:  EvalConfig{MinRounds: 1, MaxRounds: 3},
+			},
+		},
+		Planning: &PlanningState{
+			CurrentPlan: &ActivePlan{ID: 1, Name: "Test Plan", Domain: "test", File: "impl/plan.json", SpecCommits: commits},
+		},
+		Implementing: NewImplementingState(),
+	}
+
+	Advance(s, AdvanceInput{}, dir) // ORIENT → IMPLEMENT
+	if s.State != StateImplement {
+		t.Fatalf("expected IMPLEMENT, got %s", s.State)
+	}
+	return s
+}
+
+// TestOutputImplementReadCommandPerSpec verifies a bounded `git show` Read
+// command is emitted under a spec entry when the plan has spec_commits. It uses
+// git show (not git log) so the command resolves to exactly the named commits.
+func TestOutputImplementReadCommandPerSpec(t *testing.T) {
+	dir := t.TempDir()
+	s := implSpecReadState(t, dir, []string{"spec-sqlc-schemas.md#x"}, nil, []string{"e742a1b", "694ca99"})
+	out := outputOf(s, dir)
+
+	want := "Read: git show e742a1b 694ca99 -- '**/spec-sqlc-schemas.md'"
+	if !strings.Contains(out, want) {
+		t.Errorf("expected %q, got:\n%s", want, out)
+	}
+	if strings.Contains(out, "git log") {
+		t.Errorf("Read command must use git show, not git log, got:\n%s", out)
+	}
+}
+
+// TestOutputImplementOmitsReadCommandWhenNoSpecCommits verifies no Read line is
+// emitted when spec_commits is empty, and the spec-review reminder falls back to
+// "read the spec file(s) listed above."
+func TestOutputImplementOmitsReadCommandWhenNoSpecCommits(t *testing.T) {
+	dir := t.TempDir()
+	s := implSpecReadState(t, dir, []string{"spec-a.md#x"}, nil, nil)
+	out := outputOf(s, dir)
+
+	if strings.Contains(out, "Read:") {
+		t.Errorf("expected no Read line when spec_commits empty, got:\n%s", out)
+	}
+	if !strings.Contains(out, "read the spec file(s) listed above") {
+		t.Errorf("expected fallback reminder 'read the spec file(s) listed above', got:\n%s", out)
+	}
+}
+
+// TestOutputImplementReadCommandPerSpecEntry verifies multi-spec items get one
+// Read line each, with the #anchor stripped from the pathspec glob.
+func TestOutputImplementReadCommandPerSpecEntry(t *testing.T) {
+	dir := t.TempDir()
+	s := implSpecReadState(t, dir, []string{"a.md#x", "b.md#y"}, nil, []string{"abc1234"})
+	out := outputOf(s, dir)
+
+	for _, want := range []string{
+		"Read: git show abc1234 -- '**/a.md'",
+		"Read: git show abc1234 -- '**/b.md'",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("expected %q, got:\n%s", want, out)
+		}
+	}
+}
+
+// TestOutputImplementReviewReminderEveryRound verifies the spec-review reminder
+// appears on subsequent (post-eval) rounds, not only the first round.
+func TestOutputImplementReviewReminderEveryRound(t *testing.T) {
+	dir := t.TempDir()
+	s := implReentryState(t, dir, "report")
+	// The re-entry plan has no specs; give the current plan spec_commits so the
+	// git-command variant of the reminder is exercised on round 2+.
+	s.Planning.CurrentPlan.SpecCommits = []string{"abc1234"}
+	out := outputOf(s, dir)
+
+	want := "Please review the specification(s) above if you have not already done so"
+	if !strings.Contains(out, want) {
+		t.Errorf("expected spec-review reminder on round 2+, got:\n%s", out)
+	}
+}
+
+// TestOutputImplementRefsReminderGatedOnRefs verifies the Refs-review reminder
+// is present iff the item has Refs.
+func TestOutputImplementRefsReminderGatedOnRefs(t *testing.T) {
+	const refsReminder = "Please review the reference file(s) under Refs if you have not already done so."
+
+	dirWith := t.TempDir()
+	withRefs := implSpecReadState(t, dirWith, []string{"a.md#x"}, []string{"notes/a.md"}, []string{"abc1234"})
+	if out := outputOf(withRefs, dirWith); !strings.Contains(out, refsReminder) {
+		t.Errorf("expected Refs reminder when item has Refs, got:\n%s", out)
+	}
+
+	dirWithout := t.TempDir()
+	noRefs := implSpecReadState(t, dirWithout, []string{"a.md#x"}, nil, []string{"abc1234"})
+	if out := outputOf(noRefs, dirWithout); strings.Contains(out, refsReminder) {
+		t.Errorf("expected no Refs reminder when item has no Refs, got:\n%s", out)
+	}
+}
+
 // TestOutputOrientNextBatchCount verifies that after a COMMIT within a layer,
 // the ORIENT output shows "Next: N unblocked items in next batch".
 func TestOutputOrientNextBatchCount(t *testing.T) {

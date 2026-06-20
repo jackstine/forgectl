@@ -111,6 +111,27 @@ func writeRefineBody(w io.Writer, mode, evalFile, firstLabel, indent string) {
 	fmt.Fprintf(w, "%sthen apply corrections as needed.\n", indent)
 }
 
+// writeImplementReviewReminders writes the spec-review (and optional
+// reference-review) reminders shared by every IMPLEMENT action — first round
+// and every subsequent round. The item context is re-presented on each round,
+// so both lines are phrased "if you have not already done so." When the plan
+// has spec_commits the spec reminder points at the per-spec `Read:` git
+// command; when it does not, no such command was rendered, so the reminder
+// tells the engineer to read the spec files directly. The reference reminder is
+// emitted only when the item has Refs.
+func writeImplementReviewReminders(w io.Writer, indent string, hasSpecCommits, hasRefs bool) {
+	if hasSpecCommits {
+		fmt.Fprintf(w, "%sPlease review the specification(s) above if you have not already done so —\n", indent)
+		fmt.Fprintf(w, "%srun the git command shown under each spec to read its definition.\n", indent)
+	} else {
+		fmt.Fprintf(w, "%sPlease review the specification(s) above if you have not already done so —\n", indent)
+		fmt.Fprintf(w, "%sread the spec file(s) listed above.\n", indent)
+	}
+	if hasRefs {
+		fmt.Fprintf(w, "%sPlease review the reference file(s) under Refs if you have not already done so.\n", indent)
+	}
+}
+
 // writeEvalTrailingSections renders the per-mode --- PREVIOUS EVALUATIONS ---
 // and --- REPORT OUTPUT --- sections shared by every eval-context output
 // function. It emits a single leading blank line before the first section it
@@ -903,12 +924,24 @@ func printImplementingOutput(w io.Writer, s *ForgeState, dir string) {
 		if len(item.Files) > 0 {
 			fmt.Fprintf(w, "Files:   %s\n", strings.Join(item.Files, ", "))
 		}
+		specCommits := s.Planning.CurrentPlan.SpecCommits
 		if len(item.Specs) > 0 {
 			for i, spec := range item.Specs {
 				if i == 0 {
 					fmt.Fprintf(w, "Specs:   %s\n", spec)
 				} else {
 					fmt.Fprintf(w, "         %s\n", spec)
+				}
+				// Each spec entry carries a copy-pasteable git command bounded to
+				// the plan's spec_commits. git show (not git log -p) keeps the
+				// output to exactly the named commits; the '**/<file>' pathspec
+				// self-filters that list to the commits that touched the spec.
+				// Spec entries are display-only names with an optional #anchor, so
+				// strip the anchor and glob the basename rather than treating it
+				// as a validated on-disk path. Omitted when spec_commits is empty.
+				if len(specCommits) > 0 {
+					file, _, _ := strings.Cut(spec, "#")
+					fmt.Fprintf(w, "         Read: git show %s -- '**/%s'\n", strings.Join(specCommits, " "), file)
 				}
 			}
 		}
@@ -944,9 +977,11 @@ func printImplementingOutput(w io.Writer, s *ForgeState, dir string) {
 			evalFile := filepath.Join(evalDir, fmt.Sprintf("batch-%d-round-%d.md", impl.BatchNumber, lastEval.Round))
 			implRefineMode := EvalModeFor(s.Config.Implementing.Eval, s.Config.General)
 			writeRefineBody(w, implRefineMode, evalFile, "Action:  ", "         ")
+			writeImplementReviewReminders(w, "         ", len(specCommits) > 0, len(item.Refs) > 0)
 			fmt.Fprintf(w, "         After completion of the above, advance to continue.\n")
 		} else {
 			fmt.Fprintf(w, "Action:  Implement this item.\n")
+			writeImplementReviewReminders(w, "         ", len(specCommits) > 0, len(item.Refs) > 0)
 			fmt.Fprintf(w, "         After completion of the above, advance to continue.\n")
 		}
 
