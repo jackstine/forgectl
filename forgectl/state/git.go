@@ -4,21 +4,43 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 )
 
 // AutoCommit stages files per the given strategy and commits with message.
 // Returns the full commit hash on success.
+//
+// All git commands run from the repository root (resolved via git rev-parse
+// --show-toplevel) rather than projectRoot, so they work correctly even when
+// projectRoot is a subdirectory of the git repository.
 func AutoCommit(projectRoot string, strategy string, stageTargets []string, message string) (string, error) {
+	// Resolve the actual git root — projectRoot may be a subdirectory.
+	gitRoot, err := GitRepoRoot(projectRoot)
+	if err != nil {
+		return "", fmt.Errorf("resolving git root: %w", err)
+	}
+
+	// Convert relative stage targets to absolute paths anchored at projectRoot
+	// so they resolve correctly regardless of where gitRoot is.
+	absTargets := make([]string, len(stageTargets))
+	for i, t := range stageTargets {
+		if filepath.IsAbs(t) {
+			absTargets[i] = t
+		} else {
+			absTargets[i] = filepath.Join(projectRoot, t)
+		}
+	}
+
 	var addArgs []string
 	switch strategy {
 	case "strict", "all-specs", "scoped":
 		// Stage specific paths passed in stageTargets.
-		addArgs = append([]string{"-C", projectRoot, "add"}, stageTargets...)
+		addArgs = append([]string{"-C", gitRoot, "add"}, absTargets...)
 	case "tracked":
-		addArgs = []string{"-C", projectRoot, "add", "-u"}
+		addArgs = []string{"-C", gitRoot, "add", "-u"}
 	case "all":
-		addArgs = []string{"-C", projectRoot, "add", "-A"}
+		addArgs = []string{"-C", gitRoot, "add", "-A"}
 	default:
 		return "", fmt.Errorf("unknown commit strategy %q", strategy)
 	}
@@ -28,7 +50,7 @@ func AutoCommit(projectRoot string, strategy string, stageTargets []string, mess
 		return "", fmt.Errorf("git add failed: %s", strings.TrimSpace(string(out)))
 	}
 
-	commitCmd := exec.Command("git", "-C", projectRoot, "commit", "-m", message)
+	commitCmd := exec.Command("git", "-C", gitRoot, "commit", "-m", message)
 	commitOut, commitErr := commitCmd.CombinedOutput()
 	if commitErr != nil {
 		outStr := strings.TrimSpace(string(commitOut))
@@ -39,7 +61,7 @@ func AutoCommit(projectRoot string, strategy string, stageTargets []string, mess
 		return "", fmt.Errorf("git commit failed: %s", outStr)
 	}
 
-	hashCmd := exec.Command("git", "-C", projectRoot, "rev-parse", "HEAD")
+	hashCmd := exec.Command("git", "-C", gitRoot, "rev-parse", "HEAD")
 	out, err := hashCmd.Output()
 	if err != nil {
 		return "", fmt.Errorf("git rev-parse HEAD failed: %w", err)

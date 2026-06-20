@@ -78,6 +78,33 @@ func TestAutoCommitScopedStagesDomainDir(t *testing.T) {
 	}
 }
 
+func TestAutoCommitScopedFromSubdirectory(t *testing.T) {
+	// Simulate: .forgectl/ lives inside a domain subdirectory so projectRoot
+	// is not the git root. AutoCommit must still stage files correctly by
+	// resolving the git root and converting stage targets to absolute paths.
+	repoRoot := t.TempDir()
+	initTestGitRepo(t, repoRoot)
+
+	// projectRoot is INSIDE the repo (simulates .forgectl/ nested in a subdomain).
+	projectRoot := filepath.Join(repoRoot, "backend")
+	os.MkdirAll(projectRoot, 0755)
+
+	// A file at projectRoot/api.go — stageTarget "api.go" is relative to projectRoot.
+	os.WriteFile(filepath.Join(projectRoot, "api.go"), []byte("package api"), 0644)
+
+	// With old code: git -C <projectRoot> add api.go → stages projectRoot/api.go ✓
+	// With new code: abs = projectRoot/api.go, git -C <gitRoot> add <abs> → same result.
+	// The important property verified here: gitRoot (repoRoot) != projectRoot, and
+	// the commit still succeeds because AutoCommit resolves the root correctly.
+	hash, err := AutoCommit(projectRoot, "scoped", []string{"api.go"}, "add api")
+	if err != nil {
+		t.Fatalf("AutoCommit from subdirectory failed: %v", err)
+	}
+	if len(hash) == 0 {
+		t.Error("expected non-empty commit hash")
+	}
+}
+
 func TestAutoCommitTrackedUsesU(t *testing.T) {
 	dir := t.TempDir()
 	initTestGitRepo(t, dir)

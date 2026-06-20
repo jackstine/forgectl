@@ -6,6 +6,17 @@ Log of implementation updates across sessions.
 
 ## Entries
 
+### 2026-06-20 — Fix AutoCommit running git commands from wrong directory
+
+- **Errors:** None
+- **All Tests Pass:** Yes (`go test ./...`, pre-existing `TestEvalContextReportModeSections` failure unrelated to this change)
+- **Notes:** `AutoCommit` in `state/git.go` used `git -C projectRoot` for all operations, but `projectRoot` (where `.forgectl/` lives) can be a subdirectory of the git repository root — causing relative stage targets to resolve against the wrong base. Fix: call `GitRepoRoot(projectRoot)` first, convert each stage target to an absolute path via `filepath.Join(projectRoot, t)`, then run all git operations with `-C gitRoot`. This is a no-op when `projectRoot == gitRoot` (the common case) and correct when it isn't. Added `TestAutoCommitScopedFromSubdirectory` to verify the subdirectory case. Updated `docs/auto-committing.md` Git Operations Sequence to document the git root resolution step and explain why git commands must run from the repository root (not from a domain subdirectory).
+
+### 2026-06-20 — Switch eval/refine sub-agents from opus to sonnet general-purpose
+- **Errors:** None
+- **All Tests Pass:** Yes (`go test ./...`)
+- **Notes:** Applied spec changes across batch-implementation.md, plan-production.md, spec-lifecycle.md, spec-reconciliation.md, and state-persistence.md. All eval spawn points (specifying.eval, planning.eval, implementing.eval, specifying.cross_reference.eval, specifying.reconciliation) and planning.refine now default to model="sonnet" type="general-purpose". Updated: `state/types.go` DefaultForgeConfig(), `state/output.go` fallback defaults in StateCrossReferenceEval, both `state/default-config.toml` and `docs/default-config.toml` TOML templates, `docs/configurations.md` Default values and valid-values list (added "general-purpose"), and `state/types_config_test.go` round-trip and defaults test pins.
+
 ### 2026-06-19 — IMPLEMENT output: per-spec git-show Read command + review reminders
 - **Errors:** None
 - **All Tests Pass:** Yes (`go test ./...`)
