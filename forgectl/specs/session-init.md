@@ -251,7 +251,7 @@ The `[logs]` section in `.forgectl/config` is validated at init:
 
 1. **No implicit state.** All information for transitions is in the state file (and plan.json during implementing).
 2. **Config locked at init.** The state file's `config` object is the single source of truth for the session. `.forgectl/config` is not re-read after init.
-3. **Reuse over create; never overwrite.** When a `.forgectl/` exists anywhere in the directory hierarchy it is always reused as the project root rather than creating another; a new `.forgectl/` is created only when none exists in the hierarchy. An existing `.forgectl/config` is never read, modified, or overwritten by init. (See config-scaffolding.)
+3. **Reuse over create; never overwrite.** When a `.forgectl/` exists within the searchable ancestor chain (bounded by the git root or the filesystem root) it is always reused as the project root rather than creating another; a new `.forgectl/` is created only when none is found within that boundary. An existing `.forgectl/config` is never read, modified, or overwritten by init. (See config-scaffolding.)
 4. **Session ID generated once.** `session_id` is a UUID v4 created at init and never changes for the lifetime of the session.
 5. **Logging is best-effort.** Log file creation failure prints a warning but does not prevent init from completing.
 
