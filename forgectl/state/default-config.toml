@@ -34,9 +34,9 @@ min_rounds = 1
 # Maximum eval rounds. FAIL at this threshold forces acceptance.
 max_rounds = 3
 # Sub-agent role for this spawn point.
-type = "eval"
+type = "general-purpose"
 # Model name for spec batch evaluation.
-model = "opus"
+model = "sonnet"
 # Number of sub-agents to spawn for evaluation.
 count = 1
 # How eval findings are recorded and applied:
@@ -65,9 +65,9 @@ user_review = false
 
 [specifying.cross_reference.eval]
 # Sub-agent role for this spawn point.
-type = "eval"
+type = "general-purpose"
 # Model name for evaluating cross-reference work.
-model = "opus"
+model = "sonnet"
 # Number of sub-agents to spawn for cross-reference evaluation.
 count = 1
 
@@ -78,9 +78,9 @@ min_rounds = 0
 # Maximum reconciliation rounds. FAIL at this threshold forces completion.
 max_rounds = 3
 # Sub-agent role for this spawn point.
-type = "eval"
+type = "general-purpose"
 # Model name for reconciliation evaluation.
-model = "opus"
+model = "sonnet"
 # Number of sub-agents to spawn for reconciliation evaluation.
 count = 1
 # When true, RECONCILE_REVIEW action includes "STOP please review and discuss
@@ -121,9 +121,9 @@ min_rounds = 1
 # Maximum eval rounds. FAIL at this threshold forces acceptance.
 max_rounds = 3
 # Sub-agent role for this spawn point.
-type = "eval"
+type = "general-purpose"
 # Model name for plan evaluation.
-model = "opus"
+model = "sonnet"
 # Number of sub-agents to spawn for plan evaluation.
 count = 1
 # How eval findings are recorded and applied:
@@ -137,9 +137,9 @@ enable_eval_output = false
 
 [planning.refine]
 # Sub-agent role for this spawn point.
-type = "refine"
+type = "general-purpose"
 # Model name for updating plan from eval findings.
-model = "opus"
+model = "sonnet"
 # Number of sub-agents to spawn for plan refinement.
 count = 1
 
@@ -160,9 +160,9 @@ min_rounds = 1
 # Maximum eval rounds. FAIL at this threshold forces acceptance.
 max_rounds = 3
 # Sub-agent role for this spawn point.
-type = "eval"
+type = "general-purpose"
 # Model name for implementation evaluation.
-model = "opus"
+model = "sonnet"
 # Number of sub-agents to spawn for implementation evaluation.
 count = 1
 # How eval findings are recorded and applied:

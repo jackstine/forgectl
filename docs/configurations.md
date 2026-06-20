@@ -167,7 +167,7 @@ path = "pkg/internal/databases"
 
 Every configuration section that involves spawning sub-agents includes `type`, `model`, and `count`:
 
-- **`type`** — The role of the sub-agent at this spawn point. Valid values: `"eval"`, `"explore"`, `"refine"`.
+- **`type`** — The role of the sub-agent at this spawn point. Valid values: `"eval"`, `"explore"`, `"refine"`, `"general-purpose"`.
 - **`model`** — A string identifying the model for the sub-agent. Can be a model name (e.g., `"opus"`, `"haiku"`) or a descriptive phrase (e.g., `"opus explorer"`, `"spec-eval-expert"`).
 - **`count`** — An integer specifying how many sub-agents to spawn. Must be >= 1.
 
@@ -202,14 +202,14 @@ Maximum evaluation rounds for a spec batch. FAIL at this threshold forces accept
 #### `specifying.eval.type`
 
 - **Type:** string
-- **Default:** `"eval"`
+- **Default:** `"general-purpose"`
 
 Sub-agent role for spec batch evaluation at EVALUATE state.
 
 #### `specifying.eval.model`
 
 - **Type:** string
-- **Default:** `"opus"`
+- **Default:** `"sonnet"`
 
 Model name for spec batch evaluation at EVALUATE state.
 
@@ -291,14 +291,14 @@ When true, the scaffold pauses at CROSS_REFERENCE_REVIEW after the first CROSS_R
 #### `specifying.cross_reference.eval.type`
 
 - **Type:** string
-- **Default:** `"eval"`
+- **Default:** `"general-purpose"`
 
 Sub-agent role for evaluating cross-reference work at CROSS_REFERENCE_EVAL state.
 
 #### `specifying.cross_reference.eval.model`
 
 - **Type:** string
-- **Default:** `"opus"`
+- **Default:** `"sonnet"`
 
 Model name for evaluating cross-reference work at CROSS_REFERENCE_EVAL state.
 
@@ -329,14 +329,14 @@ Maximum reconciliation eval rounds. FAIL at this threshold forces completion.
 #### `specifying.reconciliation.type`
 
 - **Type:** string
-- **Default:** `"eval"`
+- **Default:** `"general-purpose"`
 
 Sub-agent role for reconciliation evaluation at RECONCILE_EVAL state.
 
 #### `specifying.reconciliation.model`
 
 - **Type:** string
-- **Default:** `"opus"`
+- **Default:** `"sonnet"`
 
 Model name for reconciliation evaluation at RECONCILE_EVAL state.
 
@@ -432,14 +432,14 @@ Maximum evaluation rounds for a plan. FAIL at this threshold forces acceptance.
 #### `planning.eval.type`
 
 - **Type:** string
-- **Default:** `"eval"`
+- **Default:** `"general-purpose"`
 
 Sub-agent role for plan evaluation at EVALUATE state.
 
 #### `planning.eval.model`
 
 - **Type:** string
-- **Default:** `"opus"`
+- **Default:** `"sonnet"`
 
 Model name for plan evaluation at EVALUATE state.
 
@@ -476,14 +476,14 @@ Back-compat for sessions predating `eval_mode`. Consulted only when `eval_mode` 
 #### `planning.refine.type`
 
 - **Type:** string
-- **Default:** `"refine"`
+- **Default:** `"general-purpose"`
 
 Sub-agent role for updating plan from eval findings at REFINE state.
 
 #### `planning.refine.model`
 
 - **Type:** string
-- **Default:** `"opus"`
+- **Default:** `"sonnet"`
 
 Model name for updating plan from eval findings at REFINE state.
 
@@ -532,14 +532,14 @@ Maximum evaluation rounds for an implementation batch. FAIL at this threshold fo
 #### `implementing.eval.type`
 
 - **Type:** string
-- **Default:** `"eval"`
+- **Default:** `"general-purpose"`
 
 Sub-agent role for implementation evaluation at EVALUATE state.
 
 #### `implementing.eval.model`
 
 - **Type:** string
-- **Default:** `"opus"`
+- **Default:** `"sonnet"`
 
 Model name for implementation evaluation at EVALUATE state.
 

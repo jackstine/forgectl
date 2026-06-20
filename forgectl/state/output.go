@@ -337,10 +337,10 @@ func printSpecifyingOutput(w io.Writer, s *ForgeState, dir string) {
 		evalFile := filepath.Join(currentDomain, "specs", ".eval", fmt.Sprintf("cross-reference-r%d.md", cr.Round))
 		crEval := s.Config.Specifying.CrossReference.Eval
 		if crEval.Model == "" {
-			crEval.Model = "opus"
+			crEval.Model = "sonnet"
 		}
 		if crEval.Type == "" {
-			crEval.Type = "eval"
+			crEval.Type = "general-purpose"
 		}
 		if crEval.Count == 0 {
 			crEval.Count = 1

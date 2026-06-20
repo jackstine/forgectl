@@ -251,7 +251,7 @@ Completed session state files are archived to a permanent directory within `stat
     "specifying": {
       "batch": 3,
       "commit_strategy": "all-specs",
-      "eval": { "min_rounds": 1, "max_rounds": 3, "model": "opus", "type": "eval", "count": 1, "eval_mode": "conversational" },
+      "eval": { "min_rounds": 1, "max_rounds": 3, "model": "sonnet", "type": "general-purpose", "count": 1, "eval_mode": "conversational" },
       "cross_reference": {
         "min_rounds": 1,
         "max_rounds": 2,
@@ -259,9 +259,9 @@ Completed session state files are archived to a permanent directory within `stat
         "type": "explore",
         "count": 3,
         "user_review": false,
-        "eval": { "model": "opus", "type": "eval", "count": 1 }
+        "eval": { "model": "sonnet", "type": "general-purpose", "count": 1 }
       },
-      "reconciliation": { "min_rounds": 0, "max_rounds": 3, "model": "opus", "type": "eval", "count": 1, "user_review": false }
+      "reconciliation": { "min_rounds": 0, "max_rounds": 3, "model": "sonnet", "type": "general-purpose", "count": 1, "user_review": false }
     },
     "planning": {
       "batch": 1,
@@ -269,13 +269,13 @@ Completed session state files are archived to a permanent directory within `stat
       "self_review": false,
       "plan_all_before_implementing": false,
       "study_code": { "model": "haiku", "type": "explore", "count": 3 },
-      "eval": { "min_rounds": 1, "max_rounds": 3, "model": "opus", "type": "eval", "count": 1, "eval_mode": "conversational" },
-      "refine": { "model": "opus", "type": "refine", "count": 1 }
+      "eval": { "min_rounds": 1, "max_rounds": 3, "model": "sonnet", "type": "general-purpose", "count": 1, "eval_mode": "conversational" },
+      "refine": { "model": "sonnet", "type": "general-purpose", "count": 1 }
     },
     "implementing": {
       "batch": 2,
       "commit_strategy": "scoped",
-      "eval": { "min_rounds": 1, "max_rounds": 3, "model": "opus", "type": "eval", "count": 1, "eval_mode": "conversational" }
+      "eval": { "min_rounds": 1, "max_rounds": 3, "model": "sonnet", "type": "general-purpose", "count": 1, "eval_mode": "conversational" }
     },
     "paths": {
       "state_dir": ".forgectl/state",

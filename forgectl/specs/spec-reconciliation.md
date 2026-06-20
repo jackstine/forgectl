@@ -68,7 +68,7 @@ Action:  Cross-validate all specs across domains: verify Depends On entries,
 State:   RECONCILE_EVAL
 Phase:   specifying
 Round:   1/3
-Action:  Please spawn 1 opus sub-agent to evaluate cross-domain reconciliation.
+Action:  Please spawn 1 sonnet general-purpose sub-agent to evaluate cross-domain reconciliation.
          The sub-agent should run: forgectl eval
          After completion of the above, advance with --verdict PASS|FAIL --eval-report <path>
 ```
@@ -79,7 +79,7 @@ Action:  Please spawn 1 opus sub-agent to evaluate cross-domain reconciliation.
 State:   RECONCILE_EVAL
 Phase:   specifying
 Round:   1/3
-Action:  Please spawn 1 opus sub-agent to evaluate and correct the reconciliation.
+Action:  Please spawn 1 sonnet general-purpose sub-agent to evaluate and correct the reconciliation.
          Sub-agent runs: forgectl eval
          Spec files have been staged. Sub-agent makes corrections directly.
          After completion of the above, advance with --verdict PASS|FAIL
@@ -91,7 +91,7 @@ Action:  Please spawn 1 opus sub-agent to evaluate and correct the reconciliatio
 State:   RECONCILE_EVAL
 Phase:   specifying
 Round:   1/3
-Action:  Please spawn 1 opus sub-agent to evaluate cross-domain reconciliation.
+Action:  Please spawn 1 sonnet general-purpose sub-agent to evaluate cross-domain reconciliation.
          The sub-agent should run: forgectl eval
          After completion of the above, advance with --verdict PASS|FAIL
 ```

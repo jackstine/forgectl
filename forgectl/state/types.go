@@ -57,7 +57,7 @@ const (
 // AgentConfig specifies which Claude model/agent type to use for a task.
 type AgentConfig struct {
 	Model string `json:"model"` // "opus", "haiku", "sonnet"
-	Type  string `json:"type"`  // "eval", "explore", "refine"
+	Type  string `json:"type"`  // "eval", "explore", "refine", "general-purpose"
 	Count int    `json:"count"`
 }
 
@@ -196,8 +196,8 @@ func DefaultForgeConfig() ForgeConfig {
 				MinRounds: 1,
 				MaxRounds: 3,
 				AgentConfig: AgentConfig{
-					Model: "opus",
-					Type:  "eval",
+					Model: "sonnet",
+					Type:  "general-purpose",
 					Count: 1,
 				},
 				EvalMode: "report",
@@ -212,8 +212,8 @@ func DefaultForgeConfig() ForgeConfig {
 				},
 				UserReview: false,
 				Eval: AgentConfig{
-					Model: "opus",
-					Type:  "eval",
+					Model: "sonnet",
+					Type:  "general-purpose",
 					Count: 1,
 				},
 			},
@@ -221,8 +221,8 @@ func DefaultForgeConfig() ForgeConfig {
 				MinRounds: 0,
 				MaxRounds: 3,
 				AgentConfig: AgentConfig{
-					Model: "opus",
-					Type:  "eval",
+					Model: "sonnet",
+					Type:  "general-purpose",
 					Count: 1,
 				},
 				UserReview: false,
@@ -242,16 +242,16 @@ func DefaultForgeConfig() ForgeConfig {
 				MinRounds: 1,
 				MaxRounds: 3,
 				AgentConfig: AgentConfig{
-					Model: "opus",
-					Type:  "eval",
+					Model: "sonnet",
+					Type:  "general-purpose",
 					Count: 1,
 				},
 				EvalMode: "report",
 			},
 			Refine: RefineConfig{
 				AgentConfig: AgentConfig{
-					Model: "opus",
-					Type:  "refine",
+					Model: "sonnet",
+					Type:  "general-purpose",
 					Count: 1,
 				},
 			},
@@ -263,8 +263,8 @@ func DefaultForgeConfig() ForgeConfig {
 				MinRounds: 1,
 				MaxRounds: 3,
 				AgentConfig: AgentConfig{
-					Model: "opus",
-					Type:  "eval",
+					Model: "sonnet",
+					Type:  "general-purpose",
 					Count: 1,
 				},
 				EvalMode: "report",

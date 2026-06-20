@@ -224,7 +224,7 @@ Round:    1/3
 Items:
   - [config.types] ServiceEndpoint and ServicesConfig structs
   - [config.load] Load YAML, apply defaults, validate strictly
-Action:   Please spawn 1 opus eval sub-agent to evaluate the implementation batch.
+Action:   Please spawn 1 sonnet general-purpose sub-agent to evaluate the implementation batch.
           The sub-agent should run: forgectl eval
           After completion of the above, advance with --eval-report <path> --verdict PASS|FAIL
 ```
@@ -240,7 +240,7 @@ Round:    1/3
 Items:
   - [config.types] ServiceEndpoint and ServicesConfig structs
   - [config.load] Load YAML, apply defaults, validate strictly
-Action:   Please spawn 1 opus eval sub-agent to evaluate and correct the batch.
+Action:   Please spawn 1 sonnet general-purpose sub-agent to evaluate and correct the batch.
           Sub-agent runs: forgectl eval
           Batch files have been staged. Sub-agent makes corrections directly.
           After completion of the above, advance with --verdict PASS|FAIL
@@ -257,7 +257,7 @@ Round:    1/3
 Items:
   - [config.types] ServiceEndpoint and ServicesConfig structs
   - [config.load] Load YAML, apply defaults, validate strictly
-Action:   Please spawn 1 opus eval sub-agent to evaluate the implementation batch.
+Action:   Please spawn 1 sonnet general-purpose sub-agent to evaluate the implementation batch.
           The sub-agent should run: forgectl eval
           After completion of the above, advance with --verdict PASS|FAIL
 ```

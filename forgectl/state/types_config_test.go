@@ -25,8 +25,8 @@ func TestForgeConfigJSONRoundTrip(t *testing.T) {
 				MinRounds: 1,
 				MaxRounds: 3,
 				AgentConfig: AgentConfig{
-					Model: "opus",
-					Type:  "eval",
+					Model: "sonnet",
+					Type:  "general-purpose",
 					Count: 1,
 				},
 				EnableEvalOutput: false,
@@ -41,8 +41,8 @@ func TestForgeConfigJSONRoundTrip(t *testing.T) {
 				},
 				UserReview: false,
 				Eval: AgentConfig{
-					Model: "opus",
-					Type:  "eval",
+					Model: "sonnet",
+					Type:  "general-purpose",
 					Count: 1,
 				},
 			},
@@ -50,8 +50,8 @@ func TestForgeConfigJSONRoundTrip(t *testing.T) {
 				MinRounds: 0,
 				MaxRounds: 3,
 				AgentConfig: AgentConfig{
-					Model: "opus",
-					Type:  "eval",
+					Model: "sonnet",
+					Type:  "general-purpose",
 					Count: 1,
 				},
 				UserReview: false,
@@ -73,16 +73,16 @@ func TestForgeConfigJSONRoundTrip(t *testing.T) {
 				MinRounds: 1,
 				MaxRounds: 3,
 				AgentConfig: AgentConfig{
-					Model: "opus",
-					Type:  "eval",
+					Model: "sonnet",
+					Type:  "general-purpose",
 					Count: 1,
 				},
 				EnableEvalOutput: false,
 			},
 			Refine: RefineConfig{
 				AgentConfig: AgentConfig{
-					Model: "opus",
-					Type:  "refine",
+					Model: "sonnet",
+					Type:  "general-purpose",
 					Count: 1,
 				},
 			},
@@ -94,8 +94,8 @@ func TestForgeConfigJSONRoundTrip(t *testing.T) {
 				MinRounds: 1,
 				MaxRounds: 3,
 				AgentConfig: AgentConfig{
-					Model: "opus",
-					Type:  "eval",
+					Model: "sonnet",
+					Type:  "general-purpose",
 					Count: 1,
 				},
 				EnableEvalOutput: false,
@@ -208,17 +208,17 @@ func TestDefaultForgeConfigValues(t *testing.T) {
 	if cfg.Specifying.CrossReference.Model != "haiku" || cfg.Specifying.CrossReference.Count != 3 {
 		t.Errorf("specifying.cross_reference: got model=%q count=%d, want haiku/3", cfg.Specifying.CrossReference.Model, cfg.Specifying.CrossReference.Count)
 	}
-	if cfg.Specifying.CrossReference.Eval.Model != "opus" || cfg.Specifying.CrossReference.Eval.Count != 1 {
-		t.Errorf("specifying.cross_reference.eval: got model=%q count=%d, want opus/1", cfg.Specifying.CrossReference.Eval.Model, cfg.Specifying.CrossReference.Eval.Count)
+	if cfg.Specifying.CrossReference.Eval.Model != "sonnet" || cfg.Specifying.CrossReference.Eval.Count != 1 {
+		t.Errorf("specifying.cross_reference.eval: got model=%q count=%d, want sonnet/1", cfg.Specifying.CrossReference.Eval.Model, cfg.Specifying.CrossReference.Eval.Count)
 	}
-	if cfg.Specifying.Reconciliation.Model != "opus" || cfg.Specifying.Reconciliation.MaxRounds != 3 {
-		t.Errorf("specifying.reconciliation: got model=%q max_rounds=%d, want opus/3", cfg.Specifying.Reconciliation.Model, cfg.Specifying.Reconciliation.MaxRounds)
+	if cfg.Specifying.Reconciliation.Model != "sonnet" || cfg.Specifying.Reconciliation.MaxRounds != 3 {
+		t.Errorf("specifying.reconciliation: got model=%q max_rounds=%d, want sonnet/3", cfg.Specifying.Reconciliation.Model, cfg.Specifying.Reconciliation.MaxRounds)
 	}
 	if cfg.Planning.StudyCode.Model != "haiku" || cfg.Planning.StudyCode.Count != 3 {
 		t.Errorf("planning.study_code: got model=%q count=%d, want haiku/3", cfg.Planning.StudyCode.Model, cfg.Planning.StudyCode.Count)
 	}
-	if cfg.Planning.Refine.Model != "opus" || cfg.Planning.Refine.Type != "refine" {
-		t.Errorf("planning.refine: got model=%q type=%q, want opus/refine", cfg.Planning.Refine.Model, cfg.Planning.Refine.Type)
+	if cfg.Planning.Refine.Model != "sonnet" || cfg.Planning.Refine.Type != "general-purpose" {
+		t.Errorf("planning.refine: got model=%q type=%q, want sonnet/general-purpose", cfg.Planning.Refine.Model, cfg.Planning.Refine.Type)
 	}
 
 	// Min/max round defaults

@@ -187,7 +187,7 @@ Plan:    Service Configuration
 Domain:  launcher
 File:    launcher/.forgectl_workspace/implementation_plan/plan.json
 Round:   1/3
-Action:  Please spawn 1 opus eval sub-agent to evaluate the plan.
+Action:  Please spawn 1 sonnet general-purpose sub-agent to evaluate the plan.
          Sub-agent runs: forgectl eval
          After completion of the above, advance with --verdict PASS|FAIL --eval-report <path>
 ```
@@ -201,7 +201,7 @@ Plan:    Service Configuration
 Domain:  launcher
 File:    launcher/.forgectl_workspace/implementation_plan/plan.json
 Round:   1/3
-Action:  Please spawn 1 opus eval sub-agent to evaluate and correct the plan.
+Action:  Please spawn 1 sonnet general-purpose sub-agent to evaluate and correct the plan.
          Sub-agent runs: forgectl eval
          Plan files have been staged. Sub-agent makes corrections directly.
          After completion of the above, advance with --verdict PASS|FAIL
@@ -216,7 +216,7 @@ Plan:    Service Configuration
 Domain:  launcher
 File:    launcher/.forgectl_workspace/implementation_plan/plan.json
 Round:   1/3
-Action:  Please spawn 1 opus eval sub-agent to evaluate the plan.
+Action:  Please spawn 1 sonnet general-purpose sub-agent to evaluate the plan.
          Sub-agent runs: forgectl eval
          After completion of the above, advance with --verdict PASS|FAIL
 ```

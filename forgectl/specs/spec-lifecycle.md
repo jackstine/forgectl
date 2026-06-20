@@ -151,7 +151,7 @@ Specs:
   [1] repository-loading.md
   [2] snapshot-diffing.md
   [3] cache-invalidation.md
-Action:  Please spawn 1 opus eval sub-agent to evaluate the spec batch.
+Action:  Please spawn 1 sonnet general-purpose sub-agent to evaluate the spec batch.
          The sub-agent should run: forgectl eval
          After completion of the above, advance with --verdict PASS|FAIL --eval-report <path>
 ```
@@ -169,7 +169,7 @@ Specs:
   [1] repository-loading.md
   [2] snapshot-diffing.md
   [3] cache-invalidation.md
-Action:  Please spawn 1 opus eval sub-agent to evaluate and correct the spec.
+Action:  Please spawn 1 sonnet general-purpose sub-agent to evaluate and correct the spec.
          Sub-agent runs: forgectl eval
          Spec files have been staged. Sub-agent makes corrections directly.
          After completion of the above, advance with --verdict PASS|FAIL
@@ -188,7 +188,7 @@ Specs:
   [1] repository-loading.md
   [2] snapshot-diffing.md
   [3] cache-invalidation.md
-Action:  Please spawn 1 opus eval sub-agent to evaluate the spec batch.
+Action:  Please spawn 1 sonnet general-purpose sub-agent to evaluate the spec batch.
          The sub-agent should run: forgectl eval
          After completion of the above, advance with --verdict PASS|FAIL
 ```
@@ -305,7 +305,7 @@ Domain:  optimizer
 Path:    optimizer/
 Round:   1/2
 
-Action:  Please spawn 1 opus eval sub-agent to evaluate cross-reference consistency.
+Action:  Please spawn 1 sonnet general-purpose sub-agent to evaluate cross-reference consistency.
          The sub-agent should run: forgectl eval
          After completion of the above, advance with --verdict PASS|FAIL --eval-report <path>
 ```
@@ -319,7 +319,7 @@ Domain:  optimizer
 Path:    optimizer/
 Round:   1/2
 
-Action:  Please spawn 1 opus eval sub-agent to evaluate and correct cross-references.
+Action:  Please spawn 1 sonnet general-purpose sub-agent to evaluate and correct cross-references.
          Sub-agent runs: forgectl eval
          Spec files have been staged. Sub-agent makes corrections directly.
          After completion of the above, advance with --verdict PASS|FAIL
@@ -334,7 +334,7 @@ Domain:  optimizer
 Path:    optimizer/
 Round:   1/2
 
-Action:  Please spawn 1 opus eval sub-agent to evaluate cross-reference consistency.
+Action:  Please spawn 1 sonnet general-purpose sub-agent to evaluate cross-reference consistency.
          The sub-agent should run: forgectl eval
          After completion of the above, advance with --verdict PASS|FAIL
 ```
