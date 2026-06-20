@@ -23,28 +23,22 @@ var initCmd = &cobra.Command{
 }
 
 func init() {
-	initCmd.Flags().StringVar(&initFrom, "from", "", "Path to input file (required)")
+	initCmd.Flags().StringVar(&initFrom, "from", "", "Path to input file (required for session init)")
 	initCmd.Flags().StringVar(&initPhase, "phase", "specifying", "Starting phase: specifying, planning, implementing, reverse_engineering")
-	_ = initCmd.MarkFlagRequired("from")
 	rootCmd.AddCommand(initCmd)
 }
 
 func runInit(cmd *cobra.Command, args []string) error {
-	// Reject generate_planning_queue as an explicit --phase value.
-	if initPhase == string(state.PhaseGeneratePlanningQueue) {
-		return fmt.Errorf("generate_planning_queue requires a completed specifying phase. Use --phase specifying instead.")
-	}
+	fromSet := initFrom != ""
+	phaseSet := cmd.Flags().Changed("phase")
 
-	validPhases := map[string]bool{"specifying": true, "planning": true, "implementing": true, "reverse_engineering": true}
-	if !validPhases[initPhase] {
-		return fmt.Errorf("--phase must be specifying, planning, implementing, or reverse_engineering")
+	// --phase without --from has no meaning.
+	if phaseSet && !fromSet {
+		return fmt.Errorf("--from is required when --phase is set.")
 	}
 
 	out := cmd.OutOrStdout()
 
-	// Configuration scaffolding runs first: guarantee .forgectl/ and a default
-	// .forgectl/config exist so a brand-new project can be initialized without
-	// manual setup. The fresh-default notice is printed before any session output.
 	cwd, err := os.Getwd()
 	if err != nil {
 		return err
@@ -55,6 +49,21 @@ func runInit(cmd *cobra.Command, args []string) error {
 	}
 	if scaffold.CreatedConfig {
 		fmt.Fprintln(out, "Created default .forgectl/config. Domain-aware spec placement is not enforced until [[domains]] entries are added to it.")
+	}
+
+	// Scaffold-only mode: no --from provided, scaffolding is the entire action.
+	if !fromSet {
+		return nil
+	}
+
+	// Reject generate_planning_queue as an explicit --phase value.
+	if initPhase == string(state.PhaseGeneratePlanningQueue) {
+		return fmt.Errorf("generate_planning_queue requires a completed specifying phase. Use --phase specifying instead.")
+	}
+
+	validPhases := map[string]bool{"specifying": true, "planning": true, "implementing": true, "reverse_engineering": true}
+	if !validPhases[initPhase] {
+		return fmt.Errorf("--phase must be specifying, planning, implementing, or reverse_engineering")
 	}
 
 	// Load and validate config. Scaffolding guarantees the file exists; any read

@@ -208,6 +208,121 @@ func TestInitScaffoldsConfigWhenAbsent(t *testing.T) {
 	}
 }
 
+// TestBareInitCreatesScaffolding verifies the spec criterion "Bare init creates
+// scaffolding when nothing exists": forgectl init with no flags bootstraps
+// .forgectl/ and a default config, exits with code 0, and creates no state file.
+func TestBareInitCreatesScaffolding(t *testing.T) {
+	dir := t.TempDir()
+	orig, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chdir(dir); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		os.Chdir(orig)
+		initFrom = ""
+		initPhase = "specifying"
+	})
+
+	initFrom = ""
+	initPhase = "specifying"
+
+	var buf bytes.Buffer
+	rootCmd.SetOut(&buf)
+
+	if err := runInit(initCmd, nil); err != nil {
+		t.Fatalf("bare init: %v", err)
+	}
+
+	// .forgectl/ and config were created.
+	if info, err := os.Stat(filepath.Join(dir, ".forgectl")); err != nil || !info.IsDir() {
+		t.Fatalf(".forgectl/ not created: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, ".forgectl", "config")); err != nil {
+		t.Fatalf(".forgectl/config not created: %v", err)
+	}
+
+	// No state file was created.
+	if _, err := state.Load(resolvedStateDir(dir)); err == nil {
+		t.Error("state file should not be created by bare init")
+	}
+}
+
+// TestBareInitIsIdempotent verifies the spec criterion "Bare init is idempotent
+// on an existing project": when .forgectl/ and config already exist, no file is
+// written and no notice is printed.
+func TestBareInitIsIdempotent(t *testing.T) {
+	dir := setupProjectDir(t)
+	t.Cleanup(func() {
+		initFrom = ""
+		initPhase = "specifying"
+	})
+
+	// Record config mtime before bare init.
+	configPath := filepath.Join(dir, ".forgectl", "config")
+	before, err := os.Stat(configPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	initFrom = ""
+	initPhase = "specifying"
+
+	var buf bytes.Buffer
+	rootCmd.SetOut(&buf)
+
+	if err := runInit(initCmd, nil); err != nil {
+		t.Fatalf("bare init on existing project: %v", err)
+	}
+
+	// No notice printed.
+	if buf.Len() != 0 {
+		t.Errorf("expected no output on idempotent bare init, got: %q", buf.String())
+	}
+
+	// No state file created.
+	if _, err := state.Load(resolvedStateDir(dir)); err == nil {
+		t.Error("state file should not be created by bare init")
+	}
+
+	// Config file not rewritten (mtime unchanged).
+	after, err := os.Stat(configPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !after.ModTime().Equal(before.ModTime()) {
+		t.Error("config file was rewritten during idempotent bare init")
+	}
+}
+
+// TestPhaseWithoutFromIsRejected verifies the spec criterion "--phase without
+// --from is rejected": forgectl init --phase specifying (no --from) exits with
+// code 1 and error "--from is required when --phase is set."
+func TestPhaseWithoutFromIsRejected(t *testing.T) {
+	setupProjectDir(t)
+	t.Cleanup(func() {
+		initCmd.Flags().Lookup("phase").Changed = false
+		initFrom = ""
+		initPhase = "specifying"
+	})
+
+	// Simulate explicit --phase flag via cobra so Changed("phase") returns true.
+	if err := initCmd.Flags().Set("phase", "specifying"); err != nil {
+		t.Fatal(err)
+	}
+	initFrom = ""
+
+	err := runInit(initCmd, nil)
+	if err == nil {
+		t.Fatal("expected error when --phase is set without --from")
+	}
+	if err.Error() != "--from is required when --phase is set." {
+		t.Errorf("unexpected error: %v", err)
+	}
+}
+
 func TestInitRejectsGeneratePlanningQueuePhase(t *testing.T) {
 	setupProjectDir(t)
 
