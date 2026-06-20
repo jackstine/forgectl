@@ -40,11 +40,32 @@ func runInit(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("--phase must be specifying, planning, implementing, or reverse_engineering")
 	}
 
-	// Discover project root, load and validate config.
-	projectRoot, stateDir, cfg, err := resolveSession()
+	out := cmd.OutOrStdout()
+
+	// Configuration scaffolding runs first: guarantee .forgectl/ and a default
+	// .forgectl/config exist so a brand-new project can be initialized without
+	// manual setup. The fresh-default notice is printed before any session output.
+	cwd, err := os.Getwd()
 	if err != nil {
 		return err
 	}
+	scaffold, err := state.Scaffold(cwd)
+	if err != nil {
+		return err
+	}
+	if scaffold.CreatedConfig {
+		fmt.Fprintln(out, "Created default .forgectl/config. Domain-aware spec placement is not enforced until [[domains]] entries are added to it.")
+	}
+
+	// Load and validate config. Scaffolding guarantees the file exists; any read
+	// failure here is a permission/IO error, and a parse failure means an existing
+	// user-authored config is malformed.
+	projectRoot := scaffold.ProjectRoot
+	cfg, err := state.LoadConfig(projectRoot)
+	if err != nil {
+		return err
+	}
+	stateDir := state.StateDir(projectRoot, cfg)
 
 	violations := state.ValidateConfig(cfg)
 	if len(violations) > 0 {
@@ -68,7 +89,6 @@ func runInit(cmd *cobra.Command, args []string) error {
 
 	sessionID := state.GenerateSessionID()
 	phase := state.PhaseName(initPhase)
-	out := cmd.OutOrStdout()
 
 	s := &state.ForgeState{
 		Phase:          phase,

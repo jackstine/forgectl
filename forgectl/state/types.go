@@ -187,10 +187,10 @@ func DefaultForgeConfig() ForgeConfig {
 	return ForgeConfig{
 		General: GeneralConfig{
 			EnableCommits: false,
-			UserGuided:    false,
+			UserGuided:    true,
 		},
 		Specifying: SpecifyingConfig{
-			Batch:          1,
+			Batch:          3,
 			CommitStrategy: "all-specs",
 			Eval: EvalConfig{
 				MinRounds: 1,
@@ -202,10 +202,42 @@ func DefaultForgeConfig() ForgeConfig {
 				},
 				EvalMode: "report",
 			},
+			CrossReference: CrossRefConfig{
+				MinRounds: 1,
+				MaxRounds: 2,
+				AgentConfig: AgentConfig{
+					Model: "haiku",
+					Type:  "explore",
+					Count: 3,
+				},
+				UserReview: false,
+				Eval: AgentConfig{
+					Model: "opus",
+					Type:  "eval",
+					Count: 1,
+				},
+			},
+			Reconciliation: ReconciliationConfig{
+				MinRounds: 0,
+				MaxRounds: 3,
+				AgentConfig: AgentConfig{
+					Model: "opus",
+					Type:  "eval",
+					Count: 1,
+				},
+				UserReview: false,
+			},
 		},
 		Planning: PlanningConfig{
 			Batch:          1,
 			CommitStrategy: "strict",
+			StudyCode: StudyCodeConfig{
+				AgentConfig: AgentConfig{
+					Model: "haiku",
+					Type:  "explore",
+					Count: 3,
+				},
+			},
 			Eval: EvalConfig{
 				MinRounds: 1,
 				MaxRounds: 3,
@@ -216,9 +248,16 @@ func DefaultForgeConfig() ForgeConfig {
 				},
 				EvalMode: "report",
 			},
+			Refine: RefineConfig{
+				AgentConfig: AgentConfig{
+					Model: "opus",
+					Type:  "refine",
+					Count: 1,
+				},
+			},
 		},
 		Implementing: ImplementingConfig{
-			Batch:          1,
+			Batch:          2,
 			CommitStrategy: "scoped",
 			Eval: EvalConfig{
 				MinRounds: 1,

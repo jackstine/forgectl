@@ -150,6 +150,64 @@ func TestInitRejectsExistingState(t *testing.T) {
 	}
 }
 
+// TestInitScaffoldsConfigWhenAbsent verifies the session-init criterion "Init
+// creates .forgectl and default config when none exists": configuration
+// scaffolding runs first, bootstraps a bare project, prints the fresh-default
+// notice, and init proceeds against the default config.
+func TestInitScaffoldsConfigWhenAbsent(t *testing.T) {
+	// A bare working directory with no .forgectl/ in it or any ancestor.
+	dir := t.TempDir()
+	orig, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chdir(dir); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.Chdir(orig) })
+
+	input := state.SpecQueueInput{
+		Specs: []state.SpecQueueEntry{
+			{Name: "Spec A", Domain: "test", Topic: "topic A", File: "specs/a.md", PlanningSources: []string{}, DependsOn: []string{}},
+		},
+	}
+	data, _ := json.Marshal(input)
+	queueFile := filepath.Join(dir, "specs-queue.json")
+	os.WriteFile(queueFile, data, 0644)
+
+	initFrom = queueFile
+	initPhase = "specifying"
+
+	var buf bytes.Buffer
+	rootCmd.SetOut(&buf)
+
+	if err := runInit(initCmd, nil); err != nil {
+		t.Fatalf("init on bare project: %v", err)
+	}
+
+	// .forgectl/ and a default config were created.
+	if info, err := os.Stat(filepath.Join(dir, ".forgectl")); err != nil || !info.IsDir() {
+		t.Fatalf(".forgectl/ not created: %v", err)
+	}
+	got, err := os.ReadFile(filepath.Join(dir, ".forgectl", "config"))
+	if err != nil {
+		t.Fatalf("reading scaffolded config: %v", err)
+	}
+	if string(got) != state.DefaultConfigTemplate() {
+		t.Error("scaffolded config does not equal the embedded default template")
+	}
+
+	// The fresh-default notice was printed.
+	if !strings.Contains(buf.String(), "Created default .forgectl/config") {
+		t.Errorf("expected fresh-default notice, got output: %q", buf.String())
+	}
+
+	// Init proceeded: a state file exists at the resolved state dir.
+	if _, err := state.Load(resolvedStateDir(dir)); err != nil {
+		t.Fatalf("state not created after scaffolded init: %v", err)
+	}
+}
+
 func TestInitRejectsGeneratePlanningQueuePhase(t *testing.T) {
 	setupProjectDir(t)
 

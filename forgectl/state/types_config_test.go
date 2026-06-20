@@ -176,8 +176,21 @@ func TestDefaultForgeConfigValues(t *testing.T) {
 	if cfg.General.EnableCommits != false {
 		t.Error("general.enable_commits must default to false")
 	}
-	if cfg.General.UserGuided != false {
-		t.Error("general.user_guided must default to false")
+	// user_guided defaults to true, matching the canonical template in
+	// docs/default-config.toml that scaffolding writes (defaults-equivalence).
+	if cfg.General.UserGuided != true {
+		t.Error("general.user_guided must default to true")
+	}
+
+	// Batch defaults match the canonical template.
+	if cfg.Specifying.Batch != 3 {
+		t.Errorf("specifying.batch: got %d, want 3", cfg.Specifying.Batch)
+	}
+	if cfg.Planning.Batch != 1 {
+		t.Errorf("planning.batch: got %d, want 1", cfg.Planning.Batch)
+	}
+	if cfg.Implementing.Batch != 2 {
+		t.Errorf("implementing.batch: got %d, want 2", cfg.Implementing.Batch)
 	}
 
 	// Commit strategy defaults
@@ -189,6 +202,23 @@ func TestDefaultForgeConfigValues(t *testing.T) {
 	}
 	if cfg.Implementing.CommitStrategy != "scoped" {
 		t.Errorf("implementing.commit_strategy: got %q, want %q", cfg.Implementing.CommitStrategy, "scoped")
+	}
+
+	// Sub-agent spawn-point defaults match the canonical template.
+	if cfg.Specifying.CrossReference.Model != "haiku" || cfg.Specifying.CrossReference.Count != 3 {
+		t.Errorf("specifying.cross_reference: got model=%q count=%d, want haiku/3", cfg.Specifying.CrossReference.Model, cfg.Specifying.CrossReference.Count)
+	}
+	if cfg.Specifying.CrossReference.Eval.Model != "opus" || cfg.Specifying.CrossReference.Eval.Count != 1 {
+		t.Errorf("specifying.cross_reference.eval: got model=%q count=%d, want opus/1", cfg.Specifying.CrossReference.Eval.Model, cfg.Specifying.CrossReference.Eval.Count)
+	}
+	if cfg.Specifying.Reconciliation.Model != "opus" || cfg.Specifying.Reconciliation.MaxRounds != 3 {
+		t.Errorf("specifying.reconciliation: got model=%q max_rounds=%d, want opus/3", cfg.Specifying.Reconciliation.Model, cfg.Specifying.Reconciliation.MaxRounds)
+	}
+	if cfg.Planning.StudyCode.Model != "haiku" || cfg.Planning.StudyCode.Count != 3 {
+		t.Errorf("planning.study_code: got model=%q count=%d, want haiku/3", cfg.Planning.StudyCode.Model, cfg.Planning.StudyCode.Count)
+	}
+	if cfg.Planning.Refine.Model != "opus" || cfg.Planning.Refine.Type != "refine" {
+		t.Errorf("planning.refine: got model=%q type=%q, want opus/refine", cfg.Planning.Refine.Model, cfg.Planning.Refine.Type)
 	}
 
 	// Min/max round defaults
