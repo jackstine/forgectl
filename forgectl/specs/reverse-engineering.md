@@ -680,12 +680,16 @@ Action:
   This outputs the evaluation prompt with the full spec files
   and consistency checklist for the sub-agents to review.
 
-  After the sub-agents complete their evaluation, advance with the verdict:
-    forgectl advance --verdict PASS --eval-report <path>
-    forgectl advance --verdict FAIL --eval-report <path>
+  The sub-agents must write the report to this exact path:
+    {domain}/specs/.eval/reconciliation-r{round}.md
 
-  Eval reports are written to: {domain}/specs/.eval/reconciliation-r{round}.md
+  After the sub-agents complete their evaluation, advance with the verdict
+  and that same path (--eval-report takes the file path, not the report text):
+    forgectl advance --verdict PASS --eval-report {domain}/specs/.eval/reconciliation-r{round}.md
+    forgectl advance --verdict FAIL --eval-report {domain}/specs/.eval/reconciliation-r{round}.md
 ```
+
+This report-mode handoff follows the shared **eval-report-contract** (`specs/eval-report-contract.md`): the path in the Action is identical to the report path `forgectl eval` prints.
 
 #### `forgectl eval` Command (active during RECONCILE_EVAL)
 

@@ -144,11 +144,17 @@
 
   eval_mode: "report"  (default for new sessions)
   ───────────────────────────────────────────────
-  - EVALUATE output includes: "advance with --verdict PASS|FAIL --eval-report <path>"
-  - forgectl eval emits a "--- REPORT OUTPUT ---" section naming the report path
-    and a "--- PREVIOUS EVALUATIONS ---" list of prior rounds with their paths
+  - EVALUATE output prints the CONCRETE report path (not a literal <path>): the
+    "must write its report to this exact path" line, the advance line carrying
+    that same path, and "--eval-report takes this file path, not the report text."
+  - forgectl eval emits a "--- REPORT OUTPUT ---" section with the SAME path,
+    instructing the sub-agent to create the file there and return only the path
+    and verdict; plus a "--- PREVIOUS EVALUATIONS ---" list of prior rounds
+  - The path in the EVALUATE action and in eval REPORT OUTPUT are identical
+    (computed once by the scaffold) — see specs/eval-report-contract.md
   - REFINE output says: "Study the eval file <path> and implement any corrections"
-  - forgectl advance requires --eval-report <path>
+  - forgectl advance requires --eval-report <path>; if given report prose instead
+    of a path, the error hints that a file path is expected
   - Sub-agent writes a report to disk; stored as reference
 
   eval_mode: "direct"

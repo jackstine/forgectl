@@ -52,7 +52,15 @@ When in doubt about a borderline issue, err toward PASS for style/convention con
 
 ## Report Format
 
-Write your report as a markdown file with this structure:
+You **must create a report file** — do not merely describe your findings in your
+reply. Use your file-writing tool to write the report to the exact path given in
+the REPORT OUTPUT section of the `forgectl eval` output. When you are
+done, your final message must be **only that path and the verdict** (e.g.
+`<report-path> FAIL`) so the engineer can pass the path straight
+to `forgectl advance --eval-report`. Describing the report without writing the
+file, or returning prose instead of the path, breaks the workflow.
+
+Write the report as a markdown file with this structure:
 
 ```markdown
 # Evaluation Report

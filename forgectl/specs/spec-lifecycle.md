@@ -153,8 +153,13 @@ Specs:
   [3] cache-invalidation.md
 Action:  Please spawn 1 sonnet general-purpose sub-agent to evaluate the spec batch.
          The sub-agent should run: forgectl eval
-         After completion of the above, advance with --verdict PASS|FAIL --eval-report <path>
+         The sub-agent must write its report to this exact path:
+           optimizer/specs/.eval/batch-1-r1.md
+         After completion of the above, advance with --verdict PASS|FAIL --eval-report optimizer/specs/.eval/batch-1-r1.md
+         --eval-report takes this file path, not the report text.
 ```
+
+This report-mode handoff follows the shared **eval-report-contract** (`specs/eval-report-contract.md`): the path here is identical to the `--- REPORT OUTPUT ---` path in `forgectl eval`.
 
 **Entering EVALUATE** (after DRAFT or REFINE, `eval_mode: "direct"`):
 
@@ -307,8 +312,13 @@ Round:   1/2
 
 Action:  Please spawn 1 sonnet general-purpose sub-agent to evaluate cross-reference consistency.
          The sub-agent should run: forgectl eval
-         After completion of the above, advance with --verdict PASS|FAIL --eval-report <path>
+         The sub-agent must write its report to this exact path:
+           optimizer/specs/.eval/cross-reference-r1.md
+         After completion of the above, advance with --verdict PASS|FAIL --eval-report optimizer/specs/.eval/cross-reference-r1.md
+         --eval-report takes this file path, not the report text.
 ```
+
+This report-mode handoff follows the shared **eval-report-contract** (`specs/eval-report-contract.md`).
 
 **Entering CROSS_REFERENCE_EVAL** (after CROSS_REFERENCE, `eval_mode: "direct"`):
 
@@ -544,8 +554,12 @@ Batch:  1
 
 --- REPORT OUTPUT ---
 
-Write your evaluation report to:
+Write your evaluation report to this exact path (create the file — do not only
+describe it):
   optimizer/specs/.eval/batch-1-r1.md
+
+When done, your final message must be only this path and the verdict, e.g.:
+  optimizer/specs/.eval/batch-1-r1.md FAIL
 ```
 
 Subsequent rounds with `eval_mode: "report"` include previous evaluations:
@@ -560,8 +574,12 @@ Round 1: FAIL — optimizer/specs/.eval/batch-1-r1.md
 
 --- REPORT OUTPUT ---
 
-Write your evaluation report to:
+Write your evaluation report to this exact path (create the file — do not only
+describe it):
   optimizer/specs/.eval/batch-1-r2.md
+
+When done, your final message must be only this path and the verdict, e.g.:
+  optimizer/specs/.eval/batch-1-r2.md PASS
 ```
 
 When `eval_mode: "direct"`, the `--- REPORT OUTPUT ---` section instructs the sub-agent to make corrections directly. The `--- PREVIOUS EVALUATIONS ---` section is included in subsequent rounds.
@@ -666,8 +684,12 @@ Domain: optimizer
 
 --- REPORT OUTPUT ---
 
-Write your evaluation report to:
+Write your evaluation report to this exact path (create the file — do not only
+describe it):
   optimizer/specs/.eval/cross-reference-r1.md
+
+When done, your final message must be only this path and the verdict, e.g.:
+  optimizer/specs/.eval/cross-reference-r1.md FAIL
 ```
 
 When `eval_mode: "direct"`:

@@ -1476,6 +1476,44 @@ func TestSpecifyingEvalReportMustExist(t *testing.T) {
 	}
 }
 
+// TestEvalReportProseValueProducesPathHint verifies the eval-report-contract
+// guardrail: when --eval-report is given report prose (whitespace, no path
+// separator) instead of a path, the error hints that a file path is expected.
+func TestEvalReportProseValueProducesPathHint(t *testing.T) {
+	s := newSpecifyingState(1)
+	s.Config.Specifying.Eval.EnableEvalOutput = true
+	advanceToEvaluate(t, s)
+
+	prose := "Batch 4 Round 1 FAIL: data_coverage_pct not divided by 100"
+	err := Advance(s, AdvanceInput{Verdict: "FAIL", EvalReport: prose}, "")
+	if err == nil {
+		t.Fatal("expected error for prose eval report value")
+	}
+	if !strings.Contains(err.Error(), "the file path the eval sub-agent wrote, not the report text") {
+		t.Errorf("expected path-vs-text hint, got: %v", err)
+	}
+}
+
+// TestLooksLikeReportProse covers the prose/path heuristic: prose has whitespace
+// and no separator; real paths (even with spaces) contain a separator.
+func TestLooksLikeReportProse(t *testing.T) {
+	cases := []struct {
+		v    string
+		want bool
+	}{
+		{"Batch 4 FAIL: not divided by 100", true},
+		{"optimizer/specs/.eval/batch-1-r1.md", false},
+		{"report.md", false},
+		{"my dir/report.md", false}, // spaces but has separator → a path
+		{"singletoken", false},
+	}
+	for _, c := range cases {
+		if got := looksLikeReportProse(c.v); got != c.want {
+			t.Errorf("looksLikeReportProse(%q) = %v, want %v", c.v, got, c.want)
+		}
+	}
+}
+
 func TestPlanningDraftSetsRoundTo1OnValidationFailure(t *testing.T) {
 	dir := t.TempDir()
 	s := newPlanningStateWithDir(dir)

@@ -642,34 +642,113 @@ func implEvaluateState(t *testing.T, dir, mode, model string) *ForgeState {
 func TestEvalEntryActionReportMode(t *testing.T) {
 	dir := t.TempDir()
 
-	spec := outputOf(specEvaluateState("report", "opus"), ".")
+	specState := specEvaluateState("report", "opus")
+	spec := outputOf(specState, ".")
+	specPath := specEvalReportPath(specState)
 	if !strings.Contains(spec, "Please spawn 1 opus eval sub-agent to evaluate the spec batch.") {
 		t.Errorf("specifying report spawn line missing, got:\n%s", spec)
 	}
 	if !strings.Contains(spec, "The sub-agent should run: forgectl eval") {
 		t.Errorf("specifying report run line missing, got:\n%s", spec)
 	}
-	if !strings.Contains(spec, "advance with --verdict PASS|FAIL --eval-report <path>") {
-		t.Errorf("specifying report advance line missing, got:\n%s", spec)
+	// The advance line carries the concrete report path (no literal <path>), the
+	// path is also surfaced on the "must write" line, and the file-vs-text note
+	// is present so the engineer does not pass report prose.
+	if !strings.Contains(spec, "advance with --verdict PASS|FAIL --eval-report "+specPath) {
+		t.Errorf("specifying report advance line missing concrete path %q, got:\n%s", specPath, spec)
+	}
+	if !strings.Contains(spec, "The sub-agent must write its report to this exact path:") {
+		t.Errorf("specifying report 'must write' label line missing, got:\n%s", spec)
+	}
+	if !strings.Contains(spec, "--eval-report takes this file path, not the report text.") {
+		t.Errorf("specifying report file-vs-text note missing, got:\n%s", spec)
+	}
+	if strings.Contains(spec, "--eval-report <path>") {
+		t.Errorf("specifying report must not contain literal <path> placeholder, got:\n%s", spec)
 	}
 
-	plan := outputOf(planEvaluateState("report", "opus"), ".")
+	planState := planEvaluateState("report", "opus")
+	plan := outputOf(planState, ".")
+	planPath := planEvalReportPath(planState)
 	if !strings.Contains(plan, "Please spawn 1 opus eval sub-agent to evaluate the plan.") {
 		t.Errorf("planning report spawn line missing, got:\n%s", plan)
 	}
 	if !strings.Contains(plan, "Sub-agent runs: forgectl eval") {
 		t.Errorf("planning report run line missing, got:\n%s", plan)
 	}
-	if !strings.Contains(plan, "advance with --verdict PASS|FAIL --eval-report <path>") {
-		t.Errorf("planning report advance line missing, got:\n%s", plan)
+	if !strings.Contains(plan, "advance with --verdict PASS|FAIL --eval-report "+planPath) {
+		t.Errorf("planning report advance line missing concrete path %q, got:\n%s", planPath, plan)
 	}
 
-	impl := outputOf(implEvaluateState(t, dir, "report", "opus"), dir)
+	implState := implEvaluateState(t, dir, "report", "opus")
+	impl := outputOf(implState, dir)
+	implPath := implEvalReportPath(implState)
 	if !strings.Contains(impl, "Please spawn 1 opus eval sub-agent to evaluate the implementation batch.") {
 		t.Errorf("implementing report spawn line missing, got:\n%s", impl)
 	}
-	if !strings.Contains(impl, "advance with --eval-report <path> --verdict PASS|FAIL") {
-		t.Errorf("implementing report advance line missing, got:\n%s", impl)
+	if !strings.Contains(impl, "advance with --eval-report "+implPath+" --verdict PASS|FAIL") {
+		t.Errorf("implementing report advance line missing concrete path %q, got:\n%s", implPath, impl)
+	}
+	if !strings.Contains(impl, "--eval-report takes this file path, not the report text.") {
+		t.Errorf("implementing report file-vs-text note missing, got:\n%s", impl)
+	}
+}
+
+// TestEvalReportPathConsistentAcrossActionAndEval verifies the eval-report-contract
+// invariant that the report path printed in the EVALUATE status Action (engineer's
+// copy) is identical to the path printed in the forgectl eval REPORT OUTPUT
+// (sub-agent's copy), for every report-mode eval state.
+func TestEvalReportPathConsistentAcrossActionAndEval(t *testing.T) {
+	dir := t.TempDir()
+
+	specState := specEvaluateState("report", "opus")
+	planState := planEvaluateState("report", "opus")
+	implState := implEvaluateState(t, dir, "report", "opus")
+	crossState := crossRefEvalState("report", 1, nil)
+	reconState := reconcileEvalState("report", 1, nil)
+	reState := reOutputState(StateReconcileEval, []string{"optimizer", "api"}, 1, nil)
+	reState.ReverseEngineering.ReconcileRound = 2
+
+	cases := []struct {
+		name     string
+		state    *ForgeState
+		dir      string
+		wantPath string
+		render   func(w *bytes.Buffer, s *ForgeState, dir string) error
+	}{
+		{"specifying", specState, ".", specEvalReportPath(specState),
+			func(w *bytes.Buffer, s *ForgeState, dir string) error { return PrintSpecEvalOutput(w, s, dir) }},
+		{"planning", planState, ".", planEvalReportPath(planState),
+			func(w *bytes.Buffer, s *ForgeState, dir string) error { return PrintEvalOutput(w, s, dir) }},
+		{"implementing", implState, dir, implEvalReportPath(implState),
+			func(w *bytes.Buffer, s *ForgeState, dir string) error { return PrintEvalOutput(w, s, dir) }},
+		{"cross-reference", crossState, ".", crossRefEvalReportPath(crossState),
+			func(w *bytes.Buffer, s *ForgeState, _ string) error { return PrintCrossRefEvalOutput(w, s) }},
+		{"reconcile", reconState, ".", reconcileEvalReportPath(reconState),
+			func(w *bytes.Buffer, s *ForgeState, _ string) error { return PrintReconcileEvalOutput(w, s) }},
+		{"reverse-engineering", reState, ".", reverseEngineeringReconcileEvalReportPath(reState),
+			func(w *bytes.Buffer, s *ForgeState, _ string) error { return PrintReverseEngineeringEvalOutput(w, s) }},
+	}
+	for _, c := range cases {
+		// A "" wantPath would make strings.Contains pass vacuously; the path
+		// must be a real, non-empty path for the consistency check to mean
+		// anything.
+		if c.wantPath == "" {
+			t.Errorf("%s: expected a non-empty report path", c.name)
+			continue
+		}
+		action := outputOf(c.state, c.dir)
+		var eb bytes.Buffer
+		if err := c.render(&eb, c.state, c.dir); err != nil {
+			t.Fatalf("%s: render eval: %v", c.name, err)
+		}
+		eval := eb.String()
+		if !strings.Contains(action, c.wantPath) {
+			t.Errorf("%s: EVALUATE action missing report path %q, got:\n%s", c.name, c.wantPath, action)
+		}
+		if !strings.Contains(eval, c.wantPath) {
+			t.Errorf("%s: eval REPORT OUTPUT missing report path %q, got:\n%s", c.name, c.wantPath, eval)
+		}
 	}
 }
 
@@ -806,8 +885,8 @@ func TestEvalEntryActionEdgeCases(t *testing.T) {
 	legacy := specEvaluateState("", "opus")
 	legacy.Config.Specifying.Eval.EnableEvalOutput = true
 	out := outputOf(legacy, ".")
-	if !strings.Contains(out, "advance with --verdict PASS|FAIL --eval-report <path>") {
-		t.Errorf("legacy enable_eval_output session should resolve to report wording, got:\n%s", out)
+	if !strings.Contains(out, "advance with --verdict PASS|FAIL --eval-report "+specEvalReportPath(legacy)) {
+		t.Errorf("legacy enable_eval_output session should resolve to report wording with concrete path, got:\n%s", out)
 	}
 }
 
@@ -1027,7 +1106,7 @@ func TestEvalContextReportModeSections(t *testing.T) {
 	if !strings.Contains(p, "--- PREVIOUS EVALUATIONS ---") || !strings.Contains(p, "Round 1: FAIL — launcher/evals/round-1.md") {
 		t.Errorf("planning report previous-evals missing, got:\n%s", p)
 	}
-	if !strings.Contains(p, "--- REPORT OUTPUT ---") || !strings.Contains(p, "Write your evaluation report to:") || !strings.Contains(p, "launcher/evals/round-2.md") {
+	if !strings.Contains(p, "--- REPORT OUTPUT ---") || !strings.Contains(p, "Write your evaluation report to this exact path") || !strings.Contains(p, "launcher/evals/round-2.md") {
 		t.Errorf("planning report output missing, got:\n%s", p)
 	}
 
@@ -1043,7 +1122,7 @@ func TestEvalContextReportModeSections(t *testing.T) {
 	if !strings.Contains(sp, "Round 1: FAIL — optimizer/specs/.eval/batch-1-r1.md") {
 		t.Errorf("specifying report previous-evals missing, got:\n%s", sp)
 	}
-	if !strings.Contains(sp, "Write your evaluation report to:") || !strings.Contains(sp, "optimizer/specs/.eval/batch-1-r2.md") {
+	if !strings.Contains(sp, "Write your evaluation report to this exact path") || !strings.Contains(sp, "optimizer/specs/.eval/batch-1-r2.md") {
 		t.Errorf("specifying report output missing, got:\n%s", sp)
 	}
 
@@ -1052,7 +1131,7 @@ func TestEvalContextReportModeSections(t *testing.T) {
 	if err := PrintCrossRefEvalOutput(&cb, crossRefEvalState("report", 1, nil)); err != nil {
 		t.Fatalf("crossref eval: %v", err)
 	}
-	if !strings.Contains(cb.String(), "Write your evaluation report to:") || !strings.Contains(cb.String(), "optimizer/specs/.eval/cross-reference-r1.md") {
+	if !strings.Contains(cb.String(), "Write your evaluation report to this exact path") || !strings.Contains(cb.String(), "optimizer/specs/.eval/cross-reference-r1.md") {
 		t.Errorf("crossref report output missing, got:\n%s", cb.String())
 	}
 
@@ -1061,7 +1140,7 @@ func TestEvalContextReportModeSections(t *testing.T) {
 	if err := PrintReconcileEvalOutput(&rb, reconcileEvalState("report", 1, nil)); err != nil {
 		t.Fatalf("reconcile eval: %v", err)
 	}
-	if !strings.Contains(rb.String(), "Write your evaluation report to:") || !strings.Contains(rb.String(), "optimizer/specs/.eval/reconciliation-r1.md") {
+	if !strings.Contains(rb.String(), "Write your evaluation report to this exact path") || !strings.Contains(rb.String(), "optimizer/specs/.eval/reconciliation-r1.md") {
 		t.Errorf("reconcile report output missing, got:\n%s", rb.String())
 	}
 }
@@ -1087,7 +1166,7 @@ func TestEvalContextDirectModeSections(t *testing.T) {
 	if !strings.Contains(p, "Make corrections directly to the plan files.") {
 		t.Errorf("planning direct report output missing, got:\n%s", p)
 	}
-	if strings.Contains(p, "Write your evaluation report to:") {
+	if strings.Contains(p, "Write your evaluation report to this exact path") {
 		t.Errorf("planning direct must not print a report path, got:\n%s", p)
 	}
 
@@ -1368,8 +1447,37 @@ func TestREOutputReconcileAndEval(t *testing.T) {
 	if !strings.Contains(evOut, "Please spawn 1 opus general-purpose sub-agent") {
 		t.Errorf("RECONCILE_EVAL should reflect configured eval sub-agents, got:\n%s", evOut)
 	}
-	if !strings.Contains(evOut, filepath.Join("optimizer", "specs", ".eval", "reconciliation-r2.md")) {
+	rePath := filepath.Join("optimizer", "specs", ".eval", "reconciliation-r2.md")
+	if !strings.Contains(evOut, rePath) {
 		t.Errorf("RECONCILE_EVAL should show the report path, got:\n%s", evOut)
+	}
+	// The Action carries the concrete path (no literal <path>) and the
+	// file-vs-text note, per the eval-report contract.
+	if !strings.Contains(evOut, "must write the report to this exact path") {
+		t.Errorf("RECONCILE_EVAL action should surface the exact report path, got:\n%s", evOut)
+	}
+	if !strings.Contains(evOut, "--eval-report "+rePath) {
+		t.Errorf("RECONCILE_EVAL action advance line should carry the concrete path, got:\n%s", evOut)
+	}
+	if strings.Contains(evOut, "--eval-report <path>") {
+		t.Errorf("RECONCILE_EVAL action must not contain literal <path>, got:\n%s", evOut)
+	}
+
+	// The sub-agent's forgectl eval REPORT OUTPUT uses the imperative create-the-
+	// file wording and names the same path.
+	var reb bytes.Buffer
+	if err := PrintReverseEngineeringEvalOutput(&reb, ev); err != nil {
+		t.Fatalf("PrintReverseEngineeringEvalOutput: %v", err)
+	}
+	reportOut := reb.String()
+	if !strings.Contains(reportOut, "Write your evaluation report to this exact path (create the file") {
+		t.Errorf("RE eval REPORT OUTPUT should use imperative create-the-file wording, got:\n%s", reportOut)
+	}
+	if !strings.Contains(reportOut, rePath) {
+		t.Errorf("RE eval REPORT OUTPUT should name the report path, got:\n%s", reportOut)
+	}
+	if !strings.Contains(reportOut, "your final message must be only this path and the verdict") {
+		t.Errorf("RE eval REPORT OUTPUT should state the path+verdict return contract, got:\n%s", reportOut)
 	}
 }
 

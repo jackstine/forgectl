@@ -189,8 +189,13 @@ File:    launcher/.forgectl_workspace/implementation_plan/plan.json
 Round:   1/3
 Action:  Please spawn 1 sonnet general-purpose sub-agent to evaluate the plan.
          Sub-agent runs: forgectl eval
-         After completion of the above, advance with --verdict PASS|FAIL --eval-report <path>
+         The sub-agent must write its report to this exact path:
+           launcher/.forgectl_workspace/implementation_plan/evals/round-1.md
+         After completion of the above, advance with --verdict PASS|FAIL --eval-report launcher/.forgectl_workspace/implementation_plan/evals/round-1.md
+         --eval-report takes this file path, not the report text.
 ```
+
+This report-mode handoff follows the shared **eval-report-contract** (`specs/eval-report-contract.md`): the path here is identical to the `--- REPORT OUTPUT ---` path in `forgectl eval`.
 
 **Entering EVALUATE** (`eval_mode: "direct"`):
 
@@ -398,8 +403,12 @@ Specs:
 
 --- REPORT OUTPUT ---
 
-Write your evaluation report to:
+Write your evaluation report to this exact path (create the file — do not only
+describe it):
   launcher/.forgectl_workspace/implementation_plan/evals/round-1.md
+
+When done, your final message must be only this path and the verdict, e.g.:
+  launcher/.forgectl_workspace/implementation_plan/evals/round-1.md FAIL
 ```
 
 Subsequent rounds with `eval_mode: "report"` include previous evaluations:
@@ -414,8 +423,12 @@ Round 1: FAIL — launcher/.forgectl_workspace/implementation_plan/evals/round-1
 
 --- REPORT OUTPUT ---
 
-Write your evaluation report to:
+Write your evaluation report to this exact path (create the file — do not only
+describe it):
   launcher/.forgectl_workspace/implementation_plan/evals/round-2.md
+
+When done, your final message must be only this path and the verdict, e.g.:
+  launcher/.forgectl_workspace/implementation_plan/evals/round-2.md PASS
 ```
 
 When `eval_mode: "direct"`, the `--- REPORT OUTPUT ---` section is included but instructs the evaluator to make corrections directly rather than write a report file. The `--- PREVIOUS EVALUATIONS ---` section is included on subsequent rounds.

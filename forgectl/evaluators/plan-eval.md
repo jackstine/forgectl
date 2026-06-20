@@ -48,13 +48,12 @@ For each dimension:
 
 ## Report Format
 
-Write the report to:
-
-```
-<domain>/.workspace/implementation_plan/evals/round-N.md
-```
-
-Where `N` is the current evaluation round number.
+You **must create a report file** — do not merely describe your findings in your
+reply. Use your file-writing tool to write the report to the exact path given in
+the REPORT OUTPUT section of the `forgectl eval` output (do not guess or
+reconstruct the path). When you are done, your final message must be **only that
+path and the verdict** (e.g. `<report-path> FAIL`) so the engineer can
+pass the path straight to `forgectl advance --eval-report`.
 
 ### Report Structure
 

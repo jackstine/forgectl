@@ -226,8 +226,16 @@ Items:
   - [config.load] Load YAML, apply defaults, validate strictly
 Action:   Please spawn 1 sonnet general-purpose sub-agent to evaluate the implementation batch.
           The sub-agent should run: forgectl eval
-          After completion of the above, advance with --eval-report <path> --verdict PASS|FAIL
+          The sub-agent must write its report to this exact path:
+            launcher/.forgectl_workspace/implementation_plan/evals/batch-1-round-1.md
+          After completion of the above, advance with --eval-report launcher/.forgectl_workspace/implementation_plan/evals/batch-1-round-1.md --verdict PASS|FAIL
+          --eval-report takes this file path, not the report text.
 ```
+
+The report path printed in the Action is identical to the path printed in the
+`--- REPORT OUTPUT ---` section of `forgectl eval` (same batch and round). The
+scaffold computes it deterministically, so the engineer can pass it verbatim
+whether or not the sub-agent echoes it back.
 
 **Entering EVALUATE** (implementing phase, `eval_mode: "direct"`):
 
@@ -437,8 +445,12 @@ Batch: 1/2
 
 --- REPORT OUTPUT ---
 
-Write your evaluation report to:
+Write your evaluation report to this exact path (create the file — do not only
+describe it):
   launcher/.forgectl_workspace/implementation_plan/evals/batch-1-round-1.md
+
+When done, your final message must be only this path and the verdict, e.g.:
+  launcher/.forgectl_workspace/implementation_plan/evals/batch-1-round-1.md FAIL
 ```
 
 Subsequent rounds with `eval_mode: "report"` include previous evaluations:
@@ -453,8 +465,12 @@ Round 1: PASS — launcher/.forgectl_workspace/implementation_plan/evals/batch-1
 
 --- REPORT OUTPUT ---
 
-Write your evaluation report to:
+Write your evaluation report to this exact path (create the file — do not only
+describe it):
   launcher/.forgectl_workspace/implementation_plan/evals/batch-1-round-2.md
+
+When done, your final message must be only this path and the verdict, e.g.:
+  launcher/.forgectl_workspace/implementation_plan/evals/batch-1-round-2.md PASS
 ```
 
 When `eval_mode: "direct"`, the `--- REPORT OUTPUT ---` section is included but the sub-agent makes corrections directly to batch files instead of writing a report. The `--- PREVIOUS EVALUATIONS ---` section is included in subsequent rounds.
@@ -591,6 +607,7 @@ With `--verbose`, the full layer-by-item breakdown is appended, including spec a
 | `advance` in implementing EVALUATE without `--verdict` | Error. Exit code 1. | Verdict determines the transition |
 | `advance` in implementing EVALUATE without `--eval-report` when `eval_mode: "report"` | Error. Exit code 1. | Every evaluation must reference its report when eval output is enabled |
 | `advance --eval-report` pointing to non-existent file | Error naming the path. Exit code 1. | Report must exist to be recorded |
+| `advance --eval-report` given report prose instead of a path (value has no path separator and contains whitespace) | Error naming the value, with a hint that `--eval-report` expects the file path the eval sub-agent wrote, not the report text. Exit code 1. | Common failure: sub-agent described findings without writing the file, so the engineer passed the prose |
 | `advance --eval-report` when `eval_mode` is not `"report"` | Warning: `--eval-report is ignored, --eval-report is only used in report mode`. Command proceeds. | Consistent with `--message` warning pattern |
 | `eval` outside of implementing EVALUATE | Error naming current state and phase. Exit code 1. | Eval context only available in EVALUATE |
 
@@ -679,9 +696,11 @@ Presents **one item at a time**. Displays full context: name, description, steps
 
 Two actors:
 
-**Sub-agent** runs `forgectl eval` to receive full item details, evaluator prompt, and (when `eval_mode: "report"`) report target path and previous eval history. When `eval_mode: "direct"`, the sub-agent makes corrections directly to batch files. When `eval_mode: "conversational"`, the sub-agent communicates its verdict verbally.
+**Sub-agent** runs `forgectl eval` to receive full item details, evaluator prompt, and (when `eval_mode: "report"`) report target path and previous eval history. When `eval_mode: "report"`, the sub-agent **must create the report file** at the printed path (using its file-writing tool) and return that path with the verdict — describing findings without writing the file is a contract violation. When `eval_mode: "direct"`, the sub-agent makes corrections directly to batch files. When `eval_mode: "conversational"`, the sub-agent communicates its verdict verbally.
 
-**Engineer** reviews the report (when `eval_mode: "report"`), reviews unstaged changes from the evaluator (when `eval_mode: "direct"`), or receives the sub-agent's verbal verdict (when `eval_mode: "conversational"`). Runs `forgectl advance --verdict PASS|FAIL` (with `--eval-report <path>` when `eval_mode: "report"`).
+**Engineer** reviews the report (when `eval_mode: "report"`), reviews unstaged changes from the evaluator (when `eval_mode: "direct"`), or receives the sub-agent's verbal verdict (when `eval_mode: "conversational"`). Runs `forgectl advance --verdict PASS|FAIL` (with `--eval-report <path>` when `eval_mode: "report"`). The `--eval-report` value is a **file path**; the engineer passes the exact path shown in the EVALUATE Action (identical to the path the sub-agent wrote). The engineer never passes report prose as the `--eval-report` value, and never invents a path the sub-agent did not write.
+
+The report-mode handoff (deterministic path surfaced to both actors, sub-agent writes the file, engineer passes the path) is the shared **eval-report-contract**; see `specs/eval-report-contract.md`. This section is the fully worked example of that contract.
 
 ### COMMIT State
 
@@ -712,6 +731,8 @@ When `enable_commits` is `true`, the engineer runs `forgectl advance --message <
 13. **Auto-commit at commit points.** When `enable_commits` is `true`, `--message` is required at IMPLEMENT (first round) and COMMIT states. The scaffold runs `git add` with strategy-appropriate targets (per `implementing.commit_strategy`, default: `scoped`) to stage files, then runs `git commit -m <message>`. The `git add` step must precede `git commit` — committing without staging produces "no changes added to commit" and no commit is created. When `enable_commits` is `false`, `--message` is not shown in output; if provided, a warning is printed: `--message is ignored, commits are not enabled`. The warning does not instruct how to enable commits. See `docs/auto-committing.md`.
 14. **Spec `Read:` command is bounded.** When the current plan's `spec_commits` is non-empty, every `Specs:` entry in IMPLEMENT output is followed by a `Read:` line of the form `git show <commits> -- '**/<file>'`, using `git show` (not `git log -p`) so the command resolves to exactly the named spec commits. When `spec_commits` is empty, no `Read:` line is emitted.
 15. **Spec review reminder always present.** Every IMPLEMENT action, on every round, includes the spec-review reminder. The Refs-review reminder is present if and only if the item has `Refs`.
+16. **Report path surfaced to both actors.** When `eval_mode: "report"`, the scaffold computes the eval report path deterministically (`<plan-dir>/evals/batch-N-round-M.md`) and prints the *same* path in two places: the EVALUATE Action (for the engineer to pass to `--eval-report`) and the `--- REPORT OUTPUT ---` section of `forgectl eval` (for the sub-agent to write). The engineer never needs to invent or reconstruct the path. `--eval-report` is a file path argument; passing report prose is an error (caught by invariant 17).
+17. **`--eval-report` value is validated as a path.** The scaffold stats the `--eval-report` value before recording it. If it is not an existing file, `advance` fails. When the value contains no path separator and looks like prose (whitespace, no `/`), the error additionally states that `--eval-report` expects the file path the eval sub-agent wrote, not the report text.
 
 ---
 

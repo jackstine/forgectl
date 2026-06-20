@@ -22,7 +22,7 @@ Each spawn point is configured with three fields:
 
 Each eval block's `eval_mode` (`specifying.eval`, `planning.eval`, `implementing.eval`) shapes what the spawn instructions tell the sub-agent to produce and which flags `advance` takes:
 
-- `eval_mode: "report"` (default for new sessions): spawn instructions tell the sub-agent to write a report to a specific path, and `advance` requires `--eval-report <path>`.
+- `eval_mode: "report"` (default for new sessions): spawn instructions tell the sub-agent to **create** the report file at a concrete path and return that path; the same path is printed in the EVALUATE action so the engineer passes it to `advance --eval-report` verbatim. `advance` requires `--eval-report <path>` (a file path — passing report prose is rejected with a hint). See [the eval-report contract](../forgectl/specs/eval-report-contract.md).
 - `eval_mode: "direct"`: the sub-agent edits the implementation/spec/plan files in place (corrections land as unstaged changes); `advance` takes only `--verdict`.
 - `eval_mode: "conversational"`: spawn instructions omit the report path; the sub-agent relays its verdict verbally and `advance` takes only `--verdict`.
 

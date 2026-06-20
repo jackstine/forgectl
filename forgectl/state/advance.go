@@ -1246,9 +1246,22 @@ func archiveBatch(s *ForgeState) {
 
 func checkEvalReportExists(path string) error {
 	if _, err := os.Stat(path); err != nil {
+		// Common failure: the eval sub-agent described its findings without
+		// writing the report file, so the engineer passed the prose as the
+		// --eval-report value. A prose value has whitespace and no path
+		// separator; point the engineer back at the file path contract.
+		if looksLikeReportProse(path) {
+			return fmt.Errorf("eval report %q does not exist — --eval-report expects the file path the eval sub-agent wrote, not the report text", path)
+		}
 		return fmt.Errorf("eval report %q does not exist", path)
 	}
 	return nil
+}
+
+// looksLikeReportProse reports whether v looks like report text rather than a
+// file path: it contains whitespace and no path separator.
+func looksLikeReportProse(v string) bool {
+	return strings.ContainsAny(v, " \t\n") && !strings.ContainsAny(v, "/\\")
 }
 
 // --- Reverse Engineering Phase ---

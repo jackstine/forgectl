@@ -62,6 +62,7 @@ type evalEntryAction struct {
 	runEval      string // report/conversational middle line, e.g. "The sub-agent should run: forgectl eval"
 	stagedNote   string // direct staged-files note
 	reportTail   string // report-mode advance tail, e.g. "advance with --verdict PASS|FAIL --eval-report <path>"
+	reportPath   string // report-mode concrete report path; substituted into reportTail's "<path>" token
 }
 
 // writeEvalEntryAction renders the Action body for an eval-entry state according
@@ -78,7 +79,18 @@ func writeEvalEntryAction(w io.Writer, mode string, a evalEntryAction) {
 	case "report":
 		fmt.Fprintf(w, "%s%s\n", a.label, a.spawnEval)
 		fmt.Fprintf(w, "%s%s\n", a.indent, a.runEval)
-		fmt.Fprintf(w, "%sAfter completion of the above, %s\n", a.indent, a.reportTail)
+		tail := a.reportTail
+		if a.reportPath != "" {
+			// Surface the concrete report path to the engineer so it can be
+			// passed to --eval-report verbatim, independent of whatever the
+			// sub-agent echoes back. This is the same path forgectl eval prints
+			// in its --- REPORT OUTPUT --- section.
+			fmt.Fprintf(w, "%sThe sub-agent must write its report to this exact path:\n", a.indent)
+			fmt.Fprintf(w, "%s  %s\n", a.indent, a.reportPath)
+			tail = strings.Replace(tail, "<path>", a.reportPath, 1)
+		}
+		fmt.Fprintf(w, "%sAfter completion of the above, %s\n", a.indent, tail)
+		fmt.Fprintf(w, "%s--eval-report takes this file path, not the report text.\n", a.indent)
 	default: // conversational
 		fmt.Fprintf(w, "%s%s\n", a.label, a.spawnEval)
 		fmt.Fprintf(w, "%s%s\n", a.indent, a.runEval)
@@ -167,8 +179,86 @@ func writeEvalTrailingSections(w io.Writer, mode string, evals []EvalRecord, rep
 		return
 	}
 	fmt.Fprintf(w, "\n--- REPORT OUTPUT ---\n\n")
-	fmt.Fprintf(w, "Write your evaluation report to:\n")
+	fmt.Fprintf(w, "Write your evaluation report to this exact path (create the file — do not only\n")
+	fmt.Fprintf(w, "describe it):\n")
 	fmt.Fprintf(w, "  %s\n", reportFile)
+	fmt.Fprintf(w, "\nWhen done, your final message must be only this path and the verdict, e.g.:\n")
+	fmt.Fprintf(w, "  %s FAIL\n", reportFile)
+}
+
+// Report-path helpers are the single source of truth for each report-mode eval
+// state's deterministic report file path. Both the EVALUATE status output (so
+// the engineer can pass --eval-report verbatim) and the forgectl eval output (so
+// the sub-agent writes to the same place) call these, guaranteeing the two
+// outputs name the identical path. The cross-reference and reconciliation
+// helpers return "" when no completed/domain specs exist, matching the eval
+// output's guard.
+
+func implEvalReportPath(s *ForgeState) string {
+	impl := s.Implementing
+	return filepath.Join(currentPlanDir(s), "evals",
+		fmt.Sprintf("batch-%d-round-%d.md", impl.BatchNumber, impl.CurrentBatch.EvalRound+1))
+}
+
+func planEvalReportPath(s *ForgeState) string {
+	plan := s.Planning
+	return filepath.Join(filepath.Dir(plan.CurrentPlan.File), "evals",
+		fmt.Sprintf("round-%d.md", plan.Round))
+}
+
+func specEvalReportPath(s *ForgeState) string {
+	spec := s.Specifying
+	cs := spec.CurrentSpecs[0]
+	return filepath.Join(cs.Domain, "specs", ".eval",
+		fmt.Sprintf("batch-%d-r%d.md", spec.BatchNumber, cs.Round))
+}
+
+func crossRefEvalReportPath(s *ForgeState) string {
+	spec := s.Specifying
+	domain := spec.CurrentDomain
+	round := 0
+	if spec.CrossReference != nil {
+		if cr, ok := spec.CrossReference[domain]; ok {
+			round = cr.Round
+		}
+	}
+	for _, c := range spec.Completed {
+		if c.Domain == domain {
+			return filepath.Join(filepath.Dir(c.File), ".eval",
+				fmt.Sprintf("cross-reference-r%d.md", round))
+		}
+	}
+	return ""
+}
+
+func reconcileEvalReportPath(s *ForgeState) string {
+	spec := s.Specifying
+	round := 0
+	if spec.Reconcile != nil {
+		round = spec.Reconcile.Round
+	}
+	if len(spec.Completed) == 0 {
+		return ""
+	}
+	return filepath.Join(filepath.Dir(spec.Completed[0].File), ".eval",
+		fmt.Sprintf("reconciliation-r%d.md", round))
+}
+
+// reverseEngineeringReconcileEvalReportPath is the single source of truth for the
+// reverse_engineering RECONCILE_EVAL report path. Both the RECONCILE_EVAL Action
+// and PrintReverseEngineeringEvalOutput call it so the engineer's copy and the
+// sub-agent's copy name the identical path.
+func reverseEngineeringReconcileEvalReportPath(s *ForgeState) string {
+	re := s.ReverseEngineering
+	if re == nil {
+		return ""
+	}
+	domain := ""
+	if re.DomainIndex >= 1 && re.DomainIndex <= len(re.Domains) {
+		domain = re.Domains[re.DomainIndex-1]
+	}
+	return filepath.Join(domain, "specs", ".eval",
+		fmt.Sprintf("reconciliation-r%d.md", re.ReconcileRound))
 }
 
 func printSpecifyingOutput(w io.Writer, s *ForgeState, dir string) {
@@ -253,6 +343,7 @@ func printSpecifyingOutput(w io.Writer, s *ForgeState, dir string) {
 			runEval:      "The sub-agent should run: forgectl eval",
 			stagedNote:   "Spec files have been staged. Sub-agent makes corrections directly.",
 			reportTail:   "advance with --verdict PASS|FAIL --eval-report <path>",
+			reportPath:   specEvalReportPath(s),
 		})
 
 	case StateRefine:
@@ -360,6 +451,7 @@ func printSpecifyingOutput(w io.Writer, s *ForgeState, dir string) {
 			runEval:      "The sub-agent should run: forgectl eval",
 			stagedNote:   "Spec files have been staged. Sub-agent makes corrections directly.",
 			reportTail:   "advance with --verdict PASS|FAIL --eval-report <path>",
+			reportPath:   crossRefEvalReportPath(s),
 		})
 
 	case StateCrossReferenceReview:
@@ -428,6 +520,7 @@ func printSpecifyingOutput(w io.Writer, s *ForgeState, dir string) {
 			runEval:      "The sub-agent should run: forgectl eval",
 			stagedNote:   "Spec files have been staged. Sub-agent makes corrections directly.",
 			reportTail:   "advance with --verdict PASS|FAIL --eval-report <path>",
+			reportPath:   reconcileEvalReportPath(s),
 		})
 
 	case StateReconcileReview:
@@ -667,6 +760,7 @@ func printPlanningOutput(w io.Writer, s *ForgeState, dir string) {
 			runEval:      "Sub-agent runs: forgectl eval",
 			stagedNote:   "Plan files have been staged. Sub-agent makes corrections directly.",
 			reportTail:   "advance with --verdict PASS|FAIL --eval-report <path>",
+			reportPath:   planEvalReportPath(s),
 		})
 
 	case StateRefine:
@@ -1031,6 +1125,7 @@ func printImplementingOutput(w io.Writer, s *ForgeState, dir string) {
 			runEval:      "The sub-agent should run: forgectl eval",
 			stagedNote:   "Batch files have been staged. Sub-agent makes corrections directly.",
 			reportTail:   "advance with --eval-report <path> --verdict PASS|FAIL",
+			reportPath:   implEvalReportPath(s),
 		})
 
 	case StateCommit:
@@ -1451,11 +1546,13 @@ func printReverseEngineeringOutput(w io.Writer, s *ForgeState, dir string) {
 		fmt.Fprintf(w, "    forgectl eval\n")
 		fmt.Fprintf(w, "\n  This outputs the evaluation prompt with the full spec files\n")
 		fmt.Fprintf(w, "  and consistency checklist for the sub-agents to review.\n")
-		fmt.Fprintf(w, "\n  After the sub-agents complete their evaluation, advance with the verdict:\n")
-		fmt.Fprintf(w, "    forgectl advance --verdict PASS --eval-report <path>\n")
-		fmt.Fprintf(w, "    forgectl advance --verdict FAIL --eval-report <path>\n")
-		reportFile := filepath.Join(domain, "specs", ".eval", fmt.Sprintf("reconciliation-r%d.md", re.ReconcileRound))
-		fmt.Fprintf(w, "\n  Eval reports are written to: %s\n", reportFile)
+		reportFile := reverseEngineeringReconcileEvalReportPath(s)
+		fmt.Fprintf(w, "\n  The sub-agents must write the report to this exact path:\n")
+		fmt.Fprintf(w, "    %s\n", reportFile)
+		fmt.Fprintf(w, "\n  After the sub-agents complete their evaluation, advance with the verdict\n")
+		fmt.Fprintf(w, "  and that same path (--eval-report takes the file path, not the report text):\n")
+		fmt.Fprintf(w, "    forgectl advance --verdict PASS --eval-report %s\n", reportFile)
+		fmt.Fprintf(w, "    forgectl advance --verdict FAIL --eval-report %s\n", reportFile)
 
 	case StateColleagueReview:
 		fmt.Fprintf(w, "State: COLLEAGUE_REVIEW\n")
@@ -1786,9 +1883,9 @@ func printPlanningEval(w io.Writer, s *ForgeState) error {
 		fmt.Fprintf(w, "  - %s\n", spec)
 	}
 
-	// Previous evaluations + report output, per eval_mode.
-	evalDir := filepath.Join(filepath.Dir(plan.CurrentPlan.File), "evals")
-	reportFile := filepath.Join(evalDir, fmt.Sprintf("round-%d.md", plan.Round))
+	// Previous evaluations + report output, per eval_mode. Shared helper keeps
+	// this path identical to the one shown in the EVALUATE status action.
+	reportFile := planEvalReportPath(s)
 	writeEvalTrailingSections(w, EvalModeFor(s.Config.Planning.Eval, s.Config.General), plan.Evals, reportFile, "plan", true)
 
 	return nil
@@ -1872,9 +1969,10 @@ func printImplementingEval(w io.Writer, s *ForgeState, dir string) error {
 		}
 	}
 
-	// Previous evaluations + report output, per eval_mode.
-	evalDir := filepath.Join(currentPlanDir(s), "evals")
-	reportFile := filepath.Join(evalDir, fmt.Sprintf("batch-%d-round-%d.md", impl.BatchNumber, evalRound))
+	// Previous evaluations + report output, per eval_mode. The report path is
+	// computed by the shared helper so it is identical to the path the EVALUATE
+	// status action shows the engineer.
+	reportFile := implEvalReportPath(s)
 	writeEvalTrailingSections(w, EvalModeFor(s.Config.Implementing.Eval, s.Config.General), batch.Evals, reportFile, "batch", true)
 
 	return nil
@@ -1912,7 +2010,7 @@ func PrintSpecEvalOutput(w io.Writer, s *ForgeState, projectRoot string) error {
 		}
 	}
 
-	reportFile := filepath.Join(cs.Domain, "specs", ".eval", fmt.Sprintf("batch-%d-r%d.md", spec.BatchNumber, cs.Round))
+	reportFile := specEvalReportPath(s)
 	writeEvalTrailingSections(w, EvalModeFor(s.Config.Specifying.Eval, s.Config.General), cs.Evals, reportFile, "spec", true)
 
 	return nil
@@ -1953,10 +2051,7 @@ func PrintReconcileEvalOutput(w io.Writer, s *ForgeState) error {
 	fmt.Fprintf(w, "\n--- RECONCILIATION CONTEXT ---\n\n")
 	fmt.Fprintf(w, "Run: git diff --staged\n")
 
-	reportFile := ""
-	if len(spec.Completed) > 0 {
-		reportFile = filepath.Join(filepath.Dir(spec.Completed[0].File), ".eval", fmt.Sprintf("reconciliation-r%d.md", round))
-	}
+	reportFile := reconcileEvalReportPath(s)
 	var prevEvals []EvalRecord
 	if spec.Reconcile != nil {
 		prevEvals = spec.Reconcile.Evals
@@ -2006,10 +2101,7 @@ func PrintCrossRefEvalOutput(w io.Writer, s *ForgeState) error {
 		}
 	}
 
-	reportFile := ""
-	if len(domainSpecs) > 0 {
-		reportFile = filepath.Join(filepath.Dir(domainSpecs[0].File), ".eval", fmt.Sprintf("cross-reference-r%d.md", round))
-	}
+	reportFile := crossRefEvalReportPath(s)
 	var prevEvals []EvalRecord
 	if spec.CrossReference != nil {
 		if cr, ok := spec.CrossReference[domain]; ok {
@@ -2064,10 +2156,15 @@ func PrintReverseEngineeringEvalOutput(w io.Writer, s *ForgeState) error {
 		fmt.Fprintf(w, "  (no specs queued for this domain)\n")
 	}
 
-	reportFile := filepath.Join(domain, "specs", ".eval", fmt.Sprintf("reconciliation-r%d.md", round))
+	// Shared helper keeps this path identical to the one shown in the
+	// RECONCILE_EVAL action.
+	reportFile := reverseEngineeringReconcileEvalReportPath(s)
 	fmt.Fprintf(w, "\n--- REPORT OUTPUT ---\n\n")
-	fmt.Fprintf(w, "Write your evaluation report to:\n")
+	fmt.Fprintf(w, "Write your evaluation report to this exact path (create the file — do not only\n")
+	fmt.Fprintf(w, "describe it):\n")
 	fmt.Fprintf(w, "  %s\n", reportFile)
+	fmt.Fprintf(w, "\nWhen done, your final message must be only this path and the verdict, e.g.:\n")
+	fmt.Fprintf(w, "  %s FAIL\n", reportFile)
 
 	return nil
 }

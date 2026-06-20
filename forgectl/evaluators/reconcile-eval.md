@@ -20,7 +20,7 @@ confirm that wiring is sound.
 You will be given:
 
 1. **The spec list** — every spec created or updated for this domain, each with
-   its `depends_on` references. Listed in the `--- SPECS ---` section below.
+   its `depends_on` references. Listed in the SPECS section below.
 2. **The current round number** and the report output path.
 
 Read each listed spec file **in full**. Also read any spec named in a
@@ -54,13 +54,12 @@ For each dimension:
 
 ## Report Format
 
-Write the report to:
-
-```
-<domain>/specs/.eval/reconciliation-r<round>.md
-```
-
-Where `<round>` is the current evaluation round number (given below).
+You **must create a report file** — do not merely describe your findings in your
+reply. Use your file-writing tool to write the report to the exact path given in
+the REPORT OUTPUT section of the `forgectl eval` output (do not guess or
+reconstruct the path). When you are done, your final message must be **only that
+path and the verdict** (e.g. `<report-path> FAIL`) so the engineer can
+pass the path straight to `forgectl advance --eval-report`.
 
 ### Report Structure
 

@@ -70,8 +70,13 @@ Phase:   specifying
 Round:   1/3
 Action:  Please spawn 1 sonnet general-purpose sub-agent to evaluate cross-domain reconciliation.
          The sub-agent should run: forgectl eval
-         After completion of the above, advance with --verdict PASS|FAIL --eval-report <path>
+         The sub-agent must write its report to this exact path:
+           specs/.eval/reconciliation-r1.md
+         After completion of the above, advance with --verdict PASS|FAIL --eval-report specs/.eval/reconciliation-r1.md
+         --eval-report takes this file path, not the report text.
 ```
+
+This report-mode handoff follows the shared **eval-report-contract** (`specs/eval-report-contract.md`): the path here is identical to the `--- REPORT OUTPUT ---` path in `forgectl eval`.
 
 **Entering RECONCILE_EVAL** (after RECONCILE, `eval_mode: "direct"`):
 
@@ -177,8 +182,12 @@ Run: git diff --staged
 
 --- REPORT OUTPUT ---
 
-Write your evaluation report to:
+Write your evaluation report to this exact path (create the file — do not only
+describe it):
   specs/.eval/reconciliation-r1.md
+
+When done, your final message must be only this path and the verdict, e.g.:
+  specs/.eval/reconciliation-r1.md FAIL
 ```
 
 When `eval_mode: "direct"` or `eval_mode: "conversational"`, the `--- REPORT OUTPUT ---` section is omitted.
