@@ -54,7 +54,7 @@ What scaffolding reports to its caller.
 | current working directory | path | yes | The directory the scaffold is invoked from; the starting point for project-root resolution. |
 | embedded default template | TOML text | yes | Compiled into the binary; the content written when no config exists. |
 
-Scaffolding takes no CLI flags of its own. It is triggered as a side effect of `init`.
+Scaffolding takes no CLI flags of its own. It is triggered in two ways: as the primary action of `forgectl init` with no flags (scaffold-only mode), and as the first step of `forgectl init --from <path>` before session initialization proceeds.
 
 ### Outputs
 

@@ -1,13 +1,17 @@
 # Session Initialization
 
 ## Topic of Concern
-> The scaffold initializes a session from a validated input file, project configuration, and a specified phase.
+> The `init` command either bootstraps a project's configuration (when called with no flags) or initializes a full session from a validated input file, project configuration, and a specified phase.
 
 ## Context
 
-The `init` command creates a new `forgectl-state.json` from a user-provided input file and the project's `.forgectl/config`. The input schema varies by phase: a spec queue for specifying, a plans queue for planning, or a plan.json for implementing. Before loading config, `init` invokes configuration scaffolding, which guarantees `.forgectl/` and a default `.forgectl/config` exist — creating them when absent so a brand-new project can be initialized without manual setup. The scaffold then reads the TOML config, validates the input, rejects malformed data with actionable errors, and sets the starting state for the chosen phase.
+The `init` command has two modes of operation:
 
-All configuration is read from `.forgectl/config` at init time and locked into the state file. CLI flags on `init` are limited to `--from` and `--phase`. See `docs/configurations.md` for the full configuration reference.
+**Scaffold-only mode** (`forgectl init` with no flags): runs configuration scaffolding and exits. This creates `.forgectl/` and a default `.forgectl/config` at the project root if either is absent, then exits successfully. No state file is created. This mode is idempotent and safe to run on any project at any time.
+
+**Session mode** (`forgectl init --from <path>`): creates a new `forgectl-state.json` from a user-provided input file and the project's `.forgectl/config`. The input schema varies by phase: a spec queue for specifying, a plans queue for planning, or a plan.json for implementing. Before loading config, `init` invokes configuration scaffolding, which guarantees `.forgectl/` and a default `.forgectl/config` exist — creating them when absent so a brand-new project can be initialized without manual setup. The scaffold then reads the TOML config, validates the input, rejects malformed data with actionable errors, and sets the starting state for the chosen phase.
+
+All configuration is read from `.forgectl/config` at init time and locked into the state file. CLI flags on `init` are `--from` and `--phase`. See `docs/configurations.md` for the full configuration reference.
 
 Sessions can begin at any of three phases — specifying, planning, or implementing — allowing users to skip earlier phases when inputs already exist. The generate_planning_queue phase cannot be initialized directly; it requires a completed specifying phase.
 
@@ -37,7 +41,8 @@ Sessions can begin at any of three phases — specifying, planning, or implement
 
 | Command | Flags | Description |
 |---------|-------|-------------|
-| `init` | `--from <path>` (required), `--phase specifying\|planning\|implementing` (default specifying) | Initialize state file from validated input and project config |
+| `init` | *(none)* | Bootstrap `.forgectl/` and default config if absent; exit after scaffolding with no state file created |
+| `init` | `--from <path>` (required), `--phase specifying\|planning\|implementing` (default: specifying) | Initialize state file from validated input and project config |
 
 All other configuration is read from `.forgectl/config`.
 
@@ -123,9 +128,10 @@ The scaffold exits with a non-zero code on validation failure.
 | Condition | Signal | Rationale |
 |-----------|--------|-----------|
 | `.forgectl/` or `.forgectl/config` cannot be created | Error with the OS failure detail. Exit code 1. | Scaffolding must establish the project root and config (see config-scaffolding) |
+| `--phase` is provided without `--from` | Error: "--from is required when --phase is set." Exit code 1. | `--phase` has no meaning without an input file |
 | `.forgectl/config` exists but is unparseable TOML | Error with parse details. Exit code 1. | An existing config must be valid TOML; scaffolding never overwrites it |
 | Config constraint violation (e.g., eval.min_rounds > eval.max_rounds, invalid commit_strategy, nested domain paths) | Error listing violations. Exit code 1. | Invalid configuration |
-| `init` called when state file already exists | Error: "State file already exists. Delete it to reinitialize." Exit code 1. | Prevents accidental loss of in-progress state |
+| `init` called with `--from` when state file already exists | Error: "State file already exists. Delete it to reinitialize." Exit code 1. | Prevents accidental loss of in-progress state |
 | `--from` file fails schema validation | Error listing violations. Prints full valid schema. Exit code 1. | User needs to see what's wrong |
 | `--phase` not one of the three valid values | Error: "--phase must be specifying, planning, or implementing." Exit code 1. | Invalid phase |
 | `--phase generate_planning_queue` | Error: "generate_planning_queue requires a completed specifying phase. Use --phase specifying instead." Exit code 1. | Cannot initialize mid-lifecycle phase directly |
@@ -134,12 +140,32 @@ The scaffold exits with a non-zero code on validation failure.
 
 ## Behavior
 
+### Scaffold-Only Initialization
+
+#### Preconditions
+- No flags are provided.
+
+#### Steps
+1. Run configuration scaffolding (see config-scaffolding): establish the project root, creating `.forgectl/` and writing a default `.forgectl/config` if either is missing.
+2. Scaffolding prints a user-facing notice if a default config was freshly written; no additional output is emitted by `init` itself.
+3. Exit with code 0.
+
+#### Postconditions
+- `.forgectl/` and `.forgectl/config` exist at the resolved project root.
+- No state file is created or modified.
+- If `.forgectl/` and `.forgectl/config` already existed before this invocation, no file is written and no notice is printed.
+
+#### Error Handling
+- `.forgectl/` or `.forgectl/config` cannot be created: error with the OS failure detail. Exit code 1.
+
+---
+
 ### Initializing a Session
 
 #### Preconditions
-- No state file exists at the configured `state_dir` location.
 - `--from` is provided.
 - `--phase` is one of `specifying`, `planning`, `implementing` (default: `specifying`). `generate_planning_queue` is not valid.
+- No state file exists at the configured `state_dir` location.
 
 (`.forgectl/` and `.forgectl/config` need not pre-exist — configuration scaffolding creates them when absent.)
 
@@ -265,6 +291,24 @@ The `[logs]` section in `.forgectl/config` is validated at init:
 
 ## Testing Criteria
 
+### Bare init creates scaffolding when nothing exists
+- **Verifies:** Scaffold-only mode bootstraps a bare project.
+- **Given:** No `.forgectl/` in the current directory or any ancestor; no flags provided.
+- **When:** `forgectl init`
+- **Then:** `.forgectl/` and `.forgectl/config` are created at the current directory; no state file is created; exit code 0.
+
+### Bare init is idempotent on an existing project
+- **Verifies:** Scaffold-only mode performs no writes when scaffolding already exists.
+- **Given:** `.forgectl/` and `.forgectl/config` already exist.
+- **When:** `forgectl init`
+- **Then:** No file is written; no notice is printed; exit code 0.
+
+### --phase without --from is rejected
+- **Verifies:** Flag combination validation.
+- **Given:** Any project state.
+- **When:** `forgectl init --phase specifying`
+- **Then:** Exit code 1 with error "--from is required when --phase is set."
+
 ### Init defaults to specifying phase
 - **Verifies:** Default phase selection.
 - **Given:** Valid `.forgectl/config` with defaults.
@@ -328,6 +372,7 @@ The `[logs]` section in `.forgectl/config` is validated at init:
 ---
 
 ## Implements
+- Scaffold-only invocation (`forgectl init` with no flags) that creates `.forgectl/` and default config when absent, then exits without creating a state file
 - Phase-selectable init (`--phase specifying|planning|implementing`)
 - Input validation for spec queue, plan queue, and plan.json schemas
 - Project root discovery via `.forgectl/` directory walk
