@@ -213,6 +213,106 @@ func TestScaffoldErrorsWhenDirCannotBeCreated(t *testing.T) {
 	}
 }
 
+// TestScaffoldStopsWalkAtGitRoot verifies the git-root boundary: a .forgectl/
+// above the git root is never discovered; scaffolding creates .forgectl/ at cwd.
+func TestScaffoldStopsWalkAtGitRoot(t *testing.T) {
+	base := t.TempDir()
+	// A .forgectl/ above the git root (simulating a home-level config).
+	if err := os.MkdirAll(filepath.Join(base, ".forgectl"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	// The git repository lives under base/, so base/.forgectl/ is above its root.
+	repoDir := filepath.Join(base, "repo")
+	if err := os.MkdirAll(filepath.Join(repoDir, ".git"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	srcDir := filepath.Join(repoDir, "src")
+	if err := os.MkdirAll(srcDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	res, err := Scaffold(srcDir)
+	if err != nil {
+		t.Fatalf("Scaffold: %v", err)
+	}
+	if res.ProjectRoot != srcDir {
+		t.Errorf("ProjectRoot = %q, want %q (cwd)", res.ProjectRoot, srcDir)
+	}
+	if !res.CreatedDir {
+		t.Error("CreatedDir should be true; walk stopped at git root and created .forgectl/ at cwd")
+	}
+	// The home-level .forgectl/ must not have been used.
+	if _, err := os.Stat(filepath.Join(base, ".forgectl", "config")); !os.IsNotExist(err) {
+		t.Error("home-level .forgectl/config must not be written; the boundary was crossed")
+	}
+	// A new .forgectl/ must exist at srcDir.
+	if info, err := os.Stat(filepath.Join(srcDir, ".forgectl")); err != nil || !info.IsDir() {
+		t.Errorf(".forgectl/ not created at cwd: %v", err)
+	}
+}
+
+// TestScaffoldUsesForgetclColocatedWithGitDir verifies that a .forgectl/
+// co-located with .git/ is recognized as the project root.
+func TestScaffoldUsesForgetclColocatedWithGitDir(t *testing.T) {
+	base := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(base, ".git"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(base, ".forgectl"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	// Seed a config so this run does not write one — isolating root discovery.
+	if err := os.WriteFile(filepath.Join(base, ".forgectl", "config"), []byte("# seeded\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	srcDir := filepath.Join(base, "src")
+	if err := os.MkdirAll(srcDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	res, err := Scaffold(srcDir)
+	if err != nil {
+		t.Fatalf("Scaffold: %v", err)
+	}
+	if res.ProjectRoot != base {
+		t.Errorf("ProjectRoot = %q, want git root %q", res.ProjectRoot, base)
+	}
+	if res.CreatedDir {
+		t.Error("CreatedDir should be false; .forgectl/ co-located with .git/ must be reused")
+	}
+	if _, err := os.Stat(filepath.Join(srcDir, ".forgectl")); !os.IsNotExist(err) {
+		t.Error("no new .forgectl/ should be created in the working directory")
+	}
+}
+
+// TestScaffoldFallsBackToFullWalkOutsideGitRepo verifies that when no .git/
+// exists anywhere, the walk continues to the filesystem root as before.
+func TestScaffoldFallsBackToFullWalkOutsideGitRepo(t *testing.T) {
+	base := t.TempDir()
+	// .forgectl/ two levels up, no .git/ anywhere in the tree.
+	if err := os.MkdirAll(filepath.Join(base, ".forgectl"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(base, ".forgectl", "config"), []byte("# seeded\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	deepDir := filepath.Join(base, "a", "b")
+	if err := os.MkdirAll(deepDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	res, err := Scaffold(deepDir)
+	if err != nil {
+		t.Fatalf("Scaffold: %v", err)
+	}
+	if res.ProjectRoot != base {
+		t.Errorf("ProjectRoot = %q, want ancestor %q", res.ProjectRoot, base)
+	}
+	if res.CreatedDir {
+		t.Error("CreatedDir should be false; ancestor .forgectl/ must be reused")
+	}
+}
+
 // TestScaffoldResumableAfterConfigWriteFailure verifies partial-bootstrap error
 // handling: a directory occupying the config path fails the write, leaving the
 // created .forgectl/ in place and no partial config; a re-run completes the bootstrap.

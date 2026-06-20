@@ -145,15 +145,25 @@ type tomlForgeConfig struct {
 	Logs  tomlLogsConfig  `toml:"logs"`
 }
 
-// FindProjectRoot walks up from startDir until it finds a directory containing .forgectl/.
-// Returns an error if not found.
+// FindProjectRoot walks up from startDir looking for a directory containing
+// .forgectl/. The walk stops at the first of three conditions: a .forgectl/
+// directory is found, a .git/ directory is found (the git-root boundary), or
+// the filesystem root is reached. A .forgectl/ that lives above the git root
+// is never discovered.
 func FindProjectRoot(startDir string) (string, error) {
 	dir := startDir
 	for {
+		// .forgectl/ takes priority — check it before .git/ so a directory that
+		// contains both is still recognized as the project root.
 		candidate := filepath.Join(dir, ".forgectl")
-		info, err := os.Stat(candidate)
-		if err == nil && info.IsDir() {
+		if info, err := os.Stat(candidate); err == nil && info.IsDir() {
 			return dir, nil
+		}
+		// Stop at the git root: a .git/ here means we've reached the repository
+		// boundary. A .forgectl/ above this point must not be used.
+		gitDir := filepath.Join(dir, ".git")
+		if info, err := os.Stat(gitDir); err == nil && info.IsDir() {
+			return "", fmt.Errorf("No .forgectl directory found.")
 		}
 		parent := filepath.Dir(dir)
 		if parent == dir {
