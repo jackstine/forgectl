@@ -9,7 +9,7 @@
     {
       "name": "forgectl",
       "source": "./",
-      "description": "Skills and commands for spec-driven development with forgectl: planning, specifying, implementation planning, implementing, and reverse engineering.",
+      "description": "Skills and commands for spec-driven development with forgectl: planning, specifying, implementation planning, implementing, reverse engineering, and authoring frontend specifications.",
       "category": "development",
       "keywords": [
         "spec-driven-development",

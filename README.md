@@ -21,7 +21,7 @@ The skills and commands ship as a Claude Code plugin. Add the marketplace and in
 ```
 
 This makes the spec-driven development skills (`planner`, `specs`, `implementation_planning`,
-`implementation`, `implement_from_specs`, `reverse_engineering`) and the `meta`, `q`, and `review`
+`implementation`, `implement_from_specs`, `reverse_engineering`, `frontend_specs`) and the `meta`, `q`, and `review`
 commands available — namespaced under the `forgectl` plugin. The plugin is defined by
 `.claude-plugin/plugin.json` and published via `.claude-plugin/marketplace.json`.
 
@@ -87,6 +87,10 @@ This pipeline of the process is involved with generating a plan to implement.
 ### Implement
 
 Take a implementation plan, and implement it. Simple as that.  This is where your agent is on auto pilot, and reinforces the spec generation into the codebase.
+
+### Frontend Specs
+
+Use when creating or revising any spec under `ui/frontend/specs/` — a page, a component, a hook, a formatter, or the shared playbook. Determines which of three spec tiers a thing belongs to (rendered `.spec.html` visual sheet, Markdown component contract, or Markdown view spec) and how to write each so a view wires its components together without duplication or drift.
 
 
 ## Examples

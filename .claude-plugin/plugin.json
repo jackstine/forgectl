@@ -2,7 +2,7 @@
   "name": "forgectl",
   "displayName": "Forgectl — Spec-Driven Development",
   "version": "0.0.1",
-  "description": "Skills and commands for the forgectl spec-driven development harness: planning, specifying, implementation planning, implementing, and reverse engineering code into specs.",
+  "description": "Skills and commands for the forgectl spec-driven development harness: planning, specifying, implementation planning, implementing, reverse engineering code into specs, and authoring frontend specifications.",
   "author": {
     "name": "Jake Cukjati",
     "email": "jakecukjati@gmail.com"
