@@ -452,6 +452,13 @@ func advancePlanning(s *ForgeState, in AdvanceInput, dir string) error {
 		if s.Config.General.EnableCommits && in.Message == "" {
 			return fmt.Errorf("--message is required in planning ACCEPT state when enable_commits is true")
 		}
+		if s.Config.General.EnableCommits {
+			strategy := effectivePlanStrategy(s)
+			stageTargets := planScopeTargets(s, strategy)
+			if _, err := AutoCommit(dir, strategy, stageTargets, in.Message); err != nil {
+				return fmt.Errorf("Error: STOP there was a failure with auto committing in forgectl, please tell the user: %s", err)
+			}
+		}
 		// Add current plan to completed.
 		if s.Planning.CurrentPlan != nil {
 			s.Planning.Completed = append(s.Planning.Completed, CompletedPlan{
@@ -1472,6 +1479,45 @@ func advanceREQueue(s *ForgeState, in AdvanceInput, dir string) error {
 	re.ExecuteItemIndex = 1
 	s.State = StateExecuteReverseEngineer
 	return ensureItemSpecsDir(re, dir)
+}
+
+// effectivePlanStrategy returns the planning commit strategy, falling back to "strict".
+func effectivePlanStrategy(s *ForgeState) string {
+	if s.Config.Planning.CommitStrategy != "" {
+		return s.Config.Planning.CommitStrategy
+	}
+	return "strict"
+}
+
+// planScopeTargets returns the git staging targets for a planning ACCEPT commit.
+// strict stages plan.json and its adjacent notes/ directory.
+// scoped stages the entire domain directory.
+// all-specs stages domain/specs/.
+// tracked/all return nil (AutoCommit handles those via -u / -A flags).
+func planScopeTargets(s *ForgeState, strategy string) []string {
+	plan := s.Planning.CurrentPlan
+	if plan == nil {
+		return nil
+	}
+	switch strategy {
+	case "strict":
+		targets := []string{plan.File}
+		notesDir := filepath.Join(filepath.Dir(plan.File), "notes") + "/"
+		targets = append(targets, notesDir)
+		return targets
+	case "scoped":
+		if plan.Domain != "" {
+			return []string{plan.Domain + "/"}
+		}
+		return nil
+	case "all-specs":
+		if plan.Domain != "" {
+			return []string{plan.Domain + "/specs/"}
+		}
+		return nil
+	default:
+		return nil
+	}
 }
 
 // effectiveImplStrategy returns the implementing commit strategy, falling back to "scoped".
