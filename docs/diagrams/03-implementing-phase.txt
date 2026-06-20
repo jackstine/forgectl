@@ -56,12 +56,13 @@
   ║  ║  │  │  Files:   internal/config/load.go              │     │   ║   ║
   ║  ║  │  │  Specs:   service-configuration.md             │     │   ║   ║
   ║  ║  │  │           config-validation.md                 │     │   ║   ║
+  ║  ║  │  │  Read:    git show <commits> -- '**/<spec>'    │     │   ║   ║
   ║  ║  │  │  Refs:    notes/config.md                      │     │   ║   ║
   ║  ║  │  │  Tests:   3 (2 functional, 1 edge_case)        │     │   ║   ║
   ║  ║  │  └───────────────────────────────────────────────┘     │   ║   ║
   ║  ║  │                                                         │   ║   ║
   ║  ║  │  Engineer actions:                                      │   ║   ║
-  ║  ║  │  1. Read spec sections for contract                     │   ║   ║
+  ║  ║  │  1. Read spec sections (run the Read: git show cmd)     │   ║   ║
   ║  ║  │  2. Read notes/refs for guidance                        │   ║   ║
   ║  ║  │  3. Search codebase (confirm not already implemented)   │   ║   ║
   ║  ║  │  4. Implement completely — NO stubs, NO placeholders    │   ║   ║

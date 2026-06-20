@@ -80,9 +80,13 @@ Steps:
   3. Add YAML struct tags for deserialization
 Files:   internal/config/types.go
 Specs:   service-configuration.md#interface-outputs
+         Read: git show abc1234 def5678 -- '**/service-configuration.md'
 Refs:    notes/config.md#types
 Tests:   1 functional
 Action:  Implement this item.
+         Please review the specification(s) above if you have not already done so —
+         run the git command shown under each spec to read its definition.
+         Please review the reference file(s) under Refs if you have not already done so.
          After completion of the above, advance to continue.
 ```
 
@@ -103,10 +107,15 @@ Steps:
   4. Write table-driven tests for valid, rejection, and edge cases
 Files:   internal/config/load.go, internal/config/load_test.go
 Specs:   service-configuration.md#behavior-loading
+         Read: git show abc1234 def5678 -- '**/service-configuration.md'
          config-validation.md#behavior-strict-mode
+         Read: git show abc1234 def5678 -- '**/config-validation.md'
 Refs:    notes/config.md#load
 Tests:   2 functional, 2 rejection, 2 edge_case
 Action:  Implement this item.
+         Please review the specification(s) above if you have not already done so —
+         run the git command shown under each spec to read its definition.
+         Please review the reference file(s) under Refs if you have not already done so.
          After completion of the above, advance to continue.
 ```
 
@@ -129,12 +138,16 @@ Steps:
   3. Add YAML struct tags for deserialization
 Files:   internal/config/types.go
 Specs:   service-configuration.md#interface-outputs
+         Read: git show abc1234 def5678 -- '**/service-configuration.md'
 Refs:    notes/config.md#types
 Tests:   1 functional
 Action:  Study the eval file "launcher/.forgectl_workspace/implementation_plan/evals/batch-1-round-1.md"
          and implement any corrections as needed.
          Apply "fresh" eyes and a tightened lens when reviewing the work,
          then apply corrections as needed.
+         Please review the specification(s) above if you have not already done so —
+         run the git command shown under each spec to read its definition.
+         Please review the reference file(s) under Refs if you have not already done so.
          After completion of the above, advance to continue.
 ```
 
@@ -156,12 +169,16 @@ Steps:
   3. Add YAML struct tags for deserialization
 Files:   internal/config/types.go
 Specs:   service-configuration.md#interface-outputs
+         Read: git show abc1234 def5678 -- '**/service-configuration.md'
 Refs:    notes/config.md#types
 Tests:   1 functional
 Action:  Review unstaged changes from the evaluator (git diff).
          Accept, revise, or revert corrections as needed.
          Apply "fresh" eyes and a tightened lens when reviewing the work,
          then apply corrections as needed.
+         Please review the specification(s) above if you have not already done so —
+         run the git command shown under each spec to read its definition.
+         Please review the reference file(s) under Refs if you have not already done so.
          After completion of the above, advance to continue.
 ```
 
@@ -183,12 +200,16 @@ Steps:
   3. Add YAML struct tags for deserialization
 Files:   internal/config/types.go
 Specs:   service-configuration.md#interface-outputs
+         Read: git show abc1234 def5678 -- '**/service-configuration.md'
 Refs:    notes/config.md#types
 Tests:   1 functional
 Action:  Make corrections based off communication with the evaluator.
          Implement any corrections as needed.
          Apply "fresh" eyes and a tightened lens when reviewing the work,
          then apply corrections as needed.
+         Please review the specification(s) above if you have not already done so —
+         run the git command shown under each spec to read its definition.
+         Please review the reference file(s) under Refs if you have not already done so.
          After completion of the above, advance to continue.
 ```
 
@@ -640,11 +661,19 @@ ORIENT → IMPLEMENT(1) → IMPLEMENT(2) → ... → EVALUATE
 
 ### IMPLEMENT Behavior
 
-Presents **one item at a time**. Displays full context: name, description, steps, files, specs, refs, test summary.
+Presents **one item at a time**. Displays full context: name, description, steps, files, specs (each with a `Read:` command), refs, test summary.
+
+**Spec `Read:` command.** Each `Specs:` entry is followed by an indented `Read:` line carrying a copy-pasteable git command for inspecting that spec's definition. The command is `git show <commits> -- '**/<file>'` where:
+- `<commits>` is the space-joined list of the current plan's `spec_commits` (the deduplicated set of commit hashes from the domain's specifying phase). `git show` accepts the full list at once; commits that did not touch the spec file render nothing, so the pathspec self-filters the per-domain list down to the relevant commits.
+- `<file>` is the spec entry with its `#anchor` stripped, wrapped in a `'**/<file>'` pathspec glob. The glob is required because spec entries are display-only names (with optional `#anchor`), not validated on-disk paths.
+
+`git show` is used rather than `git log -p` so the output is bounded to exactly the named spec commits and does not walk unrelated history. When the current plan's `spec_commits` is empty, the `Read:` line is omitted (mirroring the planning phase's handling of empty spec commits) and the spec-review instruction in the action text reads "read the spec file(s) listed above" instead of referencing the git command.
+
+**Review reminders.** Every IMPLEMENT action — first round and every subsequent round — includes a reminder to review the specs before implementing: "Please review the specification(s) above if you have not already done so — run the git command shown under each spec to read its definition." When the item has `Refs`, a second line is added: "Please review the reference file(s) under Refs if you have not already done so." Both lines are phrased as "if you have not already done so" because the item context is presented on every round and the engineer may have seen it before.
 
 **First round (no prior eval):** Action says "Implement this item." Advance requires `--message` — the scaffold commits after each item.
 
-**Subsequent rounds (after eval):** When `eval_mode: "report"`, action says "Study the eval file and implement any corrections." When `eval_mode: "direct"`, action says "Review unstaged changes from the evaluator (git diff)." When `eval_mode: "conversational"`, action says "Make corrections based off communication with the evaluator." No `--message` required — corrections are committed at the COMMIT state after the batch passes.
+**Subsequent rounds (after eval):** When `eval_mode: "report"`, action says "Study the eval file and implement any corrections." When `eval_mode: "direct"`, action says "Review unstaged changes from the evaluator (git diff)." When `eval_mode: "conversational"`, action says "Make corrections based off communication with the evaluator." No `--message` required — corrections are committed at the COMMIT state after the batch passes. The spec `Read:` lines and review reminders are present in every round.
 
 ### EVALUATE Behavior
 
@@ -681,6 +710,8 @@ When `enable_commits` is `true`, the engineer runs `forgectl advance --message <
 11. **Max rounds enforced.** FAIL at `implementing.eval.max_rounds` forces acceptance.
 12. **Guided pauses.** When `config.general.user_guided` is true, ORIENT output includes "STOP please review and discuss with user before continuing."
 13. **Auto-commit at commit points.** When `enable_commits` is `true`, `--message` is required at IMPLEMENT (first round) and COMMIT states. The scaffold stages files per `implementing.commit_strategy` (default: `scoped`) and runs `git commit -m <message>`. When `enable_commits` is `false`, `--message` is not shown in output; if provided, a warning is printed: `--message is ignored, commits are not enabled`. The warning does not instruct how to enable commits. See `docs/auto-committing.md`.
+14. **Spec `Read:` command is bounded.** When the current plan's `spec_commits` is non-empty, every `Specs:` entry in IMPLEMENT output is followed by a `Read:` line of the form `git show <commits> -- '**/<file>'`, using `git show` (not `git log -p`) so the command resolves to exactly the named spec commits. When `spec_commits` is empty, no `Read:` line is emitted.
+15. **Spec review reminder always present.** Every IMPLEMENT action, on every round, includes the spec-review reminder. The Refs-review reminder is present if and only if the item has `Refs`.
 
 ---
 
@@ -761,6 +792,36 @@ When `enable_commits` is `true`, the engineer runs `forgectl advance --message <
 - **Given:** IMPLEMENT, entered after EVALUATE (round 2+).
 - **When:** `advance`
 - **Then:** Advances without committing. No error.
+
+### IMPLEMENT renders a Read command per spec when spec_commits exist
+- **Verifies:** Spec `Read:` line is emitted with a bounded `git show` command.
+- **Given:** IMPLEMENT, item with specs `["spec-sqlc-schemas.md#x"]`, current plan `spec_commits: ["e742a1b", "694ca99"]`.
+- **When:** `advance`
+- **Then:** Output contains `Read: git show e742a1b 694ca99 -- '**/spec-sqlc-schemas.md'` directly under the `Specs:` entry. The command uses `git show`, not `git log`.
+
+### IMPLEMENT omits the Read command when spec_commits is empty
+- **Verifies:** No `Read:` line without spec commits.
+- **Given:** IMPLEMENT, item with specs, current plan `spec_commits: []`.
+- **When:** `advance`
+- **Then:** Output contains no `Read:` line. The spec-review reminder still appears, worded "read the spec file(s) listed above."
+
+### IMPLEMENT renders one Read command per spec entry
+- **Verifies:** Multi-spec items get one `Read:` line each, with anchors stripped.
+- **Given:** IMPLEMENT, item with specs `["a.md#x", "b.md#y"]`, current plan `spec_commits: ["abc1234"]`.
+- **When:** `advance`
+- **Then:** Output contains `Read: git show abc1234 -- '**/a.md'` and `Read: git show abc1234 -- '**/b.md'`.
+
+### IMPLEMENT review reminder present every round
+- **Verifies:** Spec-review reminder appears on first and subsequent rounds.
+- **Given:** IMPLEMENT entered after EVALUATE (round 2+).
+- **When:** `advance`
+- **Then:** Action text includes "Please review the specification(s) above if you have not already done so."
+
+### IMPLEMENT Refs reminder gated on Refs presence
+- **Verifies:** Refs-review reminder appears only when the item has Refs.
+- **Given:** IMPLEMENT, one item with `refs` populated and one item with no `refs`.
+- **When:** `advance` on each
+- **Then:** The item with Refs shows "Please review the reference file(s) under Refs if you have not already done so"; the item without Refs omits that line.
 
 ### EVALUATE PASS with sufficient rounds → COMMIT
 - **Verifies:** PASS with sufficient rounds marks items passed.
