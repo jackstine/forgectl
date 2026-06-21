@@ -1,0 +1,387 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>forgectl — UI Implementing · Schematic</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600;700&family=Archivo+Expanded:wght@600;700;800;900&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet" />
+<link rel="stylesheet" href="forge.css" />
+<style>
+  /* ── schematic-specific surface ─────────────────────────────── */
+  :root { --shift: #a78bfa; --shift-deep: #7c5fd6; --cyan: #4fd1c5; }
+
+  .blueprint {
+    position: relative;
+    margin: 14px 0 40px;
+    border: 1px solid var(--line);
+    border-radius: 18px;
+    background:
+      radial-gradient(ellipse 90% 70% at 22% 0%, rgba(95,168,211,0.06), transparent 60%),
+      radial-gradient(ellipse 80% 80% at 90% 100%, rgba(79,209,197,0.06), transparent 60%),
+      linear-gradient(180deg, var(--surface) 0%, var(--iron-2) 100%);
+    box-shadow: var(--shadow);
+    overflow: hidden;
+  }
+  .blueprint::before {
+    content: ''; position: absolute; inset: 0; pointer-events: none; opacity: .5;
+    background-image:
+      linear-gradient(var(--line-soft) 1px, transparent 1px),
+      linear-gradient(90deg, var(--line-soft) 1px, transparent 1px);
+    background-size: 30px 30px;
+    -webkit-mask-image: radial-gradient(ellipse 120% 120% at 50% 50%, #000 60%, transparent 100%);
+    mask-image: radial-gradient(ellipse 120% 120% at 50% 50%, #000 60%, transparent 100%);
+  }
+  .bp-head {
+    position: relative; z-index: 2;
+    display: flex; align-items: flex-end; justify-content: space-between;
+    flex-wrap: wrap; gap: 14px;
+    padding: 26px 30px 4px;
+  }
+  .bp-head .t-mono {
+    font-family: 'JetBrains Mono', monospace; font-size: 10.5px; letter-spacing: .28em;
+    text-transform: uppercase; color: var(--muted-2);
+  }
+  .bp-head h2 {
+    font-family: 'Archivo Expanded', sans-serif; font-weight: 800;
+    font-size: clamp(20px, 3vw, 30px); text-transform: uppercase; letter-spacing: -.01em;
+    line-height: 1; margin-top: 8px;
+  }
+  .bp-head h2 .ph { color: var(--steel); }
+  .bp-head .sub { font-size: 13px; color: var(--muted); margin-top: 9px; max-width: 520px; }
+  .bp-stamp {
+    font-family: 'JetBrains Mono', monospace; font-size: 10px; letter-spacing: .16em;
+    text-transform: uppercase; color: var(--muted-2); text-align: right; line-height: 1.9;
+  }
+  .bp-stamp b { color: var(--cyan); font-weight: 500; }
+
+  .bp-canvas { position: relative; z-index: 2; padding: 10px 18px 22px; }
+  .bp-canvas svg { width: 100%; height: auto; display: block; overflow: visible; }
+
+  /* ── node styling ───────────────────────────────────────────── */
+  .nd rect { rx: 11; stroke-width: 1.6; filter: drop-shadow(0 6px 14px rgba(0,0,0,.45)); }
+  .nd .lbl {
+    font-family: 'JetBrains Mono', monospace; font-weight: 700;
+    font-size: 12px; letter-spacing: .03em; text-anchor: middle; dominant-baseline: middle;
+  }
+  .nd .note {
+    font-family: 'JetBrains Mono', monospace; font-weight: 400;
+    font-size: 9px; letter-spacing: .1em; text-anchor: middle;
+    fill: var(--muted-2); text-transform: uppercase;
+  }
+
+  .nd.work     rect { fill: rgba(95,168,211,.12);  stroke: var(--steel); }
+  .nd.work     .lbl { fill: #d4ecf8; }
+  .nd.decision rect { fill: rgba(255,182,39,.13);  stroke: var(--spark); }
+  .nd.decision .lbl { fill: #ffe6ad; }
+  .nd.gate     rect { fill: rgba(79,209,197,.12);  stroke: var(--cyan); }
+  .nd.gate     .lbl { fill: #bdefe9; }
+  .nd.accept   rect { fill: rgba(107,194,138,.14); stroke: var(--ok); }
+  .nd.accept   .lbl { fill: #c6edd4; }
+  .nd.refine   rect { fill: rgba(255,90,31,.14);   stroke: var(--ember-hot); }
+  .nd.refine   .lbl { fill: #ffc6ab; }
+  .nd.shift    rect { fill: rgba(167,139,250,.16); stroke: var(--shift); stroke-dasharray: 5 4; }
+  .nd.shift    .lbl { fill: #dccbff; }
+  .nd.source   rect { fill: rgba(232,93,93,.13);   stroke: var(--fail); }
+  .nd.source   .lbl { fill: #f4c4c4; }
+
+  /* edges */
+  .edge { fill: none; stroke: #9aa0ad; stroke-width: 1.7; }
+  .edge.loop { stroke: var(--ember-hot); stroke-dasharray: 6 5; stroke-width: 1.6; }
+  .elabel rect { fill: var(--iron); stroke: var(--line); rx: 5; }
+  .elabel text {
+    font-family: 'JetBrains Mono', monospace; font-size: 9.5px; letter-spacing: .08em;
+    fill: var(--muted); text-anchor: middle; dominant-baseline: middle; text-transform: uppercase;
+  }
+  .elabel.pass text { fill: var(--ok); }
+  .elabel.loop text { fill: var(--ember-hot); }
+
+  /* ── load orchestration ─────────────────────────────────────── */
+  .nd { opacity: 0; transform: scale(.92); transform-origin: center;
+        transform-box: fill-box; animation: pop .55s cubic-bezier(.2,.9,.25,1) forwards; }
+  @keyframes pop { to { opacity: 1; transform: scale(1); } }
+  .edge { stroke-dasharray: var(--len); stroke-dashoffset: var(--len);
+          animation: draw .6s ease forwards; }
+  @keyframes draw { to { stroke-dashoffset: 0; } }
+  .edge.loop { animation: drawloop .6s ease forwards; }
+  @keyframes drawloop { to { stroke-dashoffset: 0; } }
+  .elabel { opacity: 0; animation: fade .4s ease forwards; }
+  @keyframes fade { to { opacity: 1; } }
+
+  /* legend strip */
+  .key-strip {
+    display: flex; flex-wrap: wrap; gap: 9px 20px; align-items: center;
+    position: relative; z-index: 2;
+    padding: 16px 30px 24px; border-top: 1px solid var(--line-soft);
+    font-family: 'JetBrains Mono', monospace; font-size: 11px; color: var(--muted);
+  }
+  .key-strip .k { display: inline-flex; align-items: center; gap: 8px; }
+  .key-strip .sw { width: 26px; height: 15px; border-radius: 5px; border-width: 1.5px; border-style: solid; flex: none; }
+  .sw.source   { background: rgba(232,93,93,.16);    border-color: var(--fail); }
+  .sw.work     { background: rgba(95,168,211,.16);   border-color: var(--steel); }
+  .sw.decision { background: rgba(255,182,39,.16);    border-color: var(--spark); }
+  .sw.gate     { background: rgba(79,209,197,.16);    border-color: var(--cyan); }
+  .sw.refine   { background: rgba(255,90,31,.18);     border-color: var(--ember-hot); }
+  .sw.accept   { background: rgba(107,194,138,.18);   border-color: var(--ok); }
+  .sw.shift    { background: rgba(167,139,250,.2);    border-color: var(--shift); border-style: dashed; }
+  /* reset forge.css .shift layout util so the legend swatch stays 26px */
+  .key-strip .sw.shift { padding-left: 0; margin: 0; position: static; }
+
+  .read-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 16px; margin: 8px 0 70px; }
+  .read {
+    background: linear-gradient(180deg, var(--surface), var(--iron-2));
+    border: 1px solid var(--line); border-radius: 14px; padding: 20px 22px;
+    position: relative; overflow: hidden;
+  }
+  .read::before { content:''; position:absolute; left:0; top:0; bottom:0; width:3px; }
+  .read.g1::before { background: var(--spark); }
+  .read.g2::before { background: var(--cyan); }
+  .read.g3::before { background: var(--cyan); }
+  .read h4 { font-family: 'JetBrains Mono', monospace; font-size: 11px; letter-spacing: .18em; text-transform: uppercase; margin-bottom: 12px; }
+  .read.g1 h4 { color: var(--spark); }
+  .read.g2 h4, .read.g3 h4 { color: var(--cyan); }
+  .read p { font-size: 13.5px; color: var(--muted); }
+  .read p b { color: var(--text); font-weight: 600; }
+  .read .tool { font-family:'JetBrains Mono',monospace; font-size:10.5px; letter-spacing:.12em; text-transform:uppercase; color: var(--steel); margin-top:12px; }
+
+  @media (prefers-reduced-motion: reduce) {
+    .nd, .elabel { opacity: 1 !important; transform: none !important; animation: none !important; }
+    .edge { stroke-dashoffset: 0 !important; animation: none !important; }
+  }
+</style>
+</head>
+<body>
+<div class="grain"></div>
+
+<div class="wrap">
+  <header>
+    <a class="crumb" href="index.html">← Workflow Atlas</a>
+    <span class="kicker steel"><span class="dot"></span> Phase 04 · ui variant · Schematic View</span>
+    <h1 class="page-title">UI Implementing</h1>
+    <p class="lede">
+      The <code>kind: "ui"</code> implementation phase as a <strong>high-level state-machine schematic</strong> —
+      the implementing spine plus <strong>two extra verification loops</strong>. Every batch passes
+      <strong>three sequential gates</strong>: code eval, Playwright-MCP QA, and authored Playwright e2e —
+      each with its own round budget before COMMIT decides terminal status.
+    </p>
+    <div class="meta-row">
+      <span class="chip"><b>Role</b> Senior Engineer (UI)</span>
+      <span class="chip steel"><b>3</b> gate loops</span>
+      <span class="chip"><b>in</b> plan.json · kind: ui</span>
+      <span class="chip"><b>out</b> UI code + e2e tests</span>
+    </div>
+  </header>
+
+  <!-- ── BLUEPRINT BOARD ─────────────────────────────────────── -->
+  <section class="blueprint" data-reveal>
+    <div class="bp-head">
+      <div>
+        <div class="t-mono">forgectl scaffold · state machines</div>
+        <h2><span class="ph">Phase 04 · ui</span> — UI Implementing</h2>
+        <div class="sub">Batched delivery with three sequential gate loops — code eval → QA placement → e2e verification.</div>
+      </div>
+      <div class="bp-stamp">
+        sheet <b>04b / 05</b><br />
+        rev <b>kind: ui</b><br />
+        ui_plan/plan.json
+      </div>
+    </div>
+
+    <div class="bp-canvas">
+      <svg id="board" viewBox="0 0 1280 660" role="img"
+           aria-label="State-machine schematic for the forgectl UI Implementing phase">
+        <defs>
+          <marker id="ah" markerWidth="9" markerHeight="9" refX="6.5" refY="3"
+                  orient="auto" markerUnits="userSpaceOnUse">
+            <path d="M0,0 L7,3 L0,6 Z" fill="context-stroke" />
+          </marker>
+        </defs>
+        <g id="layer-edges"></g>
+        <g id="layer-labels"></g>
+        <g id="layer-nodes"></g>
+      </svg>
+    </div>
+
+    <div class="key-strip">
+      <span class="k"><span class="sw source"></span> Plan source</span>
+      <span class="k"><span class="sw work"></span> Work</span>
+      <span class="k"><span class="sw decision"></span> Code eval</span>
+      <span class="k"><span class="sw gate"></span> Playwright gate</span>
+      <span class="k"><span class="sw refine"></span> Refine loop</span>
+      <span class="k"><span class="sw accept"></span> Terminal</span>
+      <span class="k"><span class="sw shift"></span> Phase shift</span>
+    </div>
+  </section>
+
+  <!-- ── THREE GATES ─────────────────────────────────────────── -->
+  <div class="read-row">
+    <div class="read g1" data-reveal>
+      <h4>Gate 1 · Code Eval</h4>
+      <p><b>EVALUATE</b> spawns an Opus sub-agent on <code>impl-eval.md</code> to check code against specs.
+      <b>FAIL &lt; max</b> drops to <b>re-IMPLEMENT</b> and re-evaluates; <b>PASS</b> (or force-accept at
+      max) proceeds to QA. Counter: <b>eval_round</b>.</p>
+      <div class="tool">impl-eval.md · forgectl eval</div>
+    </div>
+    <div class="read g2" data-reveal>
+      <h4>Gate 2 · QA Placement</h4>
+      <p><b>QA_TEST</b> drives the live app through the <b>Playwright MCP</b> — placement, interaction,
+      console. <b>FAIL</b> loops to <b>UI_REFINE</b> (move / resize / rewire — no commit). It always writes
+      <code>qa/batch-N-steps.json</code>, the contract handed to e2e. Counter: <b>qa_round</b>.</p>
+      <div class="tool">ui-qa-eval.md · Playwright MCP</div>
+    </div>
+    <div class="read g3" data-reveal>
+      <h4>Gate 3 · E2E Verify</h4>
+      <p><b>E2E_AUTHOR</b> turns the step list into runnable Playwright tests, then <b>E2E_VERIFY</b> confirms
+      they run, pass, and cover. <b>FAIL</b> loops to <b>E2E_REMEDIATE</b>; zero scenarios is a vacuous PASS.
+      Counter: <b>e2e_round</b> → <b>COMMIT</b>.</p>
+      <div class="tool">ui-e2e-eval.md · Playwright runner</div>
+    </div>
+  </div>
+
+  <footer>
+    <span>forgectl · docs/diagrams/10-ui-implementing-schematic</span>
+    <span><a href="ui-implementing.html">detailed walkthrough →</a> &nbsp;·&nbsp; <a href="index.html">← workflow index</a></span>
+  </footer>
+</div>
+
+<script>
+/* ── schematic graph definition ──────────────────────────────────
+   Two-tier board: forward build + code-eval + QA on the top spine,
+   e2e + ship on the lower row (flows right→left). Each gate's refine
+   loop hangs below it; COMMIT cycles back to ORIENT for more batches.
+   Transitions mirror ui-implementing.html. */
+const SVGNS = 'http://www.w3.org/2000/svg';
+
+const N = {
+  // top spine — build + code eval + QA
+  src:       { cx:96,   cy:150, w:120, h:60, type:'source',   label:['plan.json','kind: ui'] },
+  orient:    { cx:272,  cy:150, w:112, h:48, type:'work',     label:['ORIENT'] },
+  implement: { cx:458,  cy:150, w:132, h:48, type:'work',     label:['IMPLEMENT'], note:'items 1..n' },
+  evaluate:  { cx:648,  cy:150, w:128, h:48, type:'decision', label:['EVALUATE'] },
+  qa:        { cx:836,  cy:150, w:120, h:48, type:'gate',     label:['QA_TEST'] },
+  author:    { cx:1028, cy:150, w:134, h:48, type:'work',     label:['E2E_AUTHOR'] },
+
+  // refine loops under the top-spine gates
+  reimpl:    { cx:648,  cy:300, w:146, h:48, type:'refine',   label:['re-IMPLEMENT'], note:'round 2+' },
+  uirefine:  { cx:836,  cy:300, w:126, h:48, type:'refine',   label:['UI_REFINE'] },
+
+  // lower row — e2e + ship  (reads right → left)
+  verify:    { cx:1028, cy:462, w:132, h:48, type:'gate',     label:['E2E_VERIFY'] },
+  commit:    { cx:812,  cy:462, w:120, h:48, type:'work',     label:['COMMIT'] },
+  done:      { cx:600,  cy:462, w:108, h:48, type:'accept',   label:['DONE'] },
+  shift:     { cx:372,  cy:462, w:146, h:48, type:'shift',    label:['PHASE_SHIFT'], note:'→ planning · next domain' },
+
+  // refine loop under the e2e gate
+  remediate: { cx:1028, cy:600, w:158, h:48, type:'refine',   label:['E2E_REMEDIATE'] },
+};
+for (const k in N){ const n=N[k]; n.x=n.cx-n.w/2; n.y=n.cy-n.h/2; }
+
+function anchor(id, side, off=0){
+  const n = N[id];
+  switch(side){
+    case 'r': return { x:n.x+n.w, y:n.cy+off };
+    case 'l': return { x:n.x,     y:n.cy+off };
+    case 't': return { x:n.cx+off, y:n.y };
+    case 'b': return { x:n.cx+off, y:n.y+n.h };
+  }
+}
+
+/* edges: a1/a2 = [node, side, offset]; mids = explicit waypoints */
+const E = [
+  // top spine forward
+  { a1:['src','r'],        a2:['orient','l'],    label:'kind: ui', lp:{x:188,y:136} },
+  { a1:['orient','r'],     a2:['implement','l'] },
+  { a1:['implement','r'],  a2:['evaluate','l'] },
+  { a1:['evaluate','r'],   a2:['qa','l'],        label:'PASS / force', cls:'pass', lp:{x:744,y:138} },
+  { a1:['qa','r'],         a2:['author','l'],    label:'PASS · steps', cls:'pass', lp:{x:934,y:138} },
+
+  // gate 1 loop
+  { a1:['evaluate','b',20], a2:['reimpl','t',20], label:'FAIL < max', cls:'loop', lp:{x:722,y:225} },
+  { a1:['reimpl','t',-20],  a2:['evaluate','b',-20], loop:true },
+
+  // gate 2 loop
+  { a1:['qa','b',20],       a2:['uirefine','t',20], label:'FAIL < max', cls:'loop', lp:{x:910,y:225} },
+  { a1:['uirefine','t',-20],a2:['qa','b',-20], loop:true },
+
+  // bridge: author → verify (drop to lower row)
+  { a1:['author','b'],      a2:['verify','t'],   label:'run suite', lp:{x:1028,y:312} },
+
+  // lower row forward (right → left)
+  { a1:['verify','l'],      a2:['commit','r'],   label:'PASS / force', cls:'pass', lp:{x:872,y:450} },
+  { a1:['commit','l'],      a2:['done','r'],     label:'all done',     cls:'pass', lp:{x:678,y:450} },
+  { a1:['done','l'],        a2:['shift','r'],    label:'layers done',  lp:{x:478,y:450} },
+
+  // gate 3 loop
+  { a1:['verify','b',20],   a2:['remediate','t',20], label:'FAIL < max', cls:'loop', lp:{x:1102,y:537} },
+  { a1:['remediate','t',-20], a2:['verify','b',-20], loop:true },
+
+  // more batches / layers — COMMIT cycles back to ORIENT
+  { a1:['commit','t'], a2:['orient','l'],
+    mids:[{x:812,y:386},{x:158,y:386},{x:158,y:150}],
+    loop:true, label:'more batches / layers', cls:'loop', lp:{x:474,y:374} },
+];
+
+const elEdges  = document.getElementById('layer-edges');
+const elLabels = document.getElementById('layer-labels');
+const elNodes  = document.getElementById('layer-nodes');
+
+function el(name, attrs={}){ const e=document.createElementNS(SVGNS,name);
+  for(const k in attrs) e.setAttribute(k, attrs[k]); return e; }
+
+/* ── draw nodes ── */
+let ni = 0;
+const NODE_STAGGER = 50;
+for (const id in N){
+  const n = N[id];
+  const g = el('g', { class:'nd '+n.type });
+  g.style.animationDelay = (ni*NODE_STAGGER) + 'ms';
+  g.appendChild(el('rect', { x:n.x, y:n.y, width:n.w, height:n.h, rx:11 }));
+  const lines = n.label, lh = 13;
+  const y0 = n.cy - (lines.length-1)*lh/2;
+  lines.forEach((ln,i)=>{
+    const t = el('text', { class:'lbl', x:n.cx, y:y0 + i*lh });
+    t.textContent = ln; g.appendChild(t);
+  });
+  if (n.note){
+    const t = el('text', { class:'note', x:n.cx, y:n.y+n.h+14 });
+    t.textContent = n.note; g.appendChild(t);
+  }
+  elNodes.appendChild(g);
+  ni++;
+}
+
+/* ── draw edges ── */
+const nodesDone = ni*NODE_STAGGER;
+let ei = 0;
+const EDGE_STAGGER = 46;
+E.forEach((e)=>{
+  const p1 = anchor(...e.a1), p2 = anchor(...e.a2);
+  const pts = [p1, ...(e.mids||[]), p2];
+  const d = pts.map((p,i)=> (i?'L':'M')+p.x+' '+p.y).join(' ');
+  const path = el('path', { class:'edge'+(e.loop?' loop':''), d, 'marker-end':'url(#ah)' });
+  let len = 0; for(let i=1;i<pts.length;i++){ len += Math.hypot(pts[i].x-pts[i-1].x, pts[i].y-pts[i-1].y); }
+  path.style.setProperty('--len', len.toFixed(1));
+  path.style.animationDelay = (nodesDone + ei*EDGE_STAGGER) + 'ms';
+  elEdges.appendChild(path);
+
+  if (e.label){
+    const lw = e.label.length * 5.6 + 14, lh = 16;
+    const g = el('g', { class:'elabel'+(e.cls?' '+e.cls:'') });
+    g.style.animationDelay = (nodesDone + ei*EDGE_STAGGER + 200) + 'ms';
+    g.appendChild(el('rect', { x:e.lp.x-lw/2, y:e.lp.y-lh/2, width:lw, height:lh, rx:5 }));
+    const t = el('text', { x:e.lp.x, y:e.lp.y+0.5 }); t.textContent = e.label;
+    g.appendChild(t);
+    elLabels.appendChild(g);
+  }
+  ei++;
+});
+
+/* reveal surrounding cards on scroll */
+const io = new IntersectionObserver((entries)=>{
+  entries.forEach(en=>{ if(en.isIntersecting){ en.target.classList.add('lit'); io.unobserve(en.target);} });
+}, { threshold:0.12, rootMargin:'0px 0px -6% 0px' });
+document.querySelectorAll('[data-reveal]').forEach(s=>io.observe(s));
+</script>
+</body>
+</html>
