@@ -1,0 +1,94 @@
+/*
+ * playbook.css — shared stylesheet for Tier-3 visual spec sheets (*.spec.html).
+ *
+ * Purpose: give every hand-authored .spec.html a consistent, neutral chrome that
+ * loosely approximates the project's component library default theme, so sheets read
+ * as one playbook. This is a DESIGN-TARGET approximation, not a faithful reproduction
+ * of the real theme. When the real component exists, a Storybook story (or your
+ * framework's equivalent) supersedes the sheet (see SKILL.md).
+ *
+ * Neutral tokens (a generic blue theme, light scheme). Retune these to match the
+ * target project's design tokens.
+ */
+
+:root {
+  --pb-font: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  --pb-fg: #1a1b1e;          /* gray-9  */
+  --pb-dimmed: #868e96;      /* gray-6  */
+  --pb-border: #dee2e6;      /* gray-3  */
+  --pb-bg: #ffffff;
+  --pb-bg-subtle: #f8f9fa;   /* gray-0  */
+  --pb-blue: #228be6;        /* blue   */
+  --pb-green: #40c057;       /* green  */
+  --pb-red: #fa5252;         /* red    */
+  --pb-yellow: #fab005;      /* yellow */
+  --pb-gray: #adb5bd;        /* gray   */
+  --pb-radius: 4px;
+}
+
+body {
+  font-family: var(--pb-font);
+  color: var(--pb-fg);
+  background: var(--pb-bg-subtle);
+  margin: 0;
+  padding: 2rem;
+  line-height: 1.5;
+}
+
+/* Sheet scaffold */
+.pb-sheet { max-width: 900px; margin: 0 auto; }
+.pb-title { font-size: 1.6rem; font-weight: 700; margin: 0 0 .25rem; }
+.pb-purpose { color: var(--pb-dimmed); margin: 0 0 2rem; max-width: 60ch; }
+.pb-section-label {
+  font-size: .75rem; text-transform: uppercase; letter-spacing: .05em;
+  color: var(--pb-dimmed); font-weight: 600; margin: 2rem 0 .75rem;
+}
+
+/* A labeled variant: the props that produce it, then the rendered thing */
+.pb-variant {
+  display: flex; align-items: center; gap: 1.25rem;
+  padding: 1rem; background: var(--pb-bg);
+  border: 1px solid var(--pb-border); border-radius: var(--pb-radius);
+  margin-bottom: .75rem;
+}
+.pb-props {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: .8rem; color: var(--pb-dimmed);
+  min-width: 220px; flex-shrink: 0;
+}
+.pb-render { flex: 1; }
+.pb-note { font-size: .85rem; color: var(--pb-dimmed); margin: .25rem 0; }
+
+/* Badge approximation */
+.pb-badge {
+  display: inline-block; padding: 2px 8px; border-radius: var(--pb-radius);
+  font-size: .7rem; font-weight: 700; text-transform: uppercase; letter-spacing: .03em;
+  color: #fff;
+}
+.pb-badge--green   { background: var(--pb-green); }
+.pb-badge--red     { background: var(--pb-red); }
+.pb-badge--yellow  { background: var(--pb-yellow); color: var(--pb-fg); }
+.pb-badge--gray    { background: var(--pb-gray); }
+.pb-badge--outline {
+  background: transparent; color: var(--pb-fg);
+  border: 1px solid var(--pb-border); font-weight: 600;
+}
+
+/* Anchor */
+.pb-anchor { color: var(--pb-blue); cursor: pointer; }
+.pb-anchor:hover { text-decoration: underline; }
+
+/* Skeleton shimmer */
+.pb-skeleton {
+  display: inline-block; height: 16px; border-radius: var(--pb-radius);
+  background: linear-gradient(90deg, #e9ecef 25%, #f1f3f5 50%, #e9ecef 75%);
+  background-size: 200% 100%; animation: pb-shimmer 1.4s ease infinite;
+}
+@keyframes pb-shimmer { 0% { background-position: 200% 0; } 100% { background-position: -200% 0; } }
+
+/* Plain table approximation (summary tables, skeleton-row host) */
+.pb-table { border-collapse: collapse; width: 100%; font-size: .85rem; }
+.pb-table th, .pb-table td {
+  text-align: left; padding: 8px 12px; border-bottom: 1px solid var(--pb-border);
+}
+.pb-table th { color: var(--pb-dimmed); font-weight: 600; }
