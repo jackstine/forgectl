@@ -1,0 +1,3 @@
+---
+---
+ok please update/create the handoff.md file to handoff to someone where you left off so that we can pick up where you left off and continue with our conversation and our goals. Please include all the information that someone would need in there, where things should be placed, when to do things, and what importance each file has and when to write into each file. Please ensure you include instructions on how to do things that you discovered, what difficulties you had, and how you resolved them, and anything that would or could help an individual continue working from where you left off.
