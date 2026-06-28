@@ -15,6 +15,15 @@
         "spec-driven-development",
         "forgectl",
         "specifications"
+      ],
+      "skills": [
+        "./skills/frontend_specs",
+        "./skills/implement_from_specs",
+        "./skills/implementation",
+        "./skills/implementation_planning",
+        "./skills/planner",
+        "./skills/reverse_engineering",
+        "./skills/specs"
       ]
     }
   ]

@@ -17,5 +17,10 @@
     "planning",
     "reverse-engineering",
     "code-generation"
+  ],
+  "commands": [
+    "./commands/meta",
+    "./commands/q",
+    "./commands/review"
   ]
 }
