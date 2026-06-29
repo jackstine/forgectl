@@ -174,22 +174,24 @@ type tomlForgeConfig struct {
 
 // FindProjectRoot walks up from startDir looking for a directory containing
 // .forgectl/. The walk stops at the first of three conditions: a .forgectl/
-// directory is found, a .git/ directory is found (the git-root boundary), or
-// the filesystem root is reached. A .forgectl/ that lives above the git root
-// is never discovered.
+// directory is found, a .git entry is found (directory or worktree file,
+// marking the git-root boundary), or the filesystem root is reached. A
+// .forgectl/ that lives above the git root is never discovered.
 func FindProjectRoot(startDir string) (string, error) {
 	dir := startDir
 	for {
-		// .forgectl/ takes priority — check it before .git/ so a directory that
+		// .forgectl/ takes priority — check it before .git so a directory that
 		// contains both is still recognized as the project root.
 		candidate := filepath.Join(dir, ".forgectl")
 		if info, err := os.Stat(candidate); err == nil && info.IsDir() {
 			return dir, nil
 		}
-		// Stop at the git root: a .git/ here means we've reached the repository
-		// boundary. A .forgectl/ above this point must not be used.
+		// Stop at the git root: any .git entry (directory or worktree file)
+		// marks the repository boundary. A .forgectl/ above this point must not
+		// be used. Git worktrees have a .git file rather than a .git directory,
+		// so we check existence only, not IsDir().
 		gitDir := filepath.Join(dir, ".git")
-		if info, err := os.Stat(gitDir); err == nil && info.IsDir() {
+		if _, err := os.Stat(gitDir); err == nil {
 			return "", fmt.Errorf("No .forgectl directory found.")
 		}
 		parent := filepath.Dir(dir)

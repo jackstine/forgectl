@@ -82,7 +82,7 @@ Scaffolding never rejects on the grounds that a config already exists, is malfor
 - The process has a current working directory.
 
 #### Steps
-1. Resolve the project root by walking up from the current working directory, checking each ancestor for a `.forgectl/` directory. The walk stops at the first of three conditions: a `.forgectl/` directory is found, a `.git/` directory is found (the git root), or the filesystem root is reached.
+1. Resolve the project root by walking up from the current working directory, checking each ancestor for a `.forgectl/` directory. The walk stops at the first of three conditions: a `.forgectl/` directory is found, a `.git` entry is found (directory **or** worktree file, marking the git-root boundary), or the filesystem root is reached.
 2. If an ancestor containing `.forgectl/` is found at or below the git root, that ancestor is the project root. Do not create a new `.forgectl/`.
 3. If the walk reaches a `.git/` directory without finding `.forgectl/` — or if the filesystem root is reached without either — the project root is the current working directory. Create `.forgectl/` there.
 4. Determine the config path as `.forgectl/config` under the project root.
@@ -130,7 +130,7 @@ This topic does not emit its own activity-log entries or metrics; session activi
 3. **Defaults equivalence.** Loading a freshly written default config yields an effective configuration identical to the one produced when the config file is absent or empty (the scaffold's built-in defaults).
 4. **Written default is valid.** A freshly written default config always passes config validation.
 5. **Create at most one root.** When an ancestor `.forgectl/` exists at or below the git root, no new `.forgectl/` is created; a new `.forgectl/` is created only when none is found within the searchable ancestor chain (bounded by the git root or the filesystem root), and only at the current working directory.
-6. **Git-root boundary.** The upward walk never crosses above a `.git/` directory. A `.forgectl/` that lives above the git root is never discovered or used.
+6. **Git-root boundary.** The upward walk never crosses above a `.git` entry (directory or worktree file). A `.forgectl/` that lives above the git root is never discovered or used.
 
 ---
 
@@ -159,6 +159,10 @@ This topic does not emit its own activity-log entries or metrics; session activi
 - **Scenario:** The current directory is inside a git repository, and a `.forgectl/` exists above the git root (e.g., in the home directory) but not inside the repo.
   - **Expected behavior:** The walk stops at the git root without finding `.forgectl/`. Scaffolding creates `.forgectl/` at the current working directory.
   - **Rationale:** Projects inside a git repository must not inherit configuration from outside the repository boundary. This prevents accidental capture of a home-level `.forgectl/` intended for a different context.
+
+- **Scenario:** The current directory is a git worktree (`.git` is a file, not a directory) and a `.forgectl/` exists above the worktree in the ancestor chain (e.g., in the home directory) but not inside the worktree.
+  - **Expected behavior:** The walk stops at the worktree boundary (the `.git` file) without finding `.forgectl/`. Scaffolding creates `.forgectl/` at the current working directory.
+  - **Rationale:** A git worktree's `.git` file is as authoritative a repository boundary as a `.git/` directory. The walk must not continue past it; otherwise a home-level `.forgectl/` would be silently captured for every worktree.
 
 - **Scenario:** The `.forgectl/` directory exists at the git root itself (the directory containing `.git/`).
   - **Expected behavior:** The walk reaches that directory, finds both `.git/` and `.forgectl/`, and uses the git root as the project root. No new `.forgectl/` is created.
@@ -231,6 +235,12 @@ This topic does not emit its own activity-log entries or metrics; session activi
 - **Given:** A git repository at `/repo/` (contains `.git/`), working directory is `/repo/src/`, and a `.forgectl/` exists at `/home/user/` (above the git root) but not inside `/repo/`.
 - **When:** Scaffolding runs.
 - **Then:** `.forgectl/` is created at `/repo/src/` (the current working directory); the home-level `.forgectl/` is neither discovered nor used; Scaffolding Result reports `created_dir` true.
+
+### Stops walk at git worktree boundary (`.git` file) when no .forgectl exists inside the worktree
+- **Verifies:** Worktree `.git` files act as a git-root boundary just like `.git/` directories.
+- **Given:** A git worktree at `/repo/worktrees/feat/` (contains a `.git` *file*, not a directory), no `.forgectl/` anywhere inside the worktree, and a `.forgectl/` exists at `/home/user/` (above the worktree path).
+- **When:** Scaffolding runs from `/repo/worktrees/feat/`.
+- **Then:** `.forgectl/` is created at `/repo/worktrees/feat/` (the current working directory); the home-level `.forgectl/` is neither discovered nor used; Scaffolding Result reports `created_dir` true.
 
 ### Uses .forgectl/ co-located with .git/
 - **Verifies:** Project root at git root is recognized.

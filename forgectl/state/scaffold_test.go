@@ -251,6 +251,51 @@ func TestScaffoldStopsWalkAtGitRoot(t *testing.T) {
 	}
 }
 
+// TestScaffoldStopsWalkAtGitWorktreeFile verifies that a .git file (git worktree)
+// acts as the same boundary as a .git/ directory: a .forgectl/ above it is never
+// discovered; scaffolding creates .forgectl/ at the worktree root (cwd).
+func TestScaffoldStopsWalkAtGitWorktreeFile(t *testing.T) {
+	base := t.TempDir()
+	// A .forgectl/ above the worktree (simulating a home-level config).
+	if err := os.MkdirAll(filepath.Join(base, ".forgectl"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(base, ".forgectl", "config"), []byte("# home config\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	// The worktree lives under base/. Its .git is a file, not a directory.
+	worktreeDir := filepath.Join(base, "worktree")
+	if err := os.MkdirAll(worktreeDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(worktreeDir, ".git"), []byte("gitdir: ../.git/worktrees/feat\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	res, err := Scaffold(worktreeDir)
+	if err != nil {
+		t.Fatalf("Scaffold: %v", err)
+	}
+	if res.ProjectRoot != worktreeDir {
+		t.Errorf("ProjectRoot = %q, want %q (cwd)", res.ProjectRoot, worktreeDir)
+	}
+	if !res.CreatedDir {
+		t.Error("CreatedDir should be true; walk must stop at .git file and create .forgectl/ at cwd")
+	}
+	// The home-level .forgectl/config must be untouched.
+	got, err := os.ReadFile(filepath.Join(base, ".forgectl", "config"))
+	if err != nil {
+		t.Fatalf("reading home config: %v", err)
+	}
+	if string(got) != "# home config\n" {
+		t.Errorf("home-level config was modified; boundary was crossed")
+	}
+	// A new .forgectl/ must exist at the worktree directory.
+	if info, statErr := os.Stat(filepath.Join(worktreeDir, ".forgectl")); statErr != nil || !info.IsDir() {
+		t.Errorf(".forgectl/ not created at worktree cwd: %v", statErr)
+	}
+}
+
 // TestScaffoldUsesForgetclColocatedWithGitDir verifies that a .forgectl/
 // co-located with .git/ is recognized as the project root.
 func TestScaffoldUsesForgetclColocatedWithGitDir(t *testing.T) {
