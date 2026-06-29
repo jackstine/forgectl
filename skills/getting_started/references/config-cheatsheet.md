@@ -97,6 +97,32 @@ path = "portal"
 
 Without a `[[domains]]` section, forgectl derives domains from spec file paths.
 
+After editing config, confirm your domains with:
+
+```bash
+forgectl domains
+```
+
+This lists every declared domain (name + `<path>/specs/` location) so you can
+verify setup before running `init`. Run it any time — it is read-only and safe.
+
+### Opt-in: prompt for domains inside the session
+
+Both `specifying` and `reverse_engineering` support an optional domain prompt
+that gates the workflow until domains are confirmed. **Disabled by default.**
+
+```toml
+[specifying]
+prompt_domains = false   # true: scaffold prompts at ORIENT before spec work starts
+
+[reverse_engineering]
+prompt_domains = false   # true: scaffold prompts at QUEUE; `forgectl add-domain` available
+```
+
+Leave both `false` — declare domains in `[[domains]]` before `init` and confirm
+with `forgectl domains`. Enable only if your domain list cannot be known at init
+time (e.g. a survey pass is expected to reveal new subsystems).
+
 ---
 
 ## Paths and logs (rarely changed)

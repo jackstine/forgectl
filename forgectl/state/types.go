@@ -102,6 +102,7 @@ type ReconciliationConfig struct {
 type SpecifyingConfig struct {
 	Batch          int                  `json:"batch"`
 	CommitStrategy string               `json:"commit_strategy"`
+	PromptDomains  bool                 `json:"prompt_domains"`
 	Eval           EvalConfig           `json:"eval"`
 	CrossReference CrossRefConfig       `json:"cross_reference"`
 	Reconciliation ReconciliationConfig `json:"reconciliation"`
@@ -180,10 +181,11 @@ type REReconcileConfig struct {
 
 // ReverseEngineeringConfig configures the reverse_engineering phase.
 type ReverseEngineeringConfig struct {
-	Execute     AgentConfig       `json:"execute"`
-	Survey      AgentConfig       `json:"survey"`
-	GapAnalysis AgentConfig       `json:"gap_analysis"`
-	Reconcile   REReconcileConfig `json:"reconcile"`
+	Execute       AgentConfig       `json:"execute"`
+	Survey        AgentConfig       `json:"survey"`
+	GapAnalysis   AgentConfig       `json:"gap_analysis"`
+	Reconcile     REReconcileConfig `json:"reconcile"`
+	PromptDomains bool              `json:"prompt_domains"`
 }
 
 // DomainConfig identifies a domain within the project.

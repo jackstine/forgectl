@@ -27,6 +27,11 @@ batch = 3
 # Commit staging strategy for specifying commits.
 # "all-specs" stages all files found in domain specs/ directories.
 commit_strategy = "all-specs"
+# When true, the scaffold prompts for domain declaration at the ORIENT state
+# before spec work begins. Use this when domains are not yet fixed in config
+# at init time. Disabled by default — declare domains in [[domains]] before
+# running init and confirm with `forgectl domains`.
+prompt_domains = false
 
 [specifying.eval]
 # Minimum eval rounds before PASS can accept a spec batch.
@@ -240,6 +245,17 @@ eval_mode = "report"
 # boundary — the e2e loop has nothing to run without them, so there is no default.
 test_command = ""
 test_dir = ""
+
+# --- Reverse Engineering ---
+# Configuration for the reverse_engineering phase.
+
+[reverse_engineering]
+# When true, the scaffold prompts for domain input at the QUEUE state and
+# accepts `forgectl add-domain <name>` to append new domains mid-session.
+# Enable when the full domain list is not known at init time — e.g. a survey
+# step is expected to reveal new subsystems. Disabled by default — declare
+# domains in [[domains]] before running init and confirm with `forgectl domains`.
+prompt_domains = false
 
 # --- Paths ---
 # Directory locations for scaffold state and domain artifacts.

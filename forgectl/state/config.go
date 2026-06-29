@@ -53,6 +53,7 @@ type tomlReconciliationConfig struct {
 type tomlSpecifyingConfig struct {
 	Batch          int                      `toml:"batch"`
 	CommitStrategy string                   `toml:"commit_strategy"`
+	PromptDomains  *bool                    `toml:"prompt_domains"`
 	Eval           tomlEvalConfig           `toml:"eval"`
 	CrossReference tomlCrossRefConfig       `toml:"cross_reference"`
 	Reconciliation tomlReconciliationConfig `toml:"reconciliation"`
@@ -126,10 +127,11 @@ type tomlREReconcileConfig struct {
 
 // tomlReverseEngineeringConfig mirrors ReverseEngineeringConfig for TOML decoding.
 type tomlReverseEngineeringConfig struct {
-	Execute     tomlAgentConfig       `toml:"execute"`
-	Survey      tomlAgentConfig       `toml:"survey"`
-	GapAnalysis tomlAgentConfig       `toml:"gap_analysis"`
-	Reconcile   tomlREReconcileConfig `toml:"reconcile"`
+	Execute       tomlAgentConfig       `toml:"execute"`
+	Survey        tomlAgentConfig       `toml:"survey"`
+	GapAnalysis   tomlAgentConfig       `toml:"gap_analysis"`
+	Reconcile     tomlREReconcileConfig `toml:"reconcile"`
+	PromptDomains *bool                 `toml:"prompt_domains"`
 }
 
 // tomlDomainConfig mirrors DomainConfig for TOML decoding.
@@ -251,6 +253,9 @@ func mergeTomlConfig(cfg *ForgeConfig, raw *tomlForgeConfig) {
 	}
 	if raw.Specifying.CommitStrategy != "" {
 		cfg.Specifying.CommitStrategy = raw.Specifying.CommitStrategy
+	}
+	if raw.Specifying.PromptDomains != nil {
+		cfg.Specifying.PromptDomains = *raw.Specifying.PromptDomains
 	}
 	mergeEvalConfig(&cfg.Specifying.Eval, &raw.Specifying.Eval)
 	mergeCrossRefConfig(&cfg.Specifying.CrossReference, &raw.Specifying.CrossReference)
@@ -429,6 +434,9 @@ func mergeReverseEngineeringConfig(dst *ReverseEngineeringConfig, src *tomlRever
 		dst.Reconcile.ColleagueReview = *src.Reconcile.ColleagueReview
 	}
 	mergeAgentConfig(&dst.Reconcile.Eval, &src.Reconcile.Eval)
+	if src.PromptDomains != nil {
+		dst.PromptDomains = *src.PromptDomains
+	}
 }
 
 func mergeReconciliationConfig(dst *ReconciliationConfig, src *tomlReconciliationConfig) {
