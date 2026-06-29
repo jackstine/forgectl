@@ -670,9 +670,19 @@ func printPlanningOutput(w io.Writer, s *ForgeState, dir string) {
 		fmt.Fprintf(w, "Domain:  %s\n", cp.Domain)
 		fmt.Fprintf(w, "File:    %s\n", cp.File)
 		fmt.Fprintf(w, "Specs:   %s\n", strings.Join(cp.Specs, ", "))
+		if len(cp.SpecCommits) > 0 {
+			fmt.Fprintf(w, "Commits: %s\n", strings.Join(cp.SpecCommits, ", "))
+		}
 		fmt.Fprintf(w, "Roots:   %s\n", strings.Join(cp.CodeSearchRoots, ", "))
-		fmt.Fprintf(w, "Action:  Study the specs: %s\n", strings.Join(cp.Specs, ", "))
-		fmt.Fprintf(w, "         Review git diffs for spec commits. Advance when done.\n")
+		ss := s.Config.Planning.StudySpecs.AgentConfig
+		fmt.Fprintf(w, "Action:  Please spawn %d %s %s %s to study the specs.\n", ss.Count, ss.Model, ss.Type, subAgentNoun(ss.Count))
+		fmt.Fprintf(w, "         Distribute the specs above evenly across sub-agents; each receives a disjoint subset.\n")
+		if len(cp.SpecCommits) > 0 {
+			fmt.Fprintf(w, "         Each sub-agent reads its assigned specs in full: spec content, git diffs for commits above, dependencies, cross-references.\n")
+		} else {
+			fmt.Fprintf(w, "         Each sub-agent reads its assigned specs in full: spec content, dependencies, cross-references.\n")
+		}
+		fmt.Fprintf(w, "         After completion of the above, advance to continue.\n")
 
 	case StateStudyCode:
 		fmt.Fprintf(w, "State:   STUDY_CODE\n")

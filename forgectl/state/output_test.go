@@ -354,6 +354,57 @@ func TestOutputOrientFinalLayerLabel(t *testing.T) {
 	}
 }
 
+// TestOutputStudySpecsSpawnInstruction verifies that STUDY_SPECS output instructs the
+// architect to spawn the configured number of haiku explore sub-agents and distribute
+// specs evenly, without a Commits line when SpecCommits is empty.
+func TestOutputStudySpecsSpawnInstruction(t *testing.T) {
+	s := newPlanningState()
+	s.Config.Planning.StudySpecs = StudySpecsConfig{
+		AgentConfig: AgentConfig{Model: "haiku", Type: "explore", Count: 3},
+	}
+	s.State = StateStudySpecs
+
+	out := outputOf(s, "")
+	for _, want := range []string{
+		"Please spawn 3 haiku explore sub-agents to study the specs.",
+		"Distribute the specs above evenly across sub-agents; each receives a disjoint subset.",
+		"spec content, dependencies, cross-references.",
+		"After completion of the above, advance to continue.",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("STUDY_SPECS output missing %q\nfull output:\n%s", want, out)
+		}
+	}
+	if strings.Contains(out, "Commits:") {
+		t.Errorf("STUDY_SPECS output must not include Commits: line when SpecCommits is empty\nfull output:\n%s", out)
+	}
+	if strings.Contains(out, "git diffs for commits above") {
+		t.Errorf("STUDY_SPECS action must omit git diffs reference when SpecCommits is empty\nfull output:\n%s", out)
+	}
+}
+
+// TestOutputStudySpecsWithCommits verifies that STUDY_SPECS output includes the Commits:
+// line and references git diffs in the action when SpecCommits is non-empty.
+func TestOutputStudySpecsWithCommits(t *testing.T) {
+	s := newPlanningState()
+	s.Config.Planning.StudySpecs = StudySpecsConfig{
+		AgentConfig: AgentConfig{Model: "haiku", Type: "explore", Count: 2},
+	}
+	s.Planning.CurrentPlan.SpecCommits = []string{"abc1234", "def5678"}
+	s.State = StateStudySpecs
+
+	out := outputOf(s, "")
+	if !strings.Contains(out, "Commits: abc1234, def5678") {
+		t.Errorf("STUDY_SPECS output missing Commits: line\nfull output:\n%s", out)
+	}
+	if !strings.Contains(out, "git diffs for commits above") {
+		t.Errorf("STUDY_SPECS action must reference git diffs when SpecCommits is non-empty\nfull output:\n%s", out)
+	}
+	if !strings.Contains(out, "Please spawn 2 haiku explore sub-agents") {
+		t.Errorf("STUDY_SPECS output must reflect configured count\nfull output:\n%s", out)
+	}
+}
+
 // TestEvalOutputPlanningReportSectionWithEnableEvalOutput verifies that planning eval output
 // includes '--- REPORT OUTPUT ---' when enable_eval_output is true.
 func TestEvalOutputPlanningReportSectionWithEnableEvalOutput(t *testing.T) {
