@@ -99,6 +99,7 @@ The three evaluator states (`EVALUATE`, `QA_TEST`, `E2E_VERIFY`) accept `--verdi
 | `commit_strategy` | string | Git staging strategy: `strict`, `all-specs`, `scoped`, `tracked`, `all` (default: `strict`) |
 | `self_review` | bool | Whether SELF_REVIEW state is entered between validation and EVALUATE (default: `false`) |
 | `plan_all_before_implementing` | bool | When `false` (default): interleaved plan-implement per domain. When `true`: all planning then all implementing. |
+| `study_specs` | AgentConfig | Agent config for spec study (sharded across sub-agents) |
 | `study_code` | AgentConfig | Agent config for codebase exploration |
 | `eval` | AgentEvalConfig | Evaluation settings |
 | `refine` | AgentConfig | Agent config for plan refinement |

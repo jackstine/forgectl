@@ -41,6 +41,7 @@
       "commit_strategy": "strict",
       "self_review": false,
       "plan_all_before_implementing": false,
+      "study_specs": { "model": "haiku", "type": "explore", "count": 3 },
       "study_code": { "model": "haiku", "type": "explore", "count": 3 },
       "eval": { "min_rounds": 1, "max_rounds": 3, "model": "opus", "type": "eval", "count": 1, "enable_eval_output": false },
       "refine": { "model": "opus", "type": "refine", "count": 1 }

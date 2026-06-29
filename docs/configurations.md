@@ -425,6 +425,28 @@ When `false` (default, interleaved): each domain is planned and then immediately
 
 When `true` (all planning first): all domains are planned first (with PHASE_SHIFT between each domain), then all domains are implemented (with PHASE_SHIFT between each domain).
 
+#### `planning.study_specs.type`
+
+- **Type:** string
+- **Default:** `"explore"`
+
+Sub-agent role for spec study at STUDY_SPECS state.
+
+#### `planning.study_specs.model`
+
+- **Type:** string
+- **Default:** `"haiku"`
+
+Model name for spec study at STUDY_SPECS state.
+
+#### `planning.study_specs.count`
+
+- **Type:** integer
+- **Default:** 3
+- **Constraint:** >= 1
+
+Number of sub-agents to spawn for spec study. Specs are distributed evenly across sub-agents; each receives a disjoint subset.
+
 #### `planning.study_code.type`
 
 - **Type:** string
@@ -786,6 +808,7 @@ After `init`, the effective configuration is stored in the state file's `config`
       "commit_strategy": "strict",
       "self_review": false,
       "plan_all_before_implementing": false,
+      "study_specs": { "type": "explore", "model": "haiku", "count": 3 },
       "study_code": { "type": "explore", "model": "haiku", "count": 3 },
       "eval": { "min_rounds": 1, "max_rounds": 3, "type": "eval", "model": "opus", "count": 1, "eval_mode": "report", "enable_eval_output": false },
       "refine": { "type": "refine", "model": "opus", "count": 1 }

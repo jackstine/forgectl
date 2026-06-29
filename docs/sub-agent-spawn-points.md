@@ -42,9 +42,10 @@ The reconciliation (`RECONCILE_EVAL`) and cross-reference (`CROSS_REFERENCE_EVAL
 | 2 | Specifying | CROSS_REFERENCE | Cross-reference domain specs | haiku | explore | 3 | `specifying.cross_reference` |
 | 3 | Specifying | CROSS_REFERENCE_EVAL | Evaluate cross-reference work | opus | eval | 1 | `specifying.cross_reference.eval` |
 | 4 | Specifying | RECONCILE_EVAL | Evaluate cross-domain reconciliation | opus | eval | 1 | `specifying.reconciliation` |
-| 5 | Planning | STUDY_CODE | Explore codebase | haiku | explore | 3 | `planning.study_code` |
-| 6 | Planning | EVALUATE | Evaluate plan | opus | eval | 1 | `planning.eval` |
-| 7 | Implementing | EVALUATE | Evaluate implementation batch | opus | eval | 1 | `implementing.eval` |
+| 5 | Planning | STUDY_SPECS | Study specs (sharded) | haiku | explore | 3 | `planning.study_specs` |
+| 6 | Planning | STUDY_CODE | Explore codebase | haiku | explore | 3 | `planning.study_code` |
+| 7 | Planning | EVALUATE | Evaluate plan | opus | eval | 1 | `planning.eval` |
+| 8 | Implementing | EVALUATE | Evaluate implementation batch | opus | eval | 1 | `implementing.eval` |
 
 ## Configuration
 
@@ -74,6 +75,11 @@ count = 1
 type = "eval"
 model = "opus"
 count = 1
+
+[planning.study_specs]
+type = "explore"
+model = "haiku"
+count = 3
 
 [planning.study_code]
 type = "explore"

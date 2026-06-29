@@ -58,6 +58,7 @@ See the nested `config` structure in the ForgeState table below.
 | `planning.commit_strategy` | `string` | Git staging strategy (default: `strict`) |
 | `planning.self_review` | `bool` | Whether SELF_REVIEW state is entered (default: `false`) |
 | `planning.plan_all_before_implementing` | `bool` | When `true`: all planning then all implementing (default: `false`) |
+| `planning.study_specs.*` | `AgentConfig` | Agent config for spec study (sharded across sub-agents) |
 | `planning.study_code.*` | `AgentConfig` | Agent config for codebase exploration |
 | `planning.eval.*` | `EvalConfig` | Eval round limits and agent config for planning |
 | `planning.refine.*` | `AgentConfig` | Agent config for plan refinement |

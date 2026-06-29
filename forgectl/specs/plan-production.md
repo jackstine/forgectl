@@ -66,8 +66,9 @@ File:    launcher/.forgectl_workspace/implementation_plan/plan.json
 Specs:   launcher/specs/service-configuration.md, ...
 Commits: abc1234, def5678
 Roots:   launcher/, api/
-Action:  Study the specs: launcher/specs/service-configuration.md, ...
-         Review git diffs for spec commits: abc1234, def5678.
+Action:  Please spawn 3 haiku explore sub-agents to study the specs.
+         Distribute the specs above evenly across sub-agents; each receives a disjoint subset.
+         Each sub-agent reads its assigned specs in full: spec content, git diffs for commits above, dependencies, cross-references.
          After completion of the above, advance to continue.
 ```
 
@@ -661,7 +662,7 @@ ORIENT → STUDY_SPECS → STUDY_CODE → STUDY_PACKAGES → REVIEW* → DRAFT
 Three study phases build context before drafting. No flags required — the architect studies, then advances.
 
 #### STUDY_SPECS
-Study the specs listed in `current_plan.specs` and the SPEC_MANIFEST.md: full spec files, git diffs, dependencies, cross-references. When `SpecCommits` is empty, the `Commits:` line and commit hash references in the action text are omitted.
+Study the specs listed in `current_plan.specs` and the SPEC_MANIFEST.md: full spec files, git diffs, dependencies, cross-references. Specs are distributed evenly across sub-agents; each agent receives a disjoint subset. Sub-agent count is configured via `planning.study_specs.count` (default 3). When `SpecCommits` is empty, the `Commits:` line and commit hash references in the action text are omitted.
 
 #### STUDY_CODE
 Explore the codebase using sub-agents within `current_plan.code_search_roots`, focused on finding code relevant to the specs in `current_plan.specs`. The output lists both the search roots and the spec file paths so sub-agents know what to look for. Sub-agent count is configured via `planning.study_code.count` (default 3).

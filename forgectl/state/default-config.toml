@@ -107,6 +107,15 @@ self_review = false
 # When true: all domains are planned first, then all implemented.
 plan_all_before_implementing = false
 
+[planning.study_specs]
+# Sub-agent role for this spawn point.
+type = "explore"
+# Model name for spec study.
+model = "haiku"
+# Number of sub-agents to spawn for spec study. Specs are distributed
+# evenly across sub-agents; each receives a disjoint subset.
+count = 3
+
 [planning.study_code]
 # Sub-agent role for this spawn point.
 type = "explore"

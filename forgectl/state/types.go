@@ -112,6 +112,11 @@ type StudyCodeConfig struct {
 	AgentConfig // embedded: model, type, count
 }
 
+// StudySpecsConfig configures the spec-study agents for planning.
+type StudySpecsConfig struct {
+	AgentConfig // embedded: model, type, count
+}
+
 // RefineConfig configures the plan-refinement agent.
 type RefineConfig struct {
 	AgentConfig // embedded: model, type, count
@@ -119,13 +124,14 @@ type RefineConfig struct {
 
 // PlanningConfig configures the planning phase.
 type PlanningConfig struct {
-	Batch                     int             `json:"batch"`
-	CommitStrategy            string          `json:"commit_strategy"`
-	SelfReview                bool            `json:"self_review"`
-	PlanAllBeforeImplementing bool            `json:"plan_all_before_implementing"`
-	StudyCode                 StudyCodeConfig `json:"study_code"`
-	Eval                      EvalConfig      `json:"eval"`
-	Refine                    RefineConfig    `json:"refine"`
+	Batch                     int              `json:"batch"`
+	CommitStrategy            string           `json:"commit_strategy"`
+	SelfReview                bool             `json:"self_review"`
+	PlanAllBeforeImplementing bool             `json:"plan_all_before_implementing"`
+	StudySpecs                StudySpecsConfig `json:"study_specs"`
+	StudyCode                 StudyCodeConfig  `json:"study_code"`
+	Eval                      EvalConfig       `json:"eval"`
+	Refine                    RefineConfig     `json:"refine"`
 }
 
 // ImplementingConfig configures the implementing phase.
@@ -286,6 +292,13 @@ func DefaultForgeConfig() ForgeConfig {
 		Planning: PlanningConfig{
 			Batch:          1,
 			CommitStrategy: "strict",
+			StudySpecs: StudySpecsConfig{
+				AgentConfig: AgentConfig{
+					Model: "haiku",
+					Type:  "explore",
+					Count: 3,
+				},
+			},
 			StudyCode: StudyCodeConfig{
 				AgentConfig: AgentConfig{
 					Model: "haiku",

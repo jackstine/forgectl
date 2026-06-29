@@ -63,6 +63,13 @@ func TestForgeConfigJSONRoundTrip(t *testing.T) {
 			CommitStrategy:            "strict",
 			SelfReview:                false,
 			PlanAllBeforeImplementing: false,
+			StudySpecs: StudySpecsConfig{
+				AgentConfig: AgentConfig{
+					Model: "haiku",
+					Type:  "explore",
+					Count: 3,
+				},
+			},
 			StudyCode: StudyCodeConfig{
 				AgentConfig: AgentConfig{
 					Model: "haiku",
@@ -158,6 +165,9 @@ func TestForgeConfigJSONRoundTrip(t *testing.T) {
 	if decoded.Specifying.Eval.Model != original.Specifying.Eval.Model {
 		t.Errorf("specifying.eval.model: got %q, want %q", decoded.Specifying.Eval.Model, original.Specifying.Eval.Model)
 	}
+	if decoded.Planning.StudySpecs.Model != original.Planning.StudySpecs.Model {
+		t.Errorf("planning.study_specs.model: got %q, want %q", decoded.Planning.StudySpecs.Model, original.Planning.StudySpecs.Model)
+	}
 	if decoded.Planning.StudyCode.Model != original.Planning.StudyCode.Model {
 		t.Errorf("planning.study_code.model: got %q, want %q", decoded.Planning.StudyCode.Model, original.Planning.StudyCode.Model)
 	}
@@ -214,6 +224,9 @@ func TestDefaultForgeConfigValues(t *testing.T) {
 	}
 	if cfg.Specifying.Reconciliation.Model != "sonnet" || cfg.Specifying.Reconciliation.MaxRounds != 3 {
 		t.Errorf("specifying.reconciliation: got model=%q max_rounds=%d, want sonnet/3", cfg.Specifying.Reconciliation.Model, cfg.Specifying.Reconciliation.MaxRounds)
+	}
+	if cfg.Planning.StudySpecs.Model != "haiku" || cfg.Planning.StudySpecs.Type != "explore" || cfg.Planning.StudySpecs.Count != 3 {
+		t.Errorf("planning.study_specs: got model=%q type=%q count=%d, want haiku/explore/3", cfg.Planning.StudySpecs.Model, cfg.Planning.StudySpecs.Type, cfg.Planning.StudySpecs.Count)
 	}
 	if cfg.Planning.StudyCode.Model != "haiku" || cfg.Planning.StudyCode.Count != 3 {
 		t.Errorf("planning.study_code: got model=%q count=%d, want haiku/3", cfg.Planning.StudyCode.Model, cfg.Planning.StudyCode.Count)
