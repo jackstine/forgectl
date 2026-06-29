@@ -82,6 +82,56 @@ The full lifecycle with every state is in [docs/diagrams/00-full-lifecycle.txt](
 
 </the_pipeline>
 
+<domains_and_specs>
+
+**Domains are one of the most important concepts in forgectl. Misunderstanding them
+is the single most common cause of `init` failures and broken spec queues.**
+
+A **domain** is a named grouping that maps to a directory in your project. It is
+the unit forgectl uses to scope specs, batch work, run cross-reference consistency
+checks, and produce implementation plans. Every spec queue entry, every plan queue
+entry, and every mid-session `add-queue-item` call references a domain by name.
+
+### What you must know before writing your first queue file
+
+1. **Declare domains in `.forgectl/config` before `init`.** Config is locked at
+   init time — mid-session edits do nothing for the current session.
+
+   ```toml
+   [[domains]]
+   name = "optimizer"
+   path = "optimizer"
+
+   [[domains]]
+   name = "portal"
+   path = "portal"
+   ```
+
+2. **Specs live at `<path>/specs/`.** A spec with `"domain": "optimizer"` must have
+   its `"file"` under `optimizer/specs/` — any mismatch causes `init` to reject.
+
+3. **Every spec queue entry needs a `"domain"` field.** Every plan queue entry does
+   too. Forgectl uses this to batch, route, and cross-reference correctly.
+
+4. **Hard constraints (init rejects on violation):**
+   - No domain path may be a prefix of another (`domains/users` and
+     `domains/users/employees` are rejected).
+   - Domain names must be unique within the config.
+
+5. **Batches never mix domains.** A `specifying.batch = 3` setting means up to
+   three specs processed per cycle, always within one domain. After the last batch
+   for a domain, forgectl runs a **per-domain CROSS_REFERENCE** pass over all specs
+   in that domain before moving to the next one.
+
+6. **Domains are optional for small projects.** Without a `[[domains]]` section,
+   forgectl derives groupings from spec file paths. For any multi-subsystem product,
+   declare them explicitly.
+
+**Full reference:** [references/domains-and-specs.md](references/domains-and-specs.md) —
+read this before authoring your first `spec-queue.json` or `plan-queue.json`.
+
+</domains_and_specs>
+
 <getting_started>
 
 <step_1>
@@ -197,6 +247,7 @@ The most common sources of "forgectl is hard":
 
 <reference_map>
 
+- **Domains and specs (read first)** — [references/domains-and-specs.md](references/domains-and-specs.md) — what domains are, how to declare them, spec path rules, queue file requirements, batching and cross-reference behavior
 - **Config, deeply** — [references/config-cheatsheet.md](references/config-cheatsheet.md), [docs/default-config.toml](../../docs/default-config.toml), [docs/configurations.md](../../docs/configurations.md)
 - **First run, concretely** — [references/first-session-walkthrough.md](references/first-session-walkthrough.md)
 - **Diagrams** — [docs/diagrams/](../../docs/diagrams/): `00-full-lifecycle`, `04-cli-commands`, `06-state-machine-complete`, `07-evaluation-loop`, `10-ui-implementing-phase`
