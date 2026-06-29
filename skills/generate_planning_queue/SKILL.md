@@ -26,7 +26,7 @@ The `generate_planning_queue` phase **cannot be initialized directly** (`init --
 
 Run `forgectl status` first to confirm you are at the specifying `PHASE_SHIFT` or already inside `generate_planning_queue`.
 
-**If there was no forgectl specifying session** (e.g. specs were authored or committed outside forgectl), this phase does not apply. Skip it and build the queue manually, then start planning directly (see [../shared/creating-plan-queue.md](../shared/creating-plan-queue.md) and [../shared/plan-queue-format.md](../shared/plan-queue-format.md)):
+**If there was no forgectl specifying session** (e.g. specs were authored or committed outside forgectl), this phase does not apply. Use the `create_plan_queue` skill instead — it walks through discovering specs, grouping by domain, resolving commits, and initializing planning directly (see [../create_plan_queue/SKILL.md](../create_plan_queue/SKILL.md)):
 
 ```bash
 forgectl init --phase planning --from <plan-queue.json>

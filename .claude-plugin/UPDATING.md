@@ -85,17 +85,21 @@ Bump `version` in `plugin.json` whenever skills or commands change. Follow semve
 
 ## Current Inventory
 
-### Skills (7)
+### Skills (11)
 
 | Skill | Path |
 |-------|------|
+| `create_plan_queue` | `skills/create_plan_queue/SKILL.md` |
 | `frontend_specs` | `skills/frontend_specs/SKILL.md` |
+| `generate_planning_queue` | `skills/generate_planning_queue/SKILL.md` |
+| `getting_started` | `skills/getting_started/SKILL.md` |
 | `implement_from_specs` | `skills/implement_from_specs/SKILL.md` |
 | `implementation` | `skills/implementation/SKILL.md` |
 | `implementation_planning` | `skills/implementation_planning/SKILL.md` |
 | `planner` | `skills/planner/SKILL.md` |
 | `reverse_engineering` | `skills/reverse_engineering/SKILL.md` |
 | `specs` | `skills/specs/SKILL.md` |
+| `ui_implementation` | `skills/ui_implementation/SKILL.md` |
 
 ### Commands (6)
 
