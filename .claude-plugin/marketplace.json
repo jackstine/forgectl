@@ -18,6 +18,7 @@
       ],
       "skills": [
         "./skills/frontend_specs",
+        "./skills/getting_started",
         "./skills/implement_from_specs",
         "./skills/implementation",
         "./skills/implementation_planning",
