@@ -16,42 +16,15 @@ These steps run inside the forgectl reverse-engineering workflow, which drives a
 
 <domain_check>
 
-**Domain Verification — Required Before Starting**
+**Domain Verification**
 
-Reverse engineering is domain-driven from the very first command. The `init` input
-requires a `"domains"` list, and once the session starts, all survey, gap-analysis,
-and spec generation work is scoped per domain. Declaring the wrong domains — or
-missing a subsystem — means restarting the session.
+Run `forgectl domains` before init. Reverse engineering requires explicit domains
+— it creates the spec files, so it cannot derive domains from paths the way
+specifying can. The `"domains"` array in your init input must match the names
+declared in `.forgectl/config` exactly; a mismatch causes init to reject.
 
-**Before you do anything else:**
-
-```bash
-forgectl domains
-```
-
-This lists every domain declared in `.forgectl/config`. Read the output before
-continuing:
-
-- **Domains listed — look correct:** use these same names as the `"domains"` array
-  in your `reverse_engineering` init input. Proceed.
-- **Domains listed — missing a subsystem:** stop. Edit `.forgectl/config`, add the
-  missing `[[domains]]` entries, rerun `forgectl domains` to confirm, then proceed.
-- **"No domains configured":** you must define them. Reverse engineering requires
-  explicit domains — it cannot derive them from file paths because it is the step
-  that *creates* those files. Add `[[domains]]` entries to `.forgectl/config` now.
-  See `getting_started/references/domains-and-specs.md` for config syntax and
-  constraints.
-
-**Naming rule:** each domain `name` in config must match exactly the string you put
-in the `"domains"` array passed to `forgectl init --phase reverse_engineering`. A
-mismatch causes init to fail with the offending value named.
-
-> **If `reverse_engineering.prompt_domains = true` in config:** forgectl prompts
-> you for domain input at the QUEUE state, where you can also use
-> `forgectl add-domain <name>` to append new domains mid-session. This is opt-in
-> and disabled by default (`prompt_domains = false`). Enable it when the full domain
-> list is not yet known at init time — for example, when a survey step is expected
-> to reveal new subsystems.
+If no domains are configured, add `[[domains]]` entries to `.forgectl/config`
+first. See [getting_started/references/domains-and-specs.md](../getting_started/references/domains-and-specs.md).
 
 </domain_check>
 

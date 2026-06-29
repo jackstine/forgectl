@@ -22,36 +22,15 @@ This skill supports four workflows. The **primary workflow** uses the forgectl s
 <workflow>
 
 <step_preflight>
-**Domain Verification — Confirm Domains Before Starting**
+**Domain Verification**
 
-Domains are foundational. Every spec queue entry must reference a declared domain,
-and every spec file must live under that domain's `<path>/specs/` directory. Getting
-this wrong causes `init` to fail. Verify domains before you write a single line of
-the spec queue.
+Run `forgectl domains` before authoring the spec queue. Every queue entry must
+reference a declared domain and its file must live under `<path>/specs/` — a
+mismatch causes `init` to reject. If domains are missing or wrong, edit
+`.forgectl/config` now; config is locked at init time.
 
-```bash
-forgectl domains
-```
-
-This lists every domain declared in `.forgectl/config`. Read the output before
-continuing:
-
-- **Domains listed — look correct:** proceed to step_0.
-- **Domains listed — missing a subsystem:** stop. Edit `.forgectl/config` to add the
-  missing `[[domains]]` entries, then rerun `forgectl domains` to confirm. Config is
-  locked at `init` time — fix it now, not after the session has started.
-- **"No domains configured":** two valid paths:
-  - *Single-domain or flat project:* no action needed — forgectl derives groupings
-    from spec file paths. Proceed to step_0.
-  - *Multi-subsystem project:* add `[[domains]]` entries to `.forgectl/config` now.
-    See `getting_started/references/domains-and-specs.md` for the config syntax,
-    constraints, and how domains shape batching and cross-reference.
-
-> **If `specifying.prompt_domains = true` in config:** forgectl will prompt you for
-> domain input at the ORIENT state before spec work begins. This is opt-in and
-> disabled by default (`prompt_domains = false`). Enable it only when you want the
-> scaffold to gate domain declaration as part of the session itself rather than as a
-> pre-init config step.
+For multi-subsystem projects with no domains configured, add `[[domains]]`
+entries before proceeding. See [getting_started/references/domains-and-specs.md](../getting_started/references/domains-and-specs.md).
 
 </step_preflight>
 
