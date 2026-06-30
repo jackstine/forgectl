@@ -469,10 +469,11 @@ func advancePlanning(s *ForgeState, in AdvanceInput, dir string) error {
 				Name:   s.Planning.CurrentPlan.Name,
 				Domain: s.Planning.CurrentPlan.Domain,
 				File:   s.Planning.CurrentPlan.File,
+				Kind:   s.Planning.CurrentPlan.Kind,
 			})
 		}
 		if s.Config.Planning.PlanAllBeforeImplementing && len(s.Planning.Queue) > 0 {
-			// Pop next plan from queue and continue planning.
+			// More plans to plan first: pop next from queue.
 			entry := s.Planning.Queue[0]
 			s.Planning.Queue = s.Planning.Queue[1:]
 			s.Planning.Round = 0
@@ -489,18 +490,46 @@ func advancePlanning(s *ForgeState, in AdvanceInput, dir string) error {
 			}
 			s.State = StatePhaseShift
 			s.PhaseShift = &PhaseShiftInfo{From: PhasePlanning, To: PhasePlanning}
+		} else if s.Config.Planning.PlanAllBeforeImplementing {
+			// Queue empty — all plans accepted; enter DONE to build the implementing queue.
+			s.State = StateDone
 		} else {
+			// Interleaved: shift immediately to this plan's implementation phase.
+			to := PhaseImplementing
+			if s.Planning.CurrentPlan != nil && s.Planning.CurrentPlan.Kind == "ui" {
+				to = PhaseUIImplementing
+			}
 			s.State = StatePhaseShift
-			s.PhaseShift = &PhaseShiftInfo{From: PhasePlanning, To: PhaseImplementing}
+			s.PhaseShift = &PhaseShiftInfo{From: PhasePlanning, To: to}
 		}
 
 	case StateDone:
 		if in.Verdict != "" || in.EvalReport != "" || in.Message != "" {
 			return fmt.Errorf("DONE is a pass-through state. No flags accepted.")
 		}
-		// Pass-through: advance to phase shift.
-		s.State = StatePhaseShift
-		s.PhaseShift = &PhaseShiftInfo{From: PhasePlanning, To: PhaseImplementing}
+		// plan_all_before_implementing: set the first completed plan as current and
+		// transition to the Planning → Implementing PHASE_SHIFT, which will initialize
+		// plan.json, route by kind, and populate the implementing queue from remaining
+		// completed plans.
+		if len(s.Planning.Completed) > 0 {
+			first := s.Planning.Completed[0]
+			to := PhaseImplementing
+			if first.Kind == "ui" {
+				to = PhaseUIImplementing
+			}
+			s.Planning.CurrentPlan = &ActivePlan{
+				ID:     first.ID,
+				Name:   first.Name,
+				Domain: first.Domain,
+				File:   first.File,
+				Kind:   first.Kind,
+			}
+			s.State = StatePhaseShift
+			s.PhaseShift = &PhaseShiftInfo{From: PhasePlanning, To: to}
+		} else {
+			s.State = StatePhaseShift
+			s.PhaseShift = &PhaseShiftInfo{From: PhasePlanning, To: PhaseImplementing}
+		}
 
 	default:
 		return fmt.Errorf("cannot advance from state %q in planning phase", s.State)
@@ -945,6 +974,17 @@ func advanceUIFromImplement(s *ForgeState, in AdvanceInput, dir string) error {
 
 	itemID := batch.Items[batch.CurrentItemIndex]
 	setItemPasses(plan, itemID, "done")
+
+	// First-round auto-commit: one commit per item for crash safety.
+	if batch.EvalRound == 0 && s.Config.General.EnableCommits {
+		strategy := effectiveUIStrategy(s)
+		item := findItem(plan, itemID)
+		stageTargets := uiScopeTargets(ui, item, strategy)
+		if _, err := AutoCommit(dir, strategy, stageTargets, in.Message); err != nil {
+			return fmt.Errorf("Error: STOP there was a failure with auto committing in forgectl, please tell the user: %s", err)
+		}
+	}
+
 	if err := savePlan(s, dir, plan); err != nil {
 		return err
 	}
@@ -1101,6 +1141,16 @@ func advanceUIFromCommit(s *ForgeState, in AdvanceInput, dir string) error {
 	if s.Config.General.EnableCommits && in.Message == "" {
 		return fmt.Errorf("--message is required in COMMIT state when enable_commits is true")
 	}
+
+	// Batch commit: stage per ui_implementing.commit_strategy and commit.
+	if s.Config.General.EnableCommits {
+		strategy := effectiveUIStrategy(s)
+		stageTargets := uiScopeTargets(s.UIImplementing, nil, strategy)
+		if _, err := AutoCommit(dir, strategy, stageTargets, in.Message); err != nil {
+			return fmt.Errorf("Error: STOP there was a failure with auto committing in forgectl, please tell the user: %s", err)
+		}
+	}
+
 	ui := s.UIImplementing
 	batch := ui.CurrentBatch
 
@@ -1335,7 +1385,8 @@ func advancePhaseShift(s *ForgeState, in AdvanceInput, dir string) error {
 		s.State = StateOrient
 		s.PhaseShift = nil
 
-	case s.PhaseShift.From == PhasePlanning && s.PhaseShift.To == PhaseImplementing:
+	case s.PhaseShift.From == PhasePlanning &&
+		(s.PhaseShift.To == PhaseImplementing || s.PhaseShift.To == PhaseUIImplementing):
 		planPath := s.Planning.CurrentPlan.File
 		fullPath := filepath.Join(dir, planPath)
 
@@ -1370,6 +1421,23 @@ func advancePhaseShift(s *ForgeState, in AdvanceInput, dir string) error {
 			return fmt.Errorf("writing plan: %w", err)
 		}
 
+		// In plan_all_before_implementing mode the DONE handler set CurrentPlan to
+		// s.Planning.Completed[0] and all plans are in Completed. Build the
+		// implementing queue from the remaining completed plans so subsequent domain
+		// boundaries chain correctly. In interleaved mode Completed holds only the
+		// plans already implemented and the queue must stay empty.
+		var implQueue []PlanQueueEntry
+		if s.Config.Planning.PlanAllBeforeImplementing && len(s.Planning.Completed) > 1 {
+			for _, cp := range s.Planning.Completed[1:] {
+				implQueue = append(implQueue, PlanQueueEntry{
+					Name:   cp.Name,
+					Domain: cp.Domain,
+					File:   cp.File,
+					Kind:   cp.Kind,
+				})
+			}
+		}
+
 		// Route by the active plan's kind: "ui" → ui_implementing, else implementing.
 		if s.Planning.CurrentPlan.Kind == "ui" {
 			if keyErrs := ValidateUIConfigKeys(s.Config.UIImplementing); len(keyErrs) > 0 {
@@ -1379,11 +1447,13 @@ func advancePhaseShift(s *ForgeState, in AdvanceInput, dir string) error {
 			s.UIImplementing = NewUIImplementingState()
 			s.UIImplementing.CurrentPlanFile = planPath
 			s.UIImplementing.CurrentPlanDomain = s.Planning.CurrentPlan.Domain
+			s.UIImplementing.PlanQueue = implQueue
 			s.Implementing = nil
 			s.Phase = PhaseUIImplementing
 		} else {
 			s.Implementing = NewImplementingState()
 			s.Implementing.CurrentPlanFile = planPath
+			s.Implementing.PlanQueue = implQueue
 			s.UIImplementing = nil
 			s.Phase = PhaseImplementing
 		}
@@ -1407,6 +1477,10 @@ func advancePhaseShift(s *ForgeState, in AdvanceInput, dir string) error {
 			if err := routeImplementationDomainBoundary(s, entry, remaining); err != nil {
 				return err
 			}
+			// Initialize plan.json for the incoming domain (add passes/rounds).
+			if err := initPlanForImplementing(s, dir); err != nil {
+				return err
+			}
 		} else {
 			s.Phase = PhaseImplementing
 		}
@@ -1420,6 +1494,10 @@ func advancePhaseShift(s *ForgeState, in AdvanceInput, dir string) error {
 			entry := s.UIImplementing.PlanQueue[0]
 			remaining := s.UIImplementing.PlanQueue[1:]
 			if err := routeImplementationDomainBoundary(s, entry, remaining); err != nil {
+				return err
+			}
+			// Initialize plan.json for the incoming domain (add passes/rounds).
+			if err := initPlanForImplementing(s, dir); err != nil {
 				return err
 			}
 		} else {
@@ -2030,6 +2108,69 @@ func implScopeTargets(impl *ImplementingState, item *PlanItem, strategy string) 
 	default:
 		return nil
 	}
+}
+
+// effectiveUIStrategy returns the ui_implementing commit strategy, falling back to "scoped".
+func effectiveUIStrategy(s *ForgeState) string {
+	if s.Config.UIImplementing.CommitStrategy != "" {
+		return s.Config.UIImplementing.CommitStrategy
+	}
+	return "scoped"
+}
+
+// uiScopeTargets returns the git staging targets for ui_implementing phase commits.
+// item is the specific plan item being committed (used by strict strategy); nil
+// means use the whole domain directory (used at COMMIT time).
+func uiScopeTargets(ui *UIImplementingState, item *PlanItem, strategy string) []string {
+	switch strategy {
+	case "strict":
+		if item != nil {
+			return item.Files
+		}
+		return nil
+	case "scoped":
+		if ui.CurrentPlanDomain != "" {
+			return []string{ui.CurrentPlanDomain + "/"}
+		}
+		return nil
+	case "all-specs":
+		if ui.CurrentPlanDomain != "" {
+			return []string{ui.CurrentPlanDomain + "/specs/"}
+		}
+		return nil
+	default:
+		return nil
+	}
+}
+
+// initPlanForImplementing reads the current implementing plan.json and adds
+// passes/rounds fields to items that haven't been initialized yet, then writes
+// it back. Called at all-first domain boundaries where the Planning→Implementing
+// PHASE_SHIFT did not run for this plan.
+func initPlanForImplementing(s *ForgeState, dir string) error {
+	planPath := currentPlanFile(s)
+	if planPath == "" {
+		return nil
+	}
+	fullPath := filepath.Join(dir, planPath)
+	data, err := os.ReadFile(fullPath)
+	if err != nil {
+		return fmt.Errorf("reading plan.json: %w", err)
+	}
+	var plan PlanJSON
+	if err := json.Unmarshal(data, &plan); err != nil {
+		return fmt.Errorf("parsing plan.json: %w", err)
+	}
+	for i := range plan.Items {
+		if plan.Items[i].Passes == "" {
+			plan.Items[i].Passes = "pending"
+		}
+	}
+	planData, err := json.MarshalIndent(plan, "", "  ")
+	if err != nil {
+		return fmt.Errorf("marshaling plan: %w", err)
+	}
+	return os.WriteFile(fullPath, planData, 0644)
 }
 
 // ValidationError wraps multiple validation errors.

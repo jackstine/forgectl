@@ -885,6 +885,12 @@ This topic emits no metrics.
 - **When:** `advance`
 - **Then:** PHASE_SHIFT entered (`ui_implementing` → planning).
 
+### ui_implementing commits at IMPLEMENT and COMMIT when enable_commits is true
+- **Verifies:** Invariant 17 — `--message` is required at IMPLEMENT (first round) and at COMMIT, and both points actually commit. (Surfaced by multi-domain pipeline integration test — `ui_implementing` required `--message` at both points but never called `AutoCommit`, producing zero commits.)
+- **Given:** `enable_commits: true`, `ui_implementing.commit_strategy: "scoped"`. IMPLEMENT (first round); file on disk modified by implementation.
+- **When:** `advance --message "implement login component"` (IMPLEMENT), then drive through loops to COMMIT, then `advance --message "batch commit"`.
+- **Then:** `git log` is non-empty. Both the per-item commit (at first-round IMPLEMENT) and the batch commit (at COMMIT) appear in history.
+
 ---
 
 ## Implements

@@ -1785,7 +1785,7 @@ func printPhaseShiftOutput(w io.Writer, s *ForgeState) {
 		fmt.Fprintf(w, "When ready, run:\n")
 		fmt.Fprintf(w, "  forgectl advance                          # auto-generate plan queue from completed specs\n")
 		fmt.Fprintf(w, "  forgectl advance --from <plan-queue.json> # OR provide a custom plan queue\n")
-	} else if ps.From == PhasePlanning && ps.To == PhaseImplementing {
+	} else if ps.From == PhasePlanning && (ps.To == PhaseImplementing || ps.To == PhaseUIImplementing) {
 		if s.Planning != nil && s.Planning.CurrentPlan != nil {
 			fmt.Fprintf(w, "Plan:    %s\n", s.Planning.CurrentPlan.Name)
 			fmt.Fprintf(w, "Domain:  %s\n", s.Planning.CurrentPlan.Domain)

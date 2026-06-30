@@ -65,6 +65,8 @@ Isolation is baked into the shared fixture so no test can forget it:
 | `oracle_specifying_test.go` | **§4.1** independent state-machine oracle for the specifying eval loop; **C1/C2** min-rounds-loops / force-accept |
 | `logging_test.go` | **H1** only init/advance log; **H2** stable log filename across a session |
 | `pipeline_multidomain_test.go` | **B1/B4** multi-domain pipeline (two code domains + one ui), interleaved, planning→implementing/ui_implementing chains driven through the CLI in one session, asserted against an independent cross-phase trace oracle; exercises the **A2** planning, **A3** implementing, and **A4** ui_implementing lifecycles in passing; **F2/F4** per-domain commits (planning ACCEPT + per-item + batch). Two **KNOWN BUG** skips: **B6** `plan_all_before_implementing`, and ui_implementing commits |
+| `round_budget_test.go` | **C1** implementing min-rounds loop (PASS r1→IMPLEMENT, PASS r2→COMMIT, items "passed"); **C2** implementing force-accept (FAIL r1→IMPLEMENT, FAIL r2≥max→COMMIT, items "failed"); **C3a/C3b/C3c** ui_implementing per-loop force-accept: eval max_rounds, QA max_rounds, and e2e max_rounds exhaustion each independently flip their `*ForceAccepted` flag and mark items "failed" at COMMIT |
+| `pipeline_front_test.go` | **B2** specifying PHASE_SHIFT without `--from` auto-generates `.forgectl/state/plan-queue.json` (one entry per domain, `code_search_roots` defaults to `["<domain>/"]`), enters `generate_planning_queue`, and hands off to planning; **B3** specifying PHASE_SHIFT with `--from <file>` skips `generate_planning_queue` entirely and lands at planning ORIENT in one step using the provided queue |
 
 ## Conventions for adding tests
 

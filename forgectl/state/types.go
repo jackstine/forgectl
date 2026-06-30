@@ -474,6 +474,7 @@ type CompletedPlan struct {
 	Name   string `json:"name"`
 	Domain string `json:"domain"`
 	File   string `json:"file"`
+	Kind   string `json:"kind,omitempty"`
 }
 
 // --- Eval records ---

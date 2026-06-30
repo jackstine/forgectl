@@ -1742,14 +1742,25 @@ func TestPlanningAcceptAllFirstWithQueueGoesToPlanningPlanning(t *testing.T) {
 	}
 }
 
-func TestPlanningAcceptAllFirstLastPlanGoesToImplementing(t *testing.T) {
+func TestPlanningAcceptAllFirstLastPlanGoesToDoneThenImplementing(t *testing.T) {
 	dir := t.TempDir()
 	s := newPlanningStateWithDir(dir) // single plan, no queue
 	s.Config.Planning.PlanAllBeforeImplementing = true
 	advancePlanningToAccept(t, s, dir)
 
-	err := Advance(s, AdvanceInput{}, dir)
-	if err != nil {
+	// ACCEPT with empty queue → DONE (queue all plans for implementation).
+	if err := Advance(s, AdvanceInput{}, dir); err != nil {
+		t.Fatal(err)
+	}
+	if s.State != StateDone {
+		t.Fatalf("expected DONE, got %s", s.State)
+	}
+	if len(s.Planning.Completed) != 1 {
+		t.Errorf("expected 1 completed plan, got %d", len(s.Planning.Completed))
+	}
+
+	// DONE → PHASE_SHIFT(planning→implementing).
+	if err := Advance(s, AdvanceInput{}, dir); err != nil {
 		t.Fatal(err)
 	}
 	if s.State != StatePhaseShift {
@@ -1757,9 +1768,6 @@ func TestPlanningAcceptAllFirstLastPlanGoesToImplementing(t *testing.T) {
 	}
 	if s.PhaseShift == nil || s.PhaseShift.From != PhasePlanning || s.PhaseShift.To != PhaseImplementing {
 		t.Errorf("expected planning→implementing, got %v", s.PhaseShift)
-	}
-	if len(s.Planning.Completed) != 1 {
-		t.Errorf("expected 1 completed plan, got %d", len(s.Planning.Completed))
 	}
 }
 
@@ -3598,6 +3606,8 @@ func TestAdvancePhaseShiftDomainBoundaryRoutesByKind(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			dir := t.TempDir()
+			// initPlanForImplementing reads the incoming plan.json to add passes/rounds.
+			createValidPlan(t, dir, "next/plan.json")
 			cfg := DefaultForgeConfig()
 			cfg.UIImplementing.App.LaunchCommand = "x"
 			cfg.UIImplementing.App.URL = "x"

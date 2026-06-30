@@ -881,6 +881,18 @@ Advancing from REFINE runs the validation gate.
 - **When:** `forgectl eval`
 - **Then:** Output includes plan-eval.md contents, plan references, report target.
 
+### plan_all_before_implementing implements every completed domain
+- **Verifies:** DONE populates the implementing queue from all completed plans; all domains are implemented, not just the last. (Surfaced by multi-domain pipeline integration test — confirmed root cause in `advance.go`.)
+- **Given:** `plan_all_before_implementing: true`. Two-domain plan queue (core, api). Both plans accepted. Queue now empty.
+- **When:** `advance` from ACCEPT (reaches DONE), then `advance` from DONE (reaches PHASE_SHIFT), then drive each domain to completion.
+- **Then:** All items in `core/plan.json` are `passed`. All items in `api/plan.json` are `passed`.
+
+### PHASE_SHIFT label matches target phase when plan kind is ui
+- **Verifies:** The PHASE_SHIFT `From` line accurately reflects the target implementation phase. (Cosmetic contract fix — `PhaseShiftInfo.To` was always `implementing` regardless of `kind`.)
+- **Given:** ACCEPT, interleaved mode (`plan_all_before_implementing: false`), `plan.kind: "ui"`.
+- **When:** `advance` from ACCEPT.
+- **Then:** State is PHASE_SHIFT. Output reads `From: planning → ui_implementing`.
+
 ---
 
 ## Implements

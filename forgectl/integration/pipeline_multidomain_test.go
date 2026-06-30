@@ -423,15 +423,7 @@ max_rounds = 3
 // → planning domain boundaries), then, once the planning queue empties, DONE →
 // PHASE_SHIFT and implement EVERY completed plan in turn. The assertion below is
 // that every domain's items end `passed`.
-//
-// KNOWN BUG — currently skipped. The binary plans all domains but then
-// implements only the LAST one: planning ACCEPT on the final plan (queue empty)
-// goes straight to PHASE_SHIFT{To: implementing} for that single plan
-// (advance.go:474–495); it never enters DONE and never populates an implementing
-// queue from the completed plans, so the earlier domains are planned and then
-// dropped. Un-skip when the loader/transition is fixed. (Plan B6.)
 func TestPipelinePlanAllBeforeImplementing(t *testing.T) {
-	t.Skip("KNOWN BUG: plan_all_before_implementing implements only the last planned domain; earlier domains are planned then dropped (advance.go:474-495 vs plan-production.md:656-658)")
 
 	p := NewProject(t)
 	p.WriteConfig(`
@@ -469,14 +461,7 @@ max_rounds = 3
 // TestUIImplementingCommitsWhenEnabled pins that ui_implementing actually commits
 // when enable_commits is true — symmetric with the implementing phase, which the
 // per-domain commit test above proves does commit.
-//
-// KNOWN BUG — currently skipped. ui_implementing *requires* --message at the
-// first-round IMPLEMENT and at COMMIT (advance.go:942-944, 1101-1103) but neither
-// path calls AutoCommit, so the message is demanded and then ignored: a commits-on
-// ui batch produces zero commits. Un-skip when the AutoCommit calls are added.
-// (Plan F2/F4, J.)
 func TestUIImplementingCommitsWhenEnabled(t *testing.T) {
-	t.Skip("KNOWN BUG: ui_implementing requires --message at IMPLEMENT/COMMIT but never calls AutoCommit (advance.go:942-944, 1101-1103) — a commits-on ui batch makes zero commits")
 
 	p := NewProject(t)
 	p.WriteConfig(`
