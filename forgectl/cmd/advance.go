@@ -82,6 +82,15 @@ func runAdvance(cmd *cobra.Command, args []string) error {
 
 	err = state.Advance(s, in, projectRoot)
 	if err != nil {
+		// Log the error before returning so §H3 observers can see it.
+		state.NewLogger(s.Config.Logs, s.StartedAtPhase, s.SessionID).Write(state.LogEntry{
+			TS:     state.LogNow(),
+			Cmd:    "error",
+			Phase:  prevPhase,
+			State:  prevState,
+			Detail: map[string]interface{}{"error": err.Error()},
+		})
+
 		// Check if it's a validation error — still save state if VALIDATE was entered.
 		if ve, ok := err.(*state.ValidationError); ok {
 			if err2 := state.Save(stateDir, s); err2 != nil {

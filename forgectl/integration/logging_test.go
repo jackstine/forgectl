@@ -73,7 +73,6 @@ func TestH2LogFilenameStableAcrossSession(t *testing.T) {
 // activity log must contain an entry with cmd:"error" written during that
 // command's execution, before the non-zero exit.
 func TestH3ErrorEntryLoggedBeforeExit(t *testing.T) {
-	t.Skip("binary does not yet emit cmd:\"error\" log entries on non-zero exit; contract test for future implementation")
 	p := NewProject(t)
 	p.WriteConfig(specifyingCommitsOffConfig)
 	p.WriteFile("spec-queue.json", oneSpecQueue)
