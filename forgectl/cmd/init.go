@@ -164,6 +164,7 @@ func runInit(cmd *cobra.Command, args []string) error {
 				Specs:           entry.Specs,
 				SpecCommits:     entry.SpecCommits,
 				CodeSearchRoots: entry.CodeSearchRoots,
+				Kind:            entry.Kind,
 			}
 		}
 

@@ -3,6 +3,7 @@
 package integration
 
 import (
+	"encoding/json"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -174,5 +175,48 @@ func TestE3RootDiscoveryStopsAtGitBoundary(t *testing.T) {
 	}
 	if !strings.Contains(res.Out(), "No .forgectl directory found") {
 		t.Errorf("expected the no-.forgectl error, got:\n%s", res.Out())
+	}
+}
+
+// TestE4SessionArchivedAtPhaseShift covers §E4: reaching the terminal PHASE_SHIFT
+// archives the completed session to .forgectl/state/sessions/ as a JSON snapshot,
+// and that snapshot contains parseable session data with the correct phase.
+func TestE4SessionArchivedAtPhaseShift(t *testing.T) {
+	p := initSpecifying(t)
+	driveSpecifyingToPhaseShift(p)
+	p.AssertAt(state.PhaseSpecifying, state.StatePhaseShift)
+
+	// The sessions/ directory must exist after PHASE_SHIFT.
+	if !p.Exists(".forgectl/state/sessions") {
+		t.Fatal("sessions/ archive directory not created at PHASE_SHIFT")
+	}
+
+	sessionsDir := p.Path(".forgectl/state/sessions")
+	entries, err := os.ReadDir(sessionsDir)
+	if err != nil {
+		t.Fatalf("reading sessions/ directory: %v", err)
+	}
+
+	var jsonNames []string
+	for _, e := range entries {
+		if !e.IsDir() && strings.HasSuffix(e.Name(), ".json") {
+			jsonNames = append(jsonNames, e.Name())
+		}
+	}
+	if len(jsonNames) == 0 {
+		t.Fatal("no .json archive file found in sessions/ directory")
+	}
+
+	// Parse the archive and assert it contains specifying-phase session data.
+	data, err := os.ReadFile(filepath.Join(sessionsDir, jsonNames[0]))
+	if err != nil {
+		t.Fatalf("reading archive file %s: %v", jsonNames[0], err)
+	}
+	var archived state.ForgeState
+	if err := json.Unmarshal(data, &archived); err != nil {
+		t.Fatalf("parsing archive JSON: %v", err)
+	}
+	if archived.Phase != state.PhaseSpecifying {
+		t.Errorf("archived.phase = %q, want %q", archived.Phase, state.PhaseSpecifying)
 	}
 }

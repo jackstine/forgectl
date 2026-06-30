@@ -592,3 +592,84 @@ func tail(ps []phaseState, from int) []phaseState {
 	}
 	return ps[from:]
 }
+
+// TestB5UIConfigGateAtPhaseShift covers the config-gate that guards the
+// planning→ui_implementing PHASE_SHIFT: when a plan with kind="ui" finishes
+// planning and reaches PHASE_SHIFT, forgectl validates that
+// ui_implementing.app.url (and other required fields) are set. If they are
+// absent, the advance must exit non-zero, leave the state at PHASE_SHIFT, and
+// name the missing field in its output.
+func TestB5UIConfigGateAtPhaseShift(t *testing.T) {
+	p := NewProject(t)
+	// Config intentionally omits [ui_implementing.app] (no url or launch_command).
+	p.WriteConfig(`
+[general]
+user_guided = false
+enable_commits = false
+[planning.eval]
+min_rounds = 1
+max_rounds = 3
+[implementing]
+batch = 2
+[implementing.eval]
+min_rounds = 1
+max_rounds = 3
+[ui_implementing]
+batch = 1
+[ui_implementing.eval]
+min_rounds = 1
+max_rounds = 3
+[ui_implementing.qa]
+min_rounds = 1
+max_rounds = 3
+[ui_implementing.e2e]
+min_rounds = 1
+max_rounds = 3
+test_command = "echo e2e"
+test_dir = "e2e"
+`)
+	const b5PlanQueue = `{
+  "plans": [
+    {"name":"Portal Plan","domain":"portal","file":"portal/plan.json","specs":[],"spec_commits":[],"code_search_roots":["portal/"],"kind":"ui"}
+  ]
+}`
+	p.WriteFile("plan-queue.json", b5PlanQueue)
+	p.WriteFile("portal/plan.json", uiSinglePlan("portal", "Portal"))
+
+	p.mustForge("init", "--phase", "planning", "--from", "plan-queue.json")
+	p.AssertAt(state.PhasePlanning, state.StateOrient)
+
+	// Drive planning through its full sequence:
+	// ORIENT → STUDY_SPECS → STUDY_CODE → STUDY_PACKAGES → REVIEW → DRAFT
+	p.mustForge("advance") // ORIENT → STUDY_SPECS
+	p.mustForge("advance") // STUDY_SPECS → STUDY_CODE
+	p.mustForge("advance") // STUDY_CODE → STUDY_PACKAGES
+	p.mustForge("advance") // STUDY_PACKAGES → REVIEW
+	p.mustForge("advance") // REVIEW → DRAFT
+
+	// DRAFT → EVALUATE (plan file already on disk)
+	evalOut := p.mustForge("advance")
+	p.AssertAt(state.PhasePlanning, state.StateEvaluate)
+
+	// EVALUATE → ACCEPT (PASS)
+	p.PassEval(evalOut, "PASS")
+	p.AssertAt(state.PhasePlanning, state.StateAccept)
+
+	// ACCEPT → PHASE_SHIFT (commits off, no --message needed)
+	p.mustForge("advance")
+	p.AssertAt(state.PhasePlanning, state.StatePhaseShift)
+
+	// Advance from PHASE_SHIFT: must fail because ui_implementing.app.url is missing.
+	res := p.forge("advance")
+	if res.Exit == 0 {
+		t.Error("expected non-zero exit when ui_implementing.app.url is missing")
+	}
+
+	// State must remain at PHASE_SHIFT.
+	p.AssertAt(state.PhasePlanning, state.StatePhaseShift)
+
+	// Error output must mention the missing field.
+	if !strings.Contains(res.Out(), "url") {
+		t.Errorf("error should mention missing url field: %s", res.Out())
+	}
+}

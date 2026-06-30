@@ -358,10 +358,116 @@ func TestUIE2EForceAccept(t *testing.T) {
 	}
 
 	p.mustForge("advance") // COMMIT → DONE
-	final := p.forge("advance")
-	if !strings.Contains(final.Out(), "session complete") {
-		t.Errorf("expected session-complete signal:\n%s", final.Out())
+	finalE2E := p.forge("advance")
+	if !strings.Contains(finalE2E.Out(), "session complete") {
+		t.Errorf("expected session-complete signal:\n%s", finalE2E.Out())
 	}
 
 	assertAllItemsFailed(t, p, "portal/plan.json")
+}
+
+// TestC4EvalRoundResetPerBatch covers §C4: the EvalRound counter must reset to
+// 0 at the start of each new implementing batch (new ORIENT), and must persist
+// correctly across EVALUATE ↔ IMPLEMENT loops within the same batch.
+//
+// The test drives two batches (batch=1, two-layer plan, L0 then L1). Within the
+// first batch it exercises a re-implement cycle (min_rounds=2 forces a second
+// EVALUATE) and checks the counter increments. Then after COMMIT it checks the
+// counter resets at the second ORIENT.
+func TestC4EvalRoundResetPerBatch(t *testing.T) {
+	p := NewProject(t)
+	p.WriteConfig(`
+[general]
+user_guided = false
+enable_commits = false
+[implementing]
+batch = 1
+[implementing.eval]
+min_rounds = 2
+max_rounds = 4
+`)
+	// Two-layer plan: L0 (item a) and L1 (item b, depends on a). With batch=1
+	// each layer is its own batch, giving us two consecutive ORIENT→COMMIT cycles.
+	const twoLayerEvalPlan = `{
+  "context":{"domain":"core","module":"Core"},
+  "layers":[
+    {"id":"L0","name":"L0","items":["a"]},
+    {"id":"L1","name":"L1","items":["b"]}
+  ],
+  "items":[
+    {"id":"a","name":"A","description":"a","depends_on":[],"tests":[]},
+    {"id":"b","name":"B","description":"b","depends_on":["a"],"tests":[]}
+  ]
+}`
+	p.WriteFile("core/plan.json", twoLayerEvalPlan)
+
+	p.mustForge("init", "--phase", "implementing", "--from", "core/plan.json")
+	p.AssertAt(state.PhaseImplementing, state.StateOrient)
+
+	// --- Batch 1 (L0) ---
+
+	// ORIENT → IMPLEMENT (EvalRound is 0 before the first EVALUATE entry).
+	p.mustForge("advance")
+	p.AssertAt(state.PhaseImplementing, state.StateImplement)
+
+	// IMPLEMENT → EVALUATE (EvalRound becomes 1 on entry).
+	eval1 := p.mustForge("advance")
+	p.AssertAt(state.PhaseImplementing, state.StateEvaluate)
+	if got := p.State().Implementing.CurrentBatch.EvalRound; got != 1 {
+		t.Errorf("batch 1: EvalRound after first EVALUATE entry = %d, want 1", got)
+	}
+
+	// PASS at round 1 < min_rounds 2 → loops back to IMPLEMENT (not COMMIT yet).
+	p.PassEval(eval1, "PASS")
+	p.AssertAt(state.PhaseImplementing, state.StateImplement)
+
+	// IMPLEMENT (re-implement) → EVALUATE (EvalRound becomes 2 — persisted across re-implement).
+	eval2 := p.mustForge("advance")
+	p.AssertAt(state.PhaseImplementing, state.StateEvaluate)
+	if got := p.State().Implementing.CurrentBatch.EvalRound; got != 2 {
+		t.Errorf("batch 1: EvalRound after second EVALUATE entry = %d, want 2", got)
+	}
+
+	// PASS at round 2 >= min_rounds 2 → COMMIT.
+	p.PassEval(eval2, "PASS")
+	p.AssertAt(state.PhaseImplementing, state.StateCommit)
+
+	// COMMIT → ORIENT (batch 2, L1).
+	p.mustForge("advance")
+	p.AssertAt(state.PhaseImplementing, state.StateOrient)
+
+	// --- Batch 2 (L1): EvalRound must have reset to 0 ---
+
+	// ORIENT → IMPLEMENT.
+	p.mustForge("advance")
+	p.AssertAt(state.PhaseImplementing, state.StateImplement)
+
+	// IMPLEMENT → EVALUATE (EvalRound should be 1, not 3 — it reset at the new batch).
+	eval3 := p.mustForge("advance")
+	p.AssertAt(state.PhaseImplementing, state.StateEvaluate)
+	if got := p.State().Implementing.CurrentBatch.EvalRound; got != 1 {
+		t.Errorf("batch 2: EvalRound after first EVALUATE entry = %d, want 1 (counter should have reset)", got)
+	}
+
+	// PASS at round 1 < min_rounds 2 → re-implement once more (validate reset held).
+	p.PassEval(eval3, "PASS")
+	p.AssertAt(state.PhaseImplementing, state.StateImplement)
+
+	eval4 := p.mustForge("advance")
+	p.AssertAt(state.PhaseImplementing, state.StateEvaluate)
+	if got := p.State().Implementing.CurrentBatch.EvalRound; got != 2 {
+		t.Errorf("batch 2: EvalRound after second EVALUATE entry = %d, want 2", got)
+	}
+
+	// PASS at round 2 → COMMIT → DONE → session complete.
+	p.PassEval(eval4, "PASS")
+	p.AssertAt(state.PhaseImplementing, state.StateCommit)
+
+	p.mustForge("advance") // COMMIT → DONE
+	finalRes := p.forge("advance")
+	if !strings.Contains(finalRes.Out(), "session complete") {
+		t.Errorf("expected session-complete signal:\n%s", finalRes.Out())
+	}
+
+	assertAllItemsPassed(t, p, "core/plan.json")
 }
