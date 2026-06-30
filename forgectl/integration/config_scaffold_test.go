@@ -166,7 +166,6 @@ func Test44DefaultConfigEquivalence(t *testing.T) {
 // loader mismatch flagged in the config-scaffolding spec. The assertion below is
 // written against the intended behavior; un-skip it once the loader is fixed.
 func TestPlanningStudySpecsConfigIsHonored(t *testing.T) {
-	t.Skip("KNOWN BUG: [planning.study_specs] is dropped by tomlPlanningConfig (config-scaffolding spec mismatch); un-skip when the loader honors it")
 
 	root := t.TempDir()
 	_ = os.MkdirAll(filepath.Join(root, ".forgectl"), 0755)

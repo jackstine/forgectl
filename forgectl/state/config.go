@@ -66,6 +66,13 @@ type tomlStudyCodeConfig struct {
 	Count int    `toml:"count"`
 }
 
+// tomlStudySpecsConfig mirrors StudySpecsConfig for TOML decoding.
+type tomlStudySpecsConfig struct {
+	Model string `toml:"model"`
+	Type  string `toml:"type"`
+	Count int    `toml:"count"`
+}
+
 // tomlRefineConfig mirrors RefineConfig for TOML decoding.
 type tomlRefineConfig struct {
 	Model string `toml:"model"`
@@ -75,13 +82,14 @@ type tomlRefineConfig struct {
 
 // tomlPlanningConfig mirrors PlanningConfig for TOML decoding.
 type tomlPlanningConfig struct {
-	Batch                     int                 `toml:"batch"`
-	CommitStrategy            string              `toml:"commit_strategy"`
-	SelfReview                *bool               `toml:"self_review"`
-	PlanAllBeforeImplementing *bool               `toml:"plan_all_before_implementing"`
-	StudyCode                 tomlStudyCodeConfig `toml:"study_code"`
-	Eval                      tomlEvalConfig      `toml:"eval"`
-	Refine                    tomlRefineConfig    `toml:"refine"`
+	Batch                     int                  `toml:"batch"`
+	CommitStrategy            string               `toml:"commit_strategy"`
+	SelfReview                *bool                `toml:"self_review"`
+	PlanAllBeforeImplementing *bool                `toml:"plan_all_before_implementing"`
+	StudySpecs                tomlStudySpecsConfig `toml:"study_specs"`
+	StudyCode                 tomlStudyCodeConfig  `toml:"study_code"`
+	Eval                      tomlEvalConfig       `toml:"eval"`
+	Refine                    tomlRefineConfig     `toml:"refine"`
 }
 
 // tomlImplementingConfig mirrors ImplementingConfig for TOML decoding.
@@ -275,6 +283,15 @@ func mergeTomlConfig(cfg *ForgeConfig, raw *tomlForgeConfig) {
 		cfg.Planning.PlanAllBeforeImplementing = *raw.Planning.PlanAllBeforeImplementing
 	}
 	mergeEvalConfig(&cfg.Planning.Eval, &raw.Planning.Eval)
+	if raw.Planning.StudySpecs.Model != "" {
+		cfg.Planning.StudySpecs.AgentConfig.Model = raw.Planning.StudySpecs.Model
+	}
+	if raw.Planning.StudySpecs.Type != "" {
+		cfg.Planning.StudySpecs.AgentConfig.Type = raw.Planning.StudySpecs.Type
+	}
+	if raw.Planning.StudySpecs.Count > 0 {
+		cfg.Planning.StudySpecs.AgentConfig.Count = raw.Planning.StudySpecs.Count
+	}
 	if raw.Planning.StudyCode.Model != "" {
 		cfg.Planning.StudyCode.AgentConfig.Model = raw.Planning.StudyCode.Model
 	}
