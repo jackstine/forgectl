@@ -793,6 +793,7 @@ func advanceImplFromImplement(s *ForgeState, in AdvanceInput, dir string) error 
 		if err := savePlan(s, dir, plan); err != nil {
 			return err
 		}
+		batch.EvalRound++
 		s.State = StateEvaluate
 	}
 
@@ -819,7 +820,6 @@ func advanceImplFromEvaluate(s *ForgeState, in AdvanceInput, dir string) error {
 
 	impl := s.Implementing
 	batch := impl.CurrentBatch
-	batch.EvalRound++
 
 	eval := EvalRecord{
 		Round:      batch.EvalRound,
