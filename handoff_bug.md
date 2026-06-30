@@ -11,6 +11,9 @@ multi-domain `planning → implementing / ui_implementing` pipeline (the work in
 | 2 | `ui_implementing` **requires** `--message` but never commits | **High** (silent loss of commits) | `advance.go` (orig. 942–944, 1101–1103) | **Fixed** — commit `0823bf0`; `TestUIImplementingCommitsWhenEnabled` un-skipped and passing |
 | 3 | `PHASE_SHIFT` label hardcoded to "planning → implementing" for `kind:"ui"` | Low (cosmetic/contract drift) | `output.go` | **Fixed** — commit `0823bf0`; label now reads phase from `PhaseShiftInfo.To` |
 | 4 | `EvalRound` incremented on verdict (exit from EVALUATE) instead of on entry | **Medium** (counter off-by-one; min_rounds comparison uses wrong round) | `advance.go` `advanceImplFromEvaluate` | **Fixed** — see below; `TestImplementingMinRoundsLoops` now passing |
+| 5 | `[planning.study_specs]` config silently dropped by loader | **Medium** (operator config ignored) | `config.go` `tomlPlanningConfig` | **Fixed** — commit `f0496e8`; `TestPlanningStudySpecsConfigIsHonored` un-skipped and passing |
+| 6 | Embedded default-config.toml behind docs canonical (missing `specifying.prompt_domains` + `[reverse_engineering]`) | **Low** (template/docs drift; unit test failing) | `state/default-config.toml` | **Fixed** — commit `f0496e8`; `TestEmbeddedTemplateMatchesDocs` passing; `go test ./...` fully green |
+| 7 | `OPERATING_MANUAL.md` specifying drift (`RECONCILE_EVAL PASS → COMPLETE`; `-m` shorthand) | Low (doc drift) | `OPERATING_MANUAL.md` | **Remaining** |
 
 ---
 
@@ -290,14 +293,14 @@ the fix, passes now**. Committed alongside this handoff update.
 For a complete picture — these are documented in `integration_handoff.md §5` and
 `forgectl/integration/README.md`, and were **not** introduced by this work:
 
-- **`[planning.study_specs]` config is silently dropped** — `tomlPlanningConfig`
-  has no `study_specs` field, so `mergeTomlConfig` ignores it. Captured by
-  `TestPlanningStudySpecsConfigIsHonored` (skipped).
-- **`docs/default-config.toml` is ahead of the embedded template** — the unit test
-  `state.TestEmbeddedTemplateMatchesDocs` fails on the current tree
-  (`general.prompt_domains` + a `[reverse_engineering]` block exist in the docs
-  copy but not in the embedded copy or the Go structs). Pre-existing failure in the
-  **fast** unit suite (`go test ./...`), unrelated to the integration suite.
+- **`[planning.study_specs]` config is silently dropped** — **Fixed** — commit
+  `f0496e8`; added `tomlStudySpecsConfig` and merge logic to `config.go`;
+  `TestPlanningStudySpecsConfigIsHonored` un-skipped and passing.
+- **`docs/default-config.toml` is ahead of the embedded template** — **Fixed** —
+  commit `f0496e8`; synced `forgectl/state/default-config.toml` to the docs
+  canonical (`specifying.prompt_domains` + `[reverse_engineering]` section were
+  missing; both fields already existed in Go structs and the loader);
+  `TestEmbeddedTemplateMatchesDocs` now passes and `go test ./...` is fully green.
 - **`OPERATING_MANUAL.md` specifying drift** — manual says `RECONCILE_EVAL PASS →
   COMPLETE` but the binary goes to `RECONCILE_REVIEW` first; manual/skills reference
-  a `-m` shorthand that doesn't exist (only `--message`).
+  a `-m` shorthand that doesn't exist (only `--message`). **Remaining — not yet fixed.**
