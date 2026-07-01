@@ -135,11 +135,15 @@ type PlanningConfig struct {
 	Refine                    RefineConfig     `json:"refine"`
 }
 
-// ImplementingConfig configures the implementing phase.
+// ImplementingConfig configures the implementing phase. Implement parameterizes
+// the primary implementation agent — distinct from Eval, which parameterizes the
+// evaluator — so a generated workflow can bake different models/types for the
+// two roles (see workflow-generation / adversarial-evaluation-gauntlet).
 type ImplementingConfig struct {
-	Batch          int        `json:"batch"`
-	CommitStrategy string     `json:"commit_strategy"`
-	Eval           EvalConfig `json:"eval"`
+	Batch          int         `json:"batch"`
+	CommitStrategy string      `json:"commit_strategy"`
+	Implement      AgentConfig `json:"implement"`
+	Eval           EvalConfig  `json:"eval"`
 }
 
 // UIAppConfig describes how the QA loop reaches the running application.
@@ -329,6 +333,11 @@ func DefaultForgeConfig() ForgeConfig {
 		Implementing: ImplementingConfig{
 			Batch:          2,
 			CommitStrategy: "scoped",
+			Implement: AgentConfig{
+				Model: "sonnet",
+				Type:  "general-purpose",
+				Count: 1,
+			},
 			Eval: EvalConfig{
 				MinRounds: 1,
 				MaxRounds: 3,

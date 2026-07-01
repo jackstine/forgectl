@@ -317,7 +317,8 @@
           "passes": false
         }
       ],
-      "passes": "pending"
+      "passes": "passed",
+      "rounds": 1
     },
     {
       "id": "cmd.generate-workflow",

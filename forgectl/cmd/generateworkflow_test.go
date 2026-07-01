@@ -2,8 +2,11 @@ package cmd
 
 import (
 	"bytes"
+	"encoding/json"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 
@@ -302,5 +305,406 @@ func TestResolveWorkflowPath_NoCollision(t *testing.T) {
 	}
 	if warn.Len() != 0 {
 		t.Errorf("expected no WARN with no collision, got %q", warn.String())
+	}
+}
+
+// --- L2: script rendering ---
+
+// renderCfg builds a ForgeConfig with the implementing values a render test needs.
+func renderCfg(im, it, em, et string, minR, maxR int, commits bool) state.ForgeConfig {
+	var cfg state.ForgeConfig
+	cfg.Implementing.Implement = state.AgentConfig{Model: im, Type: it, Count: 1}
+	cfg.Implementing.Eval.Model = em
+	cfg.Implementing.Eval.Type = et
+	cfg.Implementing.Eval.Count = 1
+	cfg.Implementing.Eval.MinRounds = minR
+	cfg.Implementing.Eval.MaxRounds = maxR
+	cfg.General.EnableCommits = commits
+	return cfg
+}
+
+// sampleItem builds an item whose fields are individually recognizable so a
+// test can assert the item's description/files/specs/tests appear in a prompt.
+func sampleItem(id string) state.PlanItem {
+	return state.PlanItem{
+		ID:          id,
+		Name:        "Name-" + id,
+		Description: "Desc-" + id,
+		Files:       []string{"file_" + id + ".go"},
+		Specs:       []string{"spec_" + id + ".md#anchor"},
+		Tests:       []state.PlanTest{{Category: "functional", Description: "crit-" + id}},
+	}
+}
+
+func ctxDM() state.PlanContext { return state.PlanContext{Domain: "d", Module: "m"} }
+
+// stripJSStringLiterals removes double-quoted string literals so a test can grep
+// the residual *code* for forbidden APIs without matching baked prompt text.
+// The emitted prompts are JSON-encoded single-line strings, so no literal
+// newlines appear inside a quoted span and this simple regex is sufficient.
+func stripJSStringLiterals(s string) string {
+	re := regexp.MustCompile(`"(\\.|[^"\\])*"`)
+	return re.ReplaceAllString(s, `""`)
+}
+
+func countLabelPrefix(labels []string, prefix string) int {
+	n := 0
+	for _, l := range labels {
+		if strings.HasPrefix(l, prefix) {
+			n++
+		}
+	}
+	return n
+}
+
+type scriptRun struct {
+	Log    []string       `json:"log"`
+	Labels []string       `json:"labels"`
+	Meta   map[string]any `json:"meta"`
+}
+
+func (r scriptRun) joinedLog() string { return strings.Join(r.Log, "\n") }
+
+// runEmittedScript executes the emitted workflow with node, stubbing agent()/
+// log()/phase(). detectorResults feeds the change-detector one token per round;
+// primaryReturn/evalReturn are the raw JS the primary/eval stubs return ("null"
+// or a quoted string). It skips when node is unavailable — the loop control-flow
+// contract can only be verified by executing the script.
+func runEmittedScript(t *testing.T, script string, detectorResults []string, primaryReturn, evalReturn string) scriptRun {
+	t.Helper()
+	if _, err := exec.LookPath("node"); err != nil {
+		t.Skip("node not available; skipping emitted-script execution test")
+	}
+	dir := t.TempDir()
+	scriptPath := filepath.Join(dir, "wf.mjs")
+	if err := os.WriteFile(scriptPath, []byte(script), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	detJSON, _ := json.Marshal(detectorResults)
+	runner := "import { pathToFileURL } from 'node:url'\n" +
+		"globalThis.__log = []\n" +
+		"globalThis.__labels = []\n" +
+		"const detectorResults = " + string(detJSON) + "\n" +
+		"let detectIdx = 0\n" +
+		"const primaryReturn = " + primaryReturn + "\n" +
+		"const evalReturn = " + evalReturn + "\n" +
+		"globalThis.log = (m) => { globalThis.__log.push(String(m)) }\n" +
+		"globalThis.phase = () => {}\n" +
+		"globalThis.agent = async (prompt, opts) => {\n" +
+		"  const label = (opts && opts.label) || \"\"\n" +
+		"  globalThis.__labels.push(label)\n" +
+		"  if (label.indexOf(\"detect:\") === 0) {\n" +
+		"    const r = detectIdx < detectorResults.length ? detectorResults[detectIdx] : \"CLEAN\"\n" +
+		"    detectIdx++\n" +
+		"    return r\n" +
+		"  }\n" +
+		"  if (label.indexOf(\"primary:\") === 0) return primaryReturn\n" +
+		"  if (label.indexOf(\"eval:\") === 0) return evalReturn\n" +
+		"  return \"STAGED\"\n" +
+		"}\n" +
+		"const mod = await import(pathToFileURL(process.argv[2]).href)\n" +
+		"process.stdout.write(JSON.stringify({ log: globalThis.__log, labels: globalThis.__labels, meta: mod.meta }))\n"
+	runnerPath := filepath.Join(dir, "runner.mjs")
+	if err := os.WriteFile(runnerPath, []byte(runner), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	out, err := exec.Command("node", runnerPath, scriptPath).Output()
+	if err != nil {
+		stderr := ""
+		if ee, ok := err.(*exec.ExitError); ok {
+			stderr = string(ee.Stderr)
+		}
+		t.Fatalf("node execution failed: %v\nstderr:\n%s\nscript:\n%s", err, stderr, script)
+	}
+	var run scriptRun
+	if err := json.Unmarshal(out, &run); err != nil {
+		t.Fatalf("parsing runner output: %v\nraw: %s", err, out)
+	}
+	return run
+}
+
+// Functional: pure-literal meta with name "<domain>-<module>-impl", a one-line
+// description, and a phases array of one entry per batch plus an evaluate phase.
+func TestRender_MetaLiteral(t *testing.T) {
+	batches := []Batch{{Index: 1, Items: []state.PlanItem{sampleItem("a")}}, {Index: 2, Items: []state.PlanItem{sampleItem("b")}}}
+	script := renderWorkflowScript(ctxDM(), batches, renderCfg("sonnet", "general-purpose", "sonnet", "general-purpose", 1, 3, false))
+	run := runEmittedScript(t, script, []string{"CLEAN"}, `"ok"`, `"ok"`)
+
+	if run.Meta["name"] != "d-m-impl" {
+		t.Errorf("meta.name = %v, want d-m-impl", run.Meta["name"])
+	}
+	if desc, _ := run.Meta["description"].(string); strings.TrimSpace(desc) == "" || strings.Contains(desc, "\n") {
+		t.Errorf("meta.description must be a non-empty one-liner, got %q", desc)
+	}
+	phases, ok := run.Meta["phases"].([]any)
+	if !ok {
+		t.Fatalf("meta.phases is not an array: %T", run.Meta["phases"])
+	}
+	if len(phases) != 3 {
+		t.Fatalf("meta.phases length = %d, want 3 (2 batches + evaluate)", len(phases))
+	}
+	last := phases[2].(map[string]any)
+	if last["title"] != "Evaluate" {
+		t.Errorf("last phase title = %v, want Evaluate", last["title"])
+	}
+}
+
+// Functional: no forbidden APIs appear as code (they may appear inside baked
+// prompt strings — e.g. the item's own test text — so we strip string literals
+// before checking).
+func TestRender_NoForbiddenAPIsAsCode(t *testing.T) {
+	// Give an item whose text deliberately contains the forbidden tokens to prove
+	// the check tolerates them inside prompt strings.
+	it := sampleItem("a")
+	it.Description = "must contain no require, import, Date.now(), Math.random(), new Date(), fs API, or calls to forgectl"
+	batches := []Batch{{Index: 1, Items: []state.PlanItem{it}}}
+	script := renderWorkflowScript(ctxDM(), batches, renderCfg("sonnet", "general-purpose", "sonnet", "general-purpose", 1, 3, false))
+
+	// Sanity: the raw script does contain the tokens (inside the prompt string).
+	if !strings.Contains(script, "Math.random()") {
+		t.Fatal("expected the baked prompt to carry the item's test text verbatim")
+	}
+	residual := stripJSStringLiterals(script)
+	for _, bad := range []string{"require(", "import ", "import(", "Date.now", "Math.random", "new Date", "fs.", "forgectl"} {
+		if strings.Contains(residual, bad) {
+			t.Errorf("forbidden token %q appears as code (after stripping strings):\n%s", bad, residual)
+		}
+	}
+}
+
+// Functional: the primary agent() call uses the baked implement model/type.
+func TestRender_PrimaryUsesImplementModelType(t *testing.T) {
+	batches := []Batch{{Index: 1, Items: []state.PlanItem{sampleItem("a")}}}
+	script := renderWorkflowScript(ctxDM(), batches, renderCfg("opus", "explore", "sonnet", "general-purpose", 1, 3, false))
+	if !strings.Contains(script, `"primary:batch-1", model: "opus", agentType: "explore"`) {
+		t.Errorf("primary agent() call missing baked implement model/type; script:\n%s", script)
+	}
+}
+
+// Functional: the evaluator agent() call uses the baked eval model/type, and
+// those differ from the primary's when configured differently.
+func TestRender_EvaluatorUsesEvalModelType_Distinct(t *testing.T) {
+	batches := []Batch{{Index: 1, Items: []state.PlanItem{sampleItem("a")}}}
+	script := renderWorkflowScript(ctxDM(), batches, renderCfg("sonnet", "general-purpose", "opus", "eval", 1, 3, false))
+	if !strings.Contains(script, `model: "opus", agentType: "eval", phase: "Evaluate"`) {
+		t.Errorf("evaluator agent() call missing baked eval model/type; script:\n%s", script)
+	}
+	if !strings.Contains(script, `"primary:batch-1", model: "sonnet", agentType: "general-purpose"`) {
+		t.Errorf("primary agent() should carry the (distinct) implement model/type; script:\n%s", script)
+	}
+}
+
+// Functional: the change-detector uses a haiku model with a Bash-capable agent
+// type (claude).
+func TestRender_ChangeDetectorHaiku(t *testing.T) {
+	batches := []Batch{{Index: 1, Items: []state.PlanItem{sampleItem("a")}}}
+	script := renderWorkflowScript(ctxDM(), batches, renderCfg("sonnet", "general-purpose", "sonnet", "general-purpose", 1, 3, false))
+	if !strings.Contains(script, `model: "haiku", agentType: "claude"`) {
+		t.Errorf("change-detector agent() should use haiku/claude; script:\n%s", script)
+	}
+}
+
+// Functional: when enable_commits is false, no commit instruction appears in any
+// baked prompt or log line.
+func TestRender_CommitsGatedOff(t *testing.T) {
+	batches := []Batch{{Index: 1, Items: []state.PlanItem{sampleItem("a")}}}
+	script := renderWorkflowScript(ctxDM(), batches, renderCfg("sonnet", "general-purpose", "sonnet", "general-purpose", 1, 3, false))
+	if strings.Contains(strings.ToLower(script), "commit") {
+		t.Errorf("enable_commits=false but script mentions commit:\n%s", script)
+	}
+}
+
+// Functional: when enable_commits is true, commit instructions appear in the
+// primary and evaluator prompts and the change-detector commits.
+func TestRender_CommitsGatedOn(t *testing.T) {
+	batches := []Batch{{Index: 1, Items: []state.PlanItem{sampleItem("a")}}}
+	script := renderWorkflowScript(ctxDM(), batches, renderCfg("sonnet", "general-purpose", "sonnet", "general-purpose", 1, 3, true))
+	if !strings.Contains(script, "git add -A && git commit") {
+		t.Errorf("enable_commits=true but no commit instruction found:\n%s", script)
+	}
+	if !strings.Contains(script, "batch 1 committed") {
+		t.Errorf("enable_commits=true should log a batch-committed INFO line")
+	}
+}
+
+// Functional: the evaluator prompt bakes the full GauntletEval instructions.
+func TestRender_GauntletEvalEmbedded(t *testing.T) {
+	batches := []Batch{{Index: 1, Items: []state.PlanItem{sampleItem("a")}}}
+	script := renderWorkflowScript(ctxDM(), batches, renderCfg("sonnet", "general-purpose", "sonnet", "general-purpose", 1, 3, false))
+	// A distinctive phrase from evaluators/gauntlet-eval.md.
+	if !strings.Contains(script, "Mutate, do not report") {
+		t.Errorf("evaluator prompt missing the embedded GauntletEval instructions")
+	}
+}
+
+// Functional: a two-item batch carries both items' description/files/specs/tests
+// in both the primary and the evaluator prompt (so each field appears >= 2x).
+func TestRender_WholeBatchInBothPrompts(t *testing.T) {
+	batches := []Batch{{Index: 1, Items: []state.PlanItem{sampleItem("a"), sampleItem("b")}}}
+	script := renderWorkflowScript(ctxDM(), batches, renderCfg("sonnet", "general-purpose", "sonnet", "general-purpose", 1, 3, false))
+	for _, token := range []string{"Desc-a", "Desc-b", "file_a.go", "file_b.go", "spec_a.md", "spec_b.md", "crit-a", "crit-b"} {
+		if got := strings.Count(script, token); got < 2 {
+			t.Errorf("token %q appears %d times, want >= 2 (primary + evaluator prompts)", token, got)
+		}
+	}
+}
+
+// Functional: the evaluator fan-out is independent of eval.count — scripts
+// generated with count=1 and count=4 are byte-identical.
+func TestRender_CountIgnored(t *testing.T) {
+	batches := []Batch{{Index: 1, Items: []state.PlanItem{sampleItem("a")}}}
+	c1 := renderCfg("sonnet", "general-purpose", "sonnet", "general-purpose", 1, 3, false)
+	c1.Implementing.Eval.Count = 1
+	c4 := renderCfg("sonnet", "general-purpose", "sonnet", "general-purpose", 1, 3, false)
+	c4.Implementing.Eval.Count = 4
+	if renderWorkflowScript(ctxDM(), batches, c1) != renderWorkflowScript(ctxDM(), batches, c4) {
+		t.Error("scripts differ when only eval.count differs; count must not affect rendering")
+	}
+}
+
+// Functional (executed): primary runs once and the evaluator runs exactly
+// max_rounds times when every round changes code; a force-accept WARN is logged.
+func TestRender_PrimaryOnce_ForceAcceptCeiling(t *testing.T) {
+	batches := []Batch{{Index: 1, Items: []state.PlanItem{sampleItem("a")}}}
+	script := renderWorkflowScript(ctxDM(), batches, renderCfg("sonnet", "general-purpose", "sonnet", "general-purpose", 1, 3, false))
+	run := runEmittedScript(t, script, []string{"CHANGED", "CHANGED", "CHANGED"}, `"ok"`, `"ok"`)
+
+	if n := countLabelPrefix(run.Labels, "primary:"); n != 1 {
+		t.Errorf("primary invocations = %d, want 1", n)
+	}
+	if n := countLabelPrefix(run.Labels, "eval:"); n != 3 {
+		t.Errorf("evaluator invocations = %d, want 3", n)
+	}
+	if !strings.Contains(run.joinedLog(), "force-accepted") {
+		t.Errorf("expected a force-accept WARN; log:\n%s", run.joinedLog())
+	}
+}
+
+// Functional (executed): convergence ends the loop at the first clean round at
+// or beyond min_rounds.
+func TestRender_ConvergenceEndsLoop(t *testing.T) {
+	batches := []Batch{{Index: 1, Items: []state.PlanItem{sampleItem("a")}}}
+	script := renderWorkflowScript(ctxDM(), batches, renderCfg("sonnet", "general-purpose", "sonnet", "general-purpose", 1, 5, false))
+	run := runEmittedScript(t, script, []string{"CHANGED", "CLEAN"}, `"ok"`, `"ok"`)
+
+	if n := countLabelPrefix(run.Labels, "eval:"); n != 2 {
+		t.Errorf("evaluator invocations = %d, want 2", n)
+	}
+	if !strings.Contains(run.joinedLog(), "converged at round 2") {
+		t.Errorf("expected 'converged at round 2'; log:\n%s", run.joinedLog())
+	}
+}
+
+// Edge case (executed): the min_rounds floor forces a second round even when
+// round one is clean.
+func TestRender_MinRoundsFloorEnforced(t *testing.T) {
+	batches := []Batch{{Index: 1, Items: []state.PlanItem{sampleItem("a")}}}
+	script := renderWorkflowScript(ctxDM(), batches, renderCfg("sonnet", "general-purpose", "sonnet", "general-purpose", 2, 5, false))
+	run := runEmittedScript(t, script, []string{"CLEAN", "CLEAN"}, `"ok"`, `"ok"`)
+
+	if n := countLabelPrefix(run.Labels, "eval:"); n != 2 {
+		t.Errorf("evaluator invocations = %d, want 2 (min_rounds floor)", n)
+	}
+}
+
+// Edge case (executed): min_rounds=0 lets the first clean round end the loop.
+func TestRender_MinRoundsZero(t *testing.T) {
+	batches := []Batch{{Index: 1, Items: []state.PlanItem{sampleItem("a")}}}
+	script := renderWorkflowScript(ctxDM(), batches, renderCfg("sonnet", "general-purpose", "sonnet", "general-purpose", 0, 3, false))
+	run := runEmittedScript(t, script, []string{"CLEAN"}, `"ok"`, `"ok"`)
+
+	if n := countLabelPrefix(run.Labels, "eval:"); n != 1 {
+		t.Errorf("evaluator invocations = %d, want 1 (no floor)", n)
+	}
+}
+
+// Edge case (executed): max_rounds=0 runs no evaluator round; the batch is
+// force-accepted after the primary.
+func TestRender_MaxRoundsZero(t *testing.T) {
+	batches := []Batch{{Index: 1, Items: []state.PlanItem{sampleItem("a")}}}
+	script := renderWorkflowScript(ctxDM(), batches, renderCfg("sonnet", "general-purpose", "sonnet", "general-purpose", 0, 0, false))
+	run := runEmittedScript(t, script, nil, `"ok"`, `"ok"`)
+
+	if n := countLabelPrefix(run.Labels, "primary:"); n != 1 {
+		t.Errorf("primary invocations = %d, want 1", n)
+	}
+	if n := countLabelPrefix(run.Labels, "eval:"); n != 0 {
+		t.Errorf("evaluator invocations = %d, want 0 (max_rounds=0)", n)
+	}
+	if !strings.Contains(run.joinedLog(), "force-accepted") {
+		t.Errorf("expected a force-accept log line; log:\n%s", run.joinedLog())
+	}
+}
+
+// Edge case (executed): a git failure (GIT_ERROR) is treated as changed and
+// surfaced at ERROR, preventing false convergence.
+func TestRender_GitErrorTreatedAsChanged(t *testing.T) {
+	batches := []Batch{{Index: 1, Items: []state.PlanItem{sampleItem("a")}}}
+	script := renderWorkflowScript(ctxDM(), batches, renderCfg("sonnet", "general-purpose", "sonnet", "general-purpose", 1, 2, false))
+	run := runEmittedScript(t, script, []string{"GIT_ERROR", "GIT_ERROR"}, `"ok"`, `"ok"`)
+
+	if n := countLabelPrefix(run.Labels, "eval:"); n != 2 {
+		t.Errorf("evaluator invocations = %d, want 2 (git error never converges, runs to ceiling)", n)
+	}
+	log := run.joinedLog()
+	if !strings.Contains(log, "could not run git") {
+		t.Errorf("expected an ERROR about git failure; log:\n%s", log)
+	}
+	if !strings.Contains(log, "force-accepted") {
+		t.Errorf("git-error rounds should force-accept at the ceiling; log:\n%s", log)
+	}
+}
+
+// Edge case (executed): an evaluator that returns null at/beyond min_rounds is
+// surfaced at ERROR, and since the detector observes no change the batch
+// converges optimistically.
+func TestRender_EvaluatorNullConvergesWithError(t *testing.T) {
+	batches := []Batch{{Index: 1, Items: []state.PlanItem{sampleItem("a")}}}
+	script := renderWorkflowScript(ctxDM(), batches, renderCfg("sonnet", "general-purpose", "sonnet", "general-purpose", 1, 3, false))
+	run := runEmittedScript(t, script, []string{"CLEAN"}, `"ok"`, `null`)
+
+	if n := countLabelPrefix(run.Labels, "eval:"); n != 1 {
+		t.Errorf("evaluator invocations = %d, want 1 (converges on clean detector)", n)
+	}
+	if !strings.Contains(run.joinedLog(), "evaluator agent returned null") {
+		t.Errorf("expected an ERROR about the null evaluator; log:\n%s", run.joinedLog())
+	}
+}
+
+// Edge case (executed): a null primary does not abort the batch; the evaluator
+// loop still runs and an ERROR is surfaced.
+func TestRender_PrimaryNullDoesNotAbort(t *testing.T) {
+	batches := []Batch{{Index: 1, Items: []state.PlanItem{sampleItem("a")}}}
+	script := renderWorkflowScript(ctxDM(), batches, renderCfg("sonnet", "general-purpose", "sonnet", "general-purpose", 1, 3, false))
+	run := runEmittedScript(t, script, []string{"CHANGED", "CLEAN"}, `null`, `"ok"`)
+
+	if n := countLabelPrefix(run.Labels, "eval:"); n < 1 {
+		t.Errorf("evaluator should still run after a null primary; got %d eval calls", n)
+	}
+	if !strings.Contains(run.joinedLog(), "primary agent returned null") {
+		t.Errorf("expected an ERROR about the null primary; log:\n%s", run.joinedLog())
+	}
+}
+
+// Functional (executed): the required gauntlet log lines are emitted — batch
+// started with ids, per-round outcome, converged, and the DEBUG bounds/models.
+func TestRender_RequiredLogLines(t *testing.T) {
+	batches := []Batch{{Index: 1, Items: []state.PlanItem{sampleItem("a"), sampleItem("b")}}}
+	script := renderWorkflowScript(ctxDM(), batches, renderCfg("sonnet", "general-purpose", "opus", "eval", 1, 3, false))
+	run := runEmittedScript(t, script, []string{"CHANGED", "CLEAN"}, `"ok"`, `"ok"`)
+	log := run.joinedLog()
+
+	wants := []string{
+		"INFO: batch 1 started: [a, b]",
+		"INFO: batch 1 round 1: changed",
+		"INFO: batch 1 round 2: clean",
+		"INFO: batch 1 converged at round 2",
+		"DEBUG: batch 1 agents",
+		"min_rounds=1 max_rounds=3",
+	}
+	for _, w := range wants {
+		if !strings.Contains(log, w) {
+			t.Errorf("missing log line %q; full log:\n%s", w, log)
+		}
 	}
 }

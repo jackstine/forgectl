@@ -73,6 +73,13 @@ Log of implementation updates across sessions. Add a new entry after each unit o
 - **Eval Rounds:** 1
 - **Notes:** New `cmd/generateworkflow.go`. `computeBatches` walks layers in declared order, `topoSortLayer` stably topo-sorts each layer's items by in-layer `depends_on` (declared order tiebreak, break-and-restart scan), chunks by batch size via `min`, and numbers batches 1-based across layer boundaries. `deriveOutputName`/`sanitizeSegment` reduce `<domain>-<module>` to the slash-command charset (lowercase, `[a-z0-9-]`, collapsed/trimmed hyphens); `resolveWorkflowPath` never overwrites — on collision it prepends a numeric prefix to a fresh name and logs a WARN naming both. These functions are consumed by L3 (`cmd.generate-workflow`), so they read as unused until then. L1 complete.
 
+### 2026-06-30 — L2 Script Rendering: Batch 3 (workflow.script-render) — completes L2
+- **Errors:** None
+- **All Tests Pass:** Yes
+- **Batch:** 3/4
+- **Eval Rounds:** 1
+- **Notes:** `renderWorkflowScript` emits the self-contained gauntlet workflow: a pure-literal `meta` (name/description/one-phase-per-batch+Evaluate), a `classifyDetector` helper, and per batch — a DEBUG(models+bounds) + INFO(started, ids) header, the primary agent once, a post-primary git baseline snapshot (so round 1 measures only the evaluator's delta), then the bounded evaluator loop (one evaluator + one change-detector per round; `round >= min_rounds && !changed` converges; force-accept WARN at ceiling; `max_rounds=0` skips the loop). All prompts are JSON-encoded single-line literals (so baked test text that contains `Math.random()`/`import`/etc. can't be mistaken for code); commit text and the committed-INFO are gated on `enable_commits`; error paths log for primary-null, evaluator-null, and git-failure(→changed). **Supporting change (config-scaffolding gap):** added `implementing.implement` `AgentConfig` to `state/types.go`, `state/config.go` (toml mirror + `mergeAgentConfig`), and both `default-config.toml` copies — the spec requires the primary's model/type to be baked distinctly from the evaluator's, and the struct lacked the field. Tests node-execute the emitted script against stubbed `agent()`/`log()`/`phase()` to verify loop control-flow, plus string-stripped static checks for the forbidden-API and model/type criteria. L2 complete.
+
 ### 2026-06-07 — L3 Commands & Phase-Shift Routing: Batch 8 (advance.phaseshift, cmd.init, cmd.evalwiring, cmd.handoff) — completes L3
 - **Errors:** None
 - **All Tests Pass:** Yes

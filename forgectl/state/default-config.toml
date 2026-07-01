@@ -168,6 +168,17 @@ batch = 2
 # "scoped" stages files registered in state plus any changes within the domain path.
 commit_strategy = "scoped"
 
+[implementing.implement]
+# The primary implementation agent. Consumed by `generate-workflow` as the
+# model/type baked into the primary agent() call — distinct from
+# [implementing.eval] below, which parameterizes the evaluator agent.
+# Sub-agent role for the primary implementation spawn point.
+type = "general-purpose"
+# Model name for the primary implementation agent.
+model = "sonnet"
+# Number of primary agents to spawn (the generated gauntlet runs one).
+count = 1
+
 [implementing.eval]
 # Minimum eval rounds before PASS can accept an implementation batch.
 min_rounds = 1

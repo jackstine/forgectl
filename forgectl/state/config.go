@@ -94,9 +94,10 @@ type tomlPlanningConfig struct {
 
 // tomlImplementingConfig mirrors ImplementingConfig for TOML decoding.
 type tomlImplementingConfig struct {
-	Batch          int            `toml:"batch"`
-	CommitStrategy string         `toml:"commit_strategy"`
-	Eval           tomlEvalConfig `toml:"eval"`
+	Batch          int             `toml:"batch"`
+	CommitStrategy string          `toml:"commit_strategy"`
+	Implement      tomlAgentConfig `toml:"implement"`
+	Eval           tomlEvalConfig  `toml:"eval"`
 }
 
 // tomlUIAppConfig mirrors UIAppConfig for TOML decoding.
@@ -318,6 +319,7 @@ func mergeTomlConfig(cfg *ForgeConfig, raw *tomlForgeConfig) {
 	if raw.Implementing.CommitStrategy != "" {
 		cfg.Implementing.CommitStrategy = raw.Implementing.CommitStrategy
 	}
+	mergeAgentConfig(&cfg.Implementing.Implement, &raw.Implementing.Implement)
 	mergeEvalConfig(&cfg.Implementing.Eval, &raw.Implementing.Eval)
 
 	// UI Implementing
