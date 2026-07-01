@@ -708,3 +708,301 @@ func TestRender_RequiredLogLines(t *testing.T) {
 		}
 	}
 }
+
+// --- L3: generate-workflow command ---
+
+// writeValidPlan writes a plan.json that passes ValidatePlanJSON: context d/m,
+// one layer of two items, each with a present depends_on and a valid test.
+func writeValidPlan(t *testing.T, dir string) string {
+	t.Helper()
+	plan := state.PlanJSON{
+		Context: state.PlanContext{Domain: "d", Module: "m"},
+		Layers:  []state.PlanLayerDef{{ID: "L0", Name: "Core", Items: []string{"a", "b"}}},
+		Items: []state.PlanItem{
+			{ID: "a", Name: "Item A", Description: "Do A", DependsOn: []string{}, Tests: []state.PlanTest{{Category: "functional", Description: "a works"}}},
+			{ID: "b", Name: "Item B", Description: "Do B", DependsOn: []string{"a"}, Tests: []state.PlanTest{{Category: "functional", Description: "b works"}}},
+		},
+	}
+	data, err := json.MarshalIndent(plan, "", "  ")
+	if err != nil {
+		t.Fatal(err)
+	}
+	p := filepath.Join(dir, "plan.json")
+	if err := os.WriteFile(p, data, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	return p
+}
+
+func runGen(t *testing.T, planPath string, verbose bool) (string, error) {
+	t.Helper()
+	var buf bytes.Buffer
+	generateWorkflowCmd.SetOut(&buf)
+	generateWorkflowVerbose = verbose
+	defer func() { generateWorkflowVerbose = false }()
+	err := runGenerateWorkflow(generateWorkflowCmd, []string{planPath})
+	return buf.String(), err
+}
+
+func workflowFiles(t *testing.T, projectRoot string) []string {
+	t.Helper()
+	entries, err := os.ReadDir(filepath.Join(projectRoot, ".claude", "workflows"))
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		t.Fatal(err)
+	}
+	var names []string
+	for _, e := range entries {
+		names = append(names, e.Name())
+	}
+	return names
+}
+
+// setupBareDir creates a temp dir with no .forgectl and chdirs into it.
+func setupBareDir(t *testing.T) string {
+	t.Helper()
+	dir := t.TempDir()
+	orig, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chdir(dir); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.Chdir(orig) })
+	return dir
+}
+
+// Functional: a valid plan + resolvable config writes exactly one new file and
+// exits zero, printing the output path and slash-command name plus the INFO
+// lines for started/validated/batch-count.
+func TestGenerateWorkflow_Success(t *testing.T) {
+	dir := setupProjectDir(t)
+	plan := writeValidPlan(t, dir)
+
+	out, err := runGen(t, plan, false)
+	if err != nil {
+		t.Fatalf("unexpected error: %v\noutput:\n%s", err, out)
+	}
+	files := workflowFiles(t, dir)
+	if len(files) != 1 {
+		t.Fatalf("expected exactly one workflow file, got %v", files)
+	}
+	if !strings.HasSuffix(files[0], ".js") {
+		t.Errorf("workflow file %q should end in .js", files[0])
+	}
+	for _, want := range []string{
+		"INFO: generating workflow from plan",
+		"INFO: plan validated: plan.json",
+		"INFO: computed 1 batch(es) across 2 item(s)",
+		"slash command: /d-m-impl",
+		filepath.Join(".claude", "workflows"),
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("output missing %q; full output:\n%s", want, out)
+		}
+	}
+}
+
+// Rejection: a nonexistent plan path exits non-zero naming the path; no file is
+// written.
+func TestGenerateWorkflow_MissingPlan(t *testing.T) {
+	dir := setupProjectDir(t)
+	out, err := runGen(t, filepath.Join(dir, "nope.json"), false)
+	if err == nil {
+		t.Fatal("expected an error for a missing plan")
+	}
+	if !strings.Contains(out, "nope.json") {
+		t.Errorf("error output should name the missing path; got:\n%s", out)
+	}
+	if files := workflowFiles(t, dir); len(files) != 0 {
+		t.Errorf("no file should be written on failure, got %v", files)
+	}
+}
+
+// Rejection: a malformed JSON plan exits non-zero with a located parse error,
+// distinct from a semantic validation failure; no file is written.
+func TestGenerateWorkflow_MalformedJSON(t *testing.T) {
+	dir := setupProjectDir(t)
+	p := filepath.Join(dir, "plan.json")
+	os.WriteFile(p, []byte("{ \"context\": { \"domain\": \"d\" "), 0o644)
+
+	out, err := runGen(t, p, false)
+	if err == nil {
+		t.Fatal("expected an error for malformed JSON")
+	}
+	if !strings.Contains(out, "invalid JSON") || !strings.Contains(out, "line") {
+		t.Errorf("expected a located JSON parse error; got:\n%s", out)
+	}
+	if strings.Contains(out, "validation failed") {
+		t.Errorf("malformed JSON must be distinct from a validation failure; got:\n%s", out)
+	}
+	if files := workflowFiles(t, dir); len(files) != 0 {
+		t.Errorf("no file should be written on failure, got %v", files)
+	}
+}
+
+// Rejection: a structurally valid plan that fails ValidatePlanJSON exits
+// non-zero with the validator's diagnostics; no file is written.
+func TestGenerateWorkflow_InvalidPlan(t *testing.T) {
+	dir := setupProjectDir(t)
+	// Valid JSON, but context.domain is empty — a validation failure.
+	plan := state.PlanJSON{
+		Context: state.PlanContext{Domain: "", Module: "m"},
+		Layers:  []state.PlanLayerDef{{ID: "L0", Name: "Core", Items: []string{"a"}}},
+		Items:   []state.PlanItem{{ID: "a", Name: "A", Description: "Do A", DependsOn: []string{}, Tests: []state.PlanTest{{Category: "functional", Description: "x"}}}},
+	}
+	data, _ := json.MarshalIndent(plan, "", "  ")
+	p := filepath.Join(dir, "plan.json")
+	os.WriteFile(p, data, 0o644)
+
+	out, err := runGen(t, p, false)
+	if err == nil {
+		t.Fatal("expected a validation error")
+	}
+	if !strings.Contains(out, "validation failed") {
+		t.Errorf("expected validator diagnostics; got:\n%s", out)
+	}
+	if files := workflowFiles(t, dir); len(files) != 0 {
+		t.Errorf("no file should be written on failure, got %v", files)
+	}
+}
+
+// Rejection: with no resolvable .forgectl/config the command exits non-zero
+// stating config is required; no file is written.
+func TestGenerateWorkflow_NoConfig(t *testing.T) {
+	dir := setupBareDir(t)
+	plan := writeValidPlan(t, dir)
+
+	out, err := runGen(t, plan, false)
+	if err == nil {
+		t.Fatal("expected an error when no config is resolvable")
+	}
+	if !strings.Contains(strings.ToLower(out), "config") {
+		t.Errorf("error should state config is required; got:\n%s", out)
+	}
+	if files := workflowFiles(t, dir); len(files) != 0 {
+		t.Errorf("no file should be written on failure, got %v", files)
+	}
+}
+
+// Rejection: a resolved config missing a required implementing field is rejected
+// with an error naming the missing block.
+func TestGenerateWorkflow_IncompleteConfig(t *testing.T) {
+	var cfg state.ForgeConfig // zero value: all implementing fields blank
+	err := validateGenerationConfig(cfg)
+	if err == nil {
+		t.Fatal("expected an error for a config missing implementing fields")
+	}
+	for _, want := range []string{"implementing.implement.model", "implementing.eval.model"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("error should name the missing block %q; got: %v", want, err)
+		}
+	}
+	// A complete config passes.
+	if err := validateGenerationConfig(state.DefaultForgeConfig()); err != nil {
+		t.Errorf("default config should be complete, got: %v", err)
+	}
+}
+
+// Functional: two runs differing only in implementing.eval.count produce
+// byte-identical scripts — count never changes evaluator fan-out.
+func TestGenerateWorkflow_CountIgnoredEndToEnd(t *testing.T) {
+	read := func(cfgTOML string) []byte {
+		d := t.TempDir()
+		os.MkdirAll(filepath.Join(d, ".forgectl"), 0o755)
+		os.WriteFile(filepath.Join(d, ".forgectl", "config"), []byte(cfgTOML), 0o644)
+		orig, _ := os.Getwd()
+		os.Chdir(d)
+		defer os.Chdir(orig)
+		plan := writeValidPlan(t, d)
+		if _, err := runGen(t, plan, false); err != nil {
+			t.Fatalf("generation failed: %v", err)
+		}
+		files := workflowFiles(t, d)
+		if len(files) != 1 {
+			t.Fatalf("expected one workflow, got %v", files)
+		}
+		b, err := os.ReadFile(filepath.Join(d, ".claude", "workflows", files[0]))
+		if err != nil {
+			t.Fatal(err)
+		}
+		return b
+	}
+	one := read("[implementing.eval]\ncount = 1\n")
+	four := read("[implementing.eval]\ncount = 4\n")
+	if !bytes.Equal(one, four) {
+		t.Error("scripts differ when only eval.count differs")
+	}
+}
+
+// Functional: a successful generation leaves plan.json and .forgectl/config
+// byte-for-byte unchanged.
+func TestGenerateWorkflow_InputsUnchanged(t *testing.T) {
+	dir := setupProjectDir(t)
+	plan := writeValidPlan(t, dir)
+
+	planBefore, _ := os.ReadFile(plan)
+	cfgPath := filepath.Join(dir, ".forgectl", "config")
+	cfgBefore, _ := os.ReadFile(cfgPath)
+
+	if _, err := runGen(t, plan, false); err != nil {
+		t.Fatalf("generation failed: %v", err)
+	}
+
+	planAfter, _ := os.ReadFile(plan)
+	cfgAfter, _ := os.ReadFile(cfgPath)
+	if !bytes.Equal(planBefore, planAfter) {
+		t.Error("plan.json was modified by generation")
+	}
+	if !bytes.Equal(cfgBefore, cfgAfter) {
+		t.Error(".forgectl/config was modified by generation")
+	}
+}
+
+// Edge case: a mid-write filesystem failure leaves no file under
+// .claude/workflows/ and exits non-zero.
+func TestGenerateWorkflow_WriteFailureNoPartialFile(t *testing.T) {
+	dir := setupProjectDir(t)
+	plan := writeValidPlan(t, dir)
+	wfDir := filepath.Join(dir, ".claude", "workflows")
+	if err := os.MkdirAll(wfDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	// Make the target directory unwritable so the atomic temp-file create fails.
+	if err := os.Chmod(wfDir, 0o555); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.Chmod(wfDir, 0o755) })
+
+	out, err := runGen(t, plan, false)
+	if err == nil {
+		t.Fatal("expected a write failure")
+	}
+	if !strings.Contains(out, "ERROR") {
+		t.Errorf("expected an ERROR diagnostic; got:\n%s", out)
+	}
+	if files := workflowFiles(t, dir); len(files) != 0 {
+		t.Errorf("no partial file should remain, got %v", files)
+	}
+}
+
+// Functional: at verbose (DEBUG) verbosity the command logs the resolved config
+// and the per-batch item ids in run order.
+func TestGenerateWorkflow_DebugVerbosity(t *testing.T) {
+	dir := setupProjectDir(t)
+	plan := writeValidPlan(t, dir)
+
+	out, err := runGen(t, plan, true)
+	if err != nil {
+		t.Fatalf("generation failed: %v", err)
+	}
+	if !strings.Contains(out, "DEBUG: baked config") {
+		t.Errorf("expected a DEBUG config line; got:\n%s", out)
+	}
+	if !strings.Contains(out, "DEBUG: batch 1 items: [a, b]") {
+		t.Errorf("expected a DEBUG per-batch item-ids line; got:\n%s", out)
+	}
+}

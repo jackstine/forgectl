@@ -117,6 +117,11 @@ count = 1
 batch = 2
 commit_strategy = "scoped"
 
+[implementing.implement]
+type = "general-purpose"
+model = "sonnet"
+count = 1
+
 [implementing.eval]
 min_rounds = 1
 max_rounds = 3
@@ -575,6 +580,27 @@ Controls which files are staged when the scaffold auto-commits during the planni
 - **Constraint:** >= 1
 
 Maximum number of unblocked plan items delivered per implementation batch. Items are selected in dependency order from the current layer.
+
+#### `implementing.implement.type`
+
+- **Type:** string
+- **Default:** `"general-purpose"`
+
+Sub-agent type for the **primary implementation** agent — the once-per-batch pass that implements the batch's items. Read by `generate-workflow` and baked into the emitted workflow's primary `agent()` call. Distinct from `implementing.eval.type` (the evaluator), so the two roles can use different agent types.
+
+#### `implementing.implement.model`
+
+- **Type:** string
+- **Default:** `"sonnet"`
+
+Model for the primary implementation agent. Baked into the emitted workflow's primary `agent()` call by `generate-workflow`.
+
+#### `implementing.implement.count`
+
+- **Type:** integer
+- **Default:** 1
+
+Number of primary implementation agents. The generated gauntlet runs a single primary per batch; this field mirrors the shared agent-config shape and is not used to fan out the primary.
 
 #### `implementing.eval.min_rounds`
 

@@ -2,52 +2,54 @@
 
 **Round:** 1
 **Batch:** 4
-**Layer:** L1 Output & Eval-Context Rendering
+**Layer:** L3 Command Wiring
 
 VERDICT: PASS
 
 ## Items Evaluated
 
-### [output.advance] Render ui_implementing advance and status output
+### [cmd.generate-workflow] Register generate-workflow CLI command
 
-**Files reviewed:** state/output.go (printUIImplementingOutput, writeItemBody, writeUIBatchItems, writeUIReviewLine, qa/e2e path helpers, countQAScenarios, CurrentEvalMode, PrintAdvanceOutput, phaseConfig, printProgressLine), state/advance.go (loadPlan/savePlan/currentPlanFile/currentPlanDir), state/output_test.go
-
-#### Test Results
-
-- [PASS] QA_TEST advance output shows Phase ui_implementing, Loop qa, the App launch/url, and the Steps step-list path; UI_REFINE shows the QA report path and refine action.
-  - printUIImplementingOutput StateQATest emits `Phase:    ui_implementing`, `Loop:     qa`, `App:      launch="npm run dev" url=http://localhost:5173`, and `Steps:    <qaStepListPath>`. StateUIRefine emits the `QA:` report path (from the recorded QAEval or the default round path), the "Study the QA report ... iterate on UI placement and controls" action, and the `Note: FAIL recorded for QA round N` line. TestOutputUIQATestAndRefine asserts all of these.
-- [PASS] When CurrentBatch.HandedOffArtifacts is non-empty, the rendered output includes a Review: line listing each artifact before the Action line.
-  - writeUIReviewLine renders `Review:` with each artifact, invoked in EVALUATE/QA_TEST/E2E_VERIFY before the Action block. TestOutputUIReviewLine asserts Review index < Action index and that both artifacts appear.
-- [PASS] COMMIT output marks items passed when no loop force-accepted and failed (naming the force-accepted loop and rounds) when one did; DONE summary reports code/qa/e2e round totals.
-  - StateCommit reads terminal `passes` from plan.json; when a force-accept flag is set it renders `failed (<loop> force-accept, M/M rounds)` with loop precedence e2e>qa>code. StateDone sums EvalRounds/QARounds/E2ERounds across LayerHistory batches into `Rounds: code C, qa Q, e2e E (across B batches)`. TestOutputUICommitAndDoneSummary covers clean-pass, e2e force-accept, and the DONE totals line.
-
-#### Notes
-
-- Phase line reads `ui_implementing` in every state; Loop/Round lines present in EVALUATE (code), QA_TEST/UI_REFINE (qa), E2E_VERIFY/E2E_REMEDIATE (e2e). E2E_AUTHOR correctly omits Round (it is a bridging state, not a loop) and renders the zero-scenario short action.
-- user_guided STOP line present in both initial and non-initial ORIENT.
-- Round counters are displayed directly (EvalRound/QARound/E2ERound) consistent with the increment-on-entry convention; advance output and eval output agree (both use the pre-incremented counter).
-- writeItemBody is shared by the implementing (line 910) and ui_implementing (line 1242) IMPLEMENT blocks; the implementing-phase block is otherwise byte-identical except the Phase line, so the refactor introduces no regression. All existing state tests pass.
-- Dispatch wired in CurrentEvalMode (loop-by-state), PrintAdvanceOutput, phaseConfig, and printProgressLine (shared with implementing).
-
-### [output.eval] Render QA and e2e eval context
-
-**Files reviewed:** state/output.go (PrintUIQAEvalOutput, PrintUIE2EEvalOutput, printUICodeEval, PrintEvalOutput routing, writeEvalItemList, writePreviousEvaluations), evaluators/ui-qa-eval.md, evaluators/ui-e2e-eval.md, state/output_test.go
+**Files reviewed:**
+- `forgectl/cmd/generateworkflow.go` (command wiring: `generateWorkflowCmd`, `init`, `runGenerateWorkflow`, `validateGenerationConfig`, `atomicWriteFile`, `computeBatches`, `renderWorkflowScript`)
+- `forgectl/cmd/generateworkflow_test.go` (`GenerateWorkflow`/`Render`/`ComputeBatches`/`ResolveWorkflowPath` test suites)
+- `forgectl/cmd/validate.go` (`jsonErrorWithLocation`, reused for the located parse error)
+- `forgectl/cmd/root.go` (`resolveSession`)
+- `forgectl/specs/workflow-generation.md` (contract)
 
 #### Test Results
 
-- [PASS] PrintUIQAEvalOutput embeds the QA prompt and shows the APPLICATION url, the STEP LIST OUTPUT path, and a HANDOFF section in every eval_mode.
-  - Embeds evaluators.UIQAEval (H1 "# UI QA Evaluation Prompt"), renders `--- APPLICATION ---` with Launch/URL/Ready timeout/Driver=Playwright MCP, `--- STEP LIST OUTPUT ---` in all modes, and `--- HANDOFF ---` in all modes (report+direct list report+step-list/step-list, conversational step-list only). REPORT OUTPUT present in report (names file) and direct (correct-directly), omitted in conversational. TestEvalOutputUIQAAllModes covers all three modes.
-- [PASS] PrintUIE2EEvalOutput embeds the e2e prompt and shows the E2E SUITE step-list path, test command, and test dir; the REPORT OUTPUT and HANDOFF sections appear only in report mode.
-  - Embeds evaluators.UIE2EEval (H1 "# UI E2E Verification Prompt"), renders `--- E2E SUITE ---` with Step list/Test command/Test dir/Runner=Playwright test runner. REPORT OUTPUT and HANDOFF gated to report mode only. TestEvalOutputUIE2EReportVsOther asserts presence in report and absence in direct/conversational using concrete rendered content (the embedded prompt itself mentions section headers, so the test matches body text rather than header markers — correct call).
-- [edge_case] Round 2+ QA/e2e eval output includes a PREVIOUS EVALUATIONS section listing prior verdicts and report paths.
-  - writePreviousEvaluations emits `--- PREVIOUS EVALUATIONS ---` with `Round N: VERDICT — <report>` lines when QAEvals/E2EEvals are non-empty. TestEvalOutputUIPreviousEvaluations covers both QA and e2e.
+- [PASS] Valid plan + resolvable config writes exactly one new file under `.claude/workflows/`, exits zero, prints output path and slash-command name
+  - `TestGenerateWorkflow_Success` asserts exactly one `.js` file is written and the output contains `slash command: /d-m-impl` plus the `.claude/workflows` path segment. Confirmed independently via an end-to-end run against the real `forgectl/.forge_workspace/implementation_plan/plan.json` (see Notes) — one file written, `node --check` confirms valid JS, exit 0.
+- [PASS] On success prints INFO lines for generation-started (plan path), plan-validated, and batch-count+item-count
+  - `TestGenerateWorkflow_Success` checks for `"INFO: generating workflow from plan"`, `"INFO: plan validated: plan.json"`, and `"INFO: computed 1 batch(es) across 2 item(s)"` in `runGenerateWorkflow`'s output, matching the code at `generateworkflow.go:97,128,149`.
+- [PASS] Nonexistent plan path exits non-zero naming the path; no file written
+  - `TestGenerateWorkflow_MissingPlan` — the `os.IsNotExist` branch (`generateworkflow.go:102-105`) names the path and returns before any write; `workflowFiles` confirms zero files.
+- [PASS] Malformed JSON exits non-zero with a located parse error, distinct from a semantic validation failure; no file written
+  - `TestGenerateWorkflow_MalformedJSON` — the probe-unmarshal at `generateworkflow.go:112-117` runs *before* `state.ValidatePlanJSON` is ever called, and `jsonErrorWithLocation` (reused from `validate.go`) reports `line`/`column`. The test explicitly asserts the output does **not** contain `"validation failed"`, proving the two paths are distinct.
+- [PASS] A plan failing `state.ValidatePlanJSON` exits non-zero with the validator's diagnostics; no file written
+  - `TestGenerateWorkflow_InvalidPlan` (empty `context.domain`) — `generateworkflow.go:121-127` prints the numbered validator errors, same shape as `forgectl validate`; no file written.
+- [PASS] No resolvable `.forgectl/config` states config is required; no file written
+  - `TestGenerateWorkflow_NoConfig` uses `setupBareDir` (no `.forgectl`); `resolveSession()` fails and `generateworkflow.go:137-141` wraps the error with "a resolvable .forgectl/config is required"; no file written.
+- [PASS] A config missing a required implementing block/field names the missing block; no file written
+  - `TestGenerateWorkflow_IncompleteConfig` calls `validateGenerationConfig` directly against a zero-value `state.ForgeConfig` and asserts the error names `implementing.implement.model` and `implementing.eval.model`; also asserts `state.DefaultForgeConfig()` passes. This is a deliberate unit-level test of the guard rather than an end-to-end CLI test, because `state.LoadConfig` always backfills defaults for these fields, so an "incomplete" config cannot actually be produced through the normal config-loading path (see Notes — judged acceptable).
+- [PASS] Two runs differing only in `implementing.eval.count` (1 vs 4) produce evaluator-fan-out-equivalent (single evaluator per round) scripts
+  - Unit level: `TestRender_CountIgnored` asserts byte-identical `renderWorkflowScript` output for `count=1` vs `count=4`. End-to-end: `TestGenerateWorkflow_CountIgnoredEndToEnd` writes two full configs differing only in `[implementing.eval] count`, runs the command against each, and asserts the two on-disk `.js` files are byte-equal.
+- [PASS] After success, `plan.json` and `.forgectl/config` are byte-for-byte unchanged
+  - `TestGenerateWorkflow_InputsUnchanged` reads both files before and after a successful run and asserts `bytes.Equal`. Confirmed by code inspection: the plan is only ever read (`os.ReadFile`), never written; `resolveSession`/`state.LoadConfig` is read-only.
+- [PASS] A mid-write filesystem failure leaves no partial file under `.claude/workflows/`; exits non-zero
+  - `atomicWriteFile` (`generateworkflow.go:73-91`) writes to a temp file in the destination directory and only `os.Rename`s it into place on full success; any failure before rename removes the temp file via `defer os.Remove(tmpName)` and never creates the destination path. `TestGenerateWorkflow_WriteFailureNoPartialFile` forces the failure by chmod'ing `.claude/workflows/` to `0o555` so `os.CreateTemp` fails; `workflowFiles` confirms zero files remain and the command exits non-zero. This exercises the earliest failure point in the atomic-write sequence rather than a failure between `Write` and `Close`/`Rename`, but because the write-then-rename design makes every pre-rename failure point equivalent (no partial file is ever visible under the target directory until rename succeeds), this is a faithful test of the invariant.
+- [PASS] At DEBUG verbosity, logs the resolved config baked into the script and per-batch item ids in run order
+  - `TestGenerateWorkflow_DebugVerbosity` asserts `"DEBUG: baked config"` and `"DEBUG: batch 1 items: [a, b]"` (run order preserved) appear only when `-v`/`generateWorkflowVerbose` is set (`generateworkflow.go:151-165`), matching the spec's Observability DEBUG row (`workflow-generation.md:178`).
 
 #### Notes
 
-- PrintEvalOutput routes ui_implementing EVALUATE→printUICodeEval (same impl-eval.md prompt + item list as implementing), QA_TEST→PrintUIQAEvalOutput, E2E_VERIFY→PrintUIE2EEvalOutput, and any other ui state returns an error naming the current state and phase (verified by TestEvalOutputUIRejectsNonEvaluatorState, which is the additional rejection-coverage test). This satisfies the §Rejection rule "eval outside an evaluator state".
-- Config sourced from s.Config.UIImplementing.App.{LaunchCommand,URL,ReadyTimeoutSeconds} and .E2E.{TestCommand,TestDir}; workspace paths resolved under the plan dir via currentPlanDir.
-- Round headers use the pre-incremented counter directly (=== UI QA EVALUATION ROUND N/max ===), matching the advance-side display.
+- **Command registration**: `generateWorkflowCmd` is a genuine cobra subcommand (`Use: "generate-workflow <plan.json>"`, `Args: cobra.ExactArgs(1)`), registered via `rootCmd.AddCommand` in `init()`, with a `-v/--verbose` flag. This satisfies the item's literal description ("Register generate-workflow CLI command").
+- **End-to-end verification performed**: built the binary (`go build -o /tmp/.../fw .`) and ran `fw generate-workflow -v plan.json` from `forgectl/.forge_workspace/implementation_plan/` (cwd resolves the project's real `.forgectl/config` one level up at the repo root via `state.FindProjectRoot`). Output: 4 batches / 5 items computed correctly from the real plan's layers and `depends_on`, DEBUG lines listed baked config and per-batch item ids, and a syntactically valid (`node --check` passed) `.claude/workflows/forgectl-forgectl-impl.js` was written with a pure-literal `meta` and one `agent()` per role per batch. The generated file was deleted immediately after inspection and the created `.claude/workflows/` (and now-empty `.claude/`) directories were removed; `git status` confirms no residual artifact from this eval run. Pre-existing `.claude/worktrees/` was untouched.
+- **`validateGenerationConfig` coverage** (explicitly flagged in the task): the guard is a defensive check that cannot be reached end-to-end because `state.LoadConfig`'s defaulting always fills every field it checks (confirmed: `TestGenerateWorkflow_Success`/`_DebugVerbosity`/etc. all use `setupProjectDir`'s empty config file, which defaults cleanly). Testing it directly against a zero-value struct, plus asserting `DefaultForgeConfig()` passes, is the only way to exercise the rejection branch and is judged an honest, sufficient way to cover the acceptance criterion — it is not dead code, since a config file that explicitly sets `min_rounds > max_rounds` or `batch = 0` (not just blank strings) *is* reachable through normal loading and is covered by the same function/test.
+- Ran `go build ./...` (clean), `go vet ./...` (clean), `gofmt -l` on both files (clean, no diff), `go test ./...` (all packages pass, no regressions), and `go test ./cmd/ -run GenerateWorkflow -v` (all 10 test functions pass, covering the 11 acceptance criteria — two criteria share `TestGenerateWorkflow_Success`).
+- Code quality: the file is well-organized (batch computation, name sanitization/collision, prompt building, script rendering, command wiring are each cleanly separated with doc comments explaining *why*, not just *what*). The `stripJSStringLiterals`-based tests in the same file give good confidence the emitted script is free of forbidden runtime APIs outside of baked prompt text.
 
 ## Summary
 
-The L1 output and eval-context rendering layer is complete and correct. `go build ./...` and `go test ./...` both pass; all seven named acceptance tests pass (TestOutputUIQATestAndRefine, TestOutputUIReviewLine, TestOutputUICommitAndDoneSummary, TestEvalOutputUIQAAllModes, TestEvalOutputUIE2EReportVsOther, TestEvalOutputUIPreviousEvaluations, TestEvalOutputUIRejectsNonEvaluatorState). All advance-output states render the spec'd lines (Phase ui_implementing, Loop/Round, App/Steps/Tests/Run, Review block, COMMIT force-accept naming, DONE per-loop totals, user_guided STOP). QA/e2e eval output honors the per-eval_mode rules (QA STEP LIST OUTPUT + HANDOFF in all modes, e2e REPORT OUTPUT/HANDOFF in report mode only). The shared writeItemBody/currentPlanFile refactors introduce no regression to the implementing phase. Round counters are displayed directly per the increment-on-entry convention and advance/eval output agree.
+All 11 acceptance criteria for `cmd.generate-workflow` are met by the implementation and are backed by passing, meaningful tests (unit-level for batching/rendering/name-resolution, and full end-to-end CLI tests for the command itself). The full test suite passes with no regressions, `go vet`/`gofmt` are clean, and a manual end-to-end run against the repository's real plan produced a valid, self-contained workflow script consistent with the spec. Two criteria (incomplete-config rejection, mid-write failure) are necessarily tested at the narrowest reachable point given the surrounding design (config defaulting, atomic write-then-rename) — this is the correct and honest way to cover them, not a gap.

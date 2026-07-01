@@ -12,7 +12,184 @@ import (
 
 	"forgectl/evaluators"
 	"forgectl/state"
+
+	"github.com/spf13/cobra"
 )
+
+var generateWorkflowVerbose bool
+
+var generateWorkflowCmd = &cobra.Command{
+	Use:   "generate-workflow <plan.json>",
+	Short: "Compile a plan.json into a self-contained Claude Code workflow script",
+	Long: "Compile a validated implementation plan and the active .forgectl/config " +
+		"into a single self-contained Claude Code workflow under .claude/workflows/. " +
+		"The emitted script bakes the plan's items as ordered batches and runs the " +
+		"adversarial evaluation gauntlet (one primary pass per batch, then a bounded " +
+		"mutating-evaluator loop). The plan and config are read once and never modified.",
+	Args: cobra.ExactArgs(1),
+	RunE: runGenerateWorkflow,
+}
+
+func init() {
+	generateWorkflowCmd.Flags().BoolVarP(&generateWorkflowVerbose, "verbose", "v", false,
+		"Print DEBUG diagnostics: the resolved config baked into the script and the per-batch item ids")
+	rootCmd.AddCommand(generateWorkflowCmd)
+}
+
+// validateGenerationConfig checks the resolved config carries the implementing
+// fields the emitted script bakes. Defaults normally populate these, so this is
+// a guard against a config that explicitly blanks a required field or sets an
+// impossible round bound; it names the offending block so the operator can fix it.
+func validateGenerationConfig(cfg state.ForgeConfig) error {
+	var problems []string
+	if strings.TrimSpace(cfg.Implementing.Implement.Model) == "" {
+		problems = append(problems, "implementing.implement.model")
+	}
+	if strings.TrimSpace(cfg.Implementing.Implement.Type) == "" {
+		problems = append(problems, "implementing.implement.type")
+	}
+	if strings.TrimSpace(cfg.Implementing.Eval.Model) == "" {
+		problems = append(problems, "implementing.eval.model")
+	}
+	if strings.TrimSpace(cfg.Implementing.Eval.Type) == "" {
+		problems = append(problems, "implementing.eval.type")
+	}
+	if cfg.Implementing.Batch < 1 {
+		problems = append(problems, "implementing.batch (must be >= 1)")
+	}
+	if cfg.Implementing.Eval.MinRounds > cfg.Implementing.Eval.MaxRounds {
+		problems = append(problems, "implementing.eval.min_rounds (cannot exceed max_rounds)")
+	}
+	if len(problems) > 0 {
+		return fmt.Errorf("incomplete implementing config, missing/invalid: %s", strings.Join(problems, ", "))
+	}
+	return nil
+}
+
+// atomicWriteFile writes data to a temp file in the destination directory and
+// renames it into place, so a reader never observes a partially written file.
+// On any failure before the rename the temp file is removed and path is never
+// created.
+func atomicWriteFile(path string, data []byte) error {
+	dir := filepath.Dir(path)
+	tmp, err := os.CreateTemp(dir, ".generate-workflow-*.tmp")
+	if err != nil {
+		return err
+	}
+	tmpName := tmp.Name()
+	// Remove the temp file if we return before a successful rename (rename
+	// consumes it, making this a no-op on success).
+	defer os.Remove(tmpName)
+	if _, err := tmp.Write(data); err != nil {
+		tmp.Close()
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		return err
+	}
+	return os.Rename(tmpName, path)
+}
+
+func runGenerateWorkflow(cmd *cobra.Command, args []string) error {
+	out := cmd.OutOrStdout()
+	planPath := args[0]
+
+	fmt.Fprintf(out, "INFO: generating workflow from plan %s\n", planPath)
+
+	// Read the plan file.
+	data, err := os.ReadFile(planPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			fmt.Fprintf(out, "ERROR: plan file not found: %s\n", planPath)
+			return fmt.Errorf("plan file not found: %s", planPath)
+		}
+		fmt.Fprintf(out, "ERROR: reading plan %s: %v\n", planPath, err)
+		return fmt.Errorf("reading plan %s: %w", planPath, err)
+	}
+
+	// Parse as JSON to catch a malformed file with a located error — distinct
+	// from a structurally valid but semantically invalid plan handled below.
+	var probe map[string]json.RawMessage
+	if err := json.Unmarshal(data, &probe); err != nil {
+		msg := jsonErrorWithLocation(data, err)
+		fmt.Fprintf(out, "ERROR: invalid JSON in %s %s\n", planPath, msg)
+		return fmt.Errorf("invalid JSON in %s %s", planPath, msg)
+	}
+
+	// Validate the plan with the same rules `forgectl validate` applies.
+	baseDir := filepath.Dir(planPath)
+	if errs := state.ValidatePlanJSON(data, baseDir); len(errs) > 0 {
+		fmt.Fprintf(out, "ERROR: plan validation failed with %d error(s):\n", len(errs))
+		for i, e := range errs {
+			fmt.Fprintf(out, "  %d. %s\n", i+1, e)
+		}
+		return fmt.Errorf("plan validation failed")
+	}
+	fmt.Fprintf(out, "INFO: plan validated: %s\n", filepath.Base(planPath))
+
+	var plan state.PlanJSON
+	if err := json.Unmarshal(data, &plan); err != nil {
+		fmt.Fprintf(out, "ERROR: decoding plan %s: %v\n", planPath, err)
+		return fmt.Errorf("decoding plan %s: %w", planPath, err)
+	}
+
+	// Resolve the active config — the loop parameters come from it.
+	projectRoot, _, cfg, err := resolveSession()
+	if err != nil {
+		fmt.Fprintf(out, "ERROR: a resolvable .forgectl/config is required: %v\n", err)
+		return fmt.Errorf("a resolvable .forgectl/config is required: %w", err)
+	}
+	if cerr := validateGenerationConfig(cfg); cerr != nil {
+		fmt.Fprintf(out, "ERROR: %v\n", cerr)
+		return cerr
+	}
+
+	// Compute batches and (optionally) report the plan of work.
+	batches := computeBatches(plan, cfg.Implementing.Batch)
+	fmt.Fprintf(out, "INFO: computed %d batch(es) across %d item(s)\n", len(batches), len(plan.Items))
+
+	if generateWorkflowVerbose {
+		fmt.Fprintf(out, "DEBUG: baked config — batch=%d; implement model=%s type=%s; eval model=%s type=%s; min_rounds=%d max_rounds=%d; enable_commits=%t\n",
+			cfg.Implementing.Batch,
+			cfg.Implementing.Implement.Model, cfg.Implementing.Implement.Type,
+			cfg.Implementing.Eval.Model, cfg.Implementing.Eval.Type,
+			cfg.Implementing.Eval.MinRounds, cfg.Implementing.Eval.MaxRounds,
+			cfg.General.EnableCommits)
+		for _, b := range batches {
+			ids := make([]string, len(b.Items))
+			for i, it := range b.Items {
+				ids[i] = it.ID
+			}
+			fmt.Fprintf(out, "DEBUG: batch %d items: [%s]\n", b.Index, strings.Join(ids, ", "))
+		}
+	}
+
+	// Render the self-contained script.
+	script := renderWorkflowScript(plan.Context, batches, cfg)
+
+	// Resolve the output path (creating .claude/workflows/ if needed) and write
+	// atomically. Collisions never overwrite — resolveWorkflowPath picks a fresh
+	// name and logs a WARN.
+	workflowsDir := filepath.Join(projectRoot, ".claude", "workflows")
+	if err := os.MkdirAll(workflowsDir, 0o755); err != nil {
+		fmt.Fprintf(out, "ERROR: creating %s: %v\n", workflowsDir, err)
+		return fmt.Errorf("creating %s: %w", workflowsDir, err)
+	}
+	finalPath, err := resolveWorkflowPath(workflowsDir, deriveOutputName(plan.Context), out)
+	if err != nil {
+		fmt.Fprintf(out, "ERROR: resolving output name under %s: %v\n", workflowsDir, err)
+		return fmt.Errorf("resolving output name: %w", err)
+	}
+	if err := atomicWriteFile(finalPath, []byte(script)); err != nil {
+		fmt.Fprintf(out, "ERROR: writing %s: %v\n", finalPath, err)
+		return fmt.Errorf("writing %s: %w", finalPath, err)
+	}
+
+	// The harness exposes the workflow under meta.name (derived from context),
+	// which may differ from the on-disk filename when a collision was resolved.
+	fmt.Fprintf(out, "INFO: wrote workflow %s (slash command: /%s)\n", finalPath, workflowBaseName(plan.Context))
+	return nil
+}
 
 // Batch is an ordered, non-empty group of plan items the generator compiles
 // into the emitted workflow script. Batches are an interface commitment of the
