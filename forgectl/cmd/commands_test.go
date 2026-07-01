@@ -980,6 +980,63 @@ func TestSetRootsInDoneState(t *testing.T) {
 	}
 }
 
+func TestSetCommitHashesInCrossReferenceReviewState(t *testing.T) {
+	dir := setupProjectDir(t)
+	forgeState := newSpecifyingForgeState(state.StateCrossReferenceReview)
+	sd := setupSpecifyingState(t, dir, forgeState)
+
+	setCommitHashesDomain = ""
+
+	if err := runSetCommitHashes(setCommitHashesCmd, []string{"abc1234", "def5678"}); err != nil {
+		t.Fatalf("set-commit-hashes: %v", err)
+	}
+
+	s, _ := state.Load(sd)
+	if len(s.Specifying.Completed) != 1 {
+		t.Fatalf("expected 1 completed spec, got %d", len(s.Specifying.Completed))
+	}
+	hashes := s.Specifying.Completed[0].CommitHashes
+	if len(hashes) != 2 || hashes[0] != "abc1234" || hashes[1] != "def5678" {
+		t.Errorf("expected hashes [abc1234 def5678], got %v", hashes)
+	}
+}
+
+func TestSetCommitHashesInDoneState(t *testing.T) {
+	dir := setupProjectDir(t)
+	forgeState := newSpecifyingForgeState(state.StateDone)
+	sd := setupSpecifyingState(t, dir, forgeState)
+
+	setCommitHashesDomain = "test"
+
+	if err := runSetCommitHashes(setCommitHashesCmd, []string{"abc1234"}); err != nil {
+		t.Fatalf("set-commit-hashes: %v", err)
+	}
+
+	s, _ := state.Load(sd)
+	if s.Specifying.Completed[0].CommitHashes[0] != "abc1234" {
+		t.Errorf("expected hash 'abc1234', got %v", s.Specifying.Completed[0].CommitHashes)
+	}
+}
+
+func TestSetCommitHashesOverwritesPreviousValue(t *testing.T) {
+	dir := setupProjectDir(t)
+	forgeState := newSpecifyingForgeState(state.StateCrossReferenceReview)
+	forgeState.Specifying.Completed[0].CommitHashes = []string{"old1234"}
+	sd := setupSpecifyingState(t, dir, forgeState)
+
+	setCommitHashesDomain = ""
+
+	if err := runSetCommitHashes(setCommitHashesCmd, []string{"new5678"}); err != nil {
+		t.Fatalf("set-commit-hashes: %v", err)
+	}
+
+	s, _ := state.Load(sd)
+	hashes := s.Specifying.Completed[0].CommitHashes
+	if len(hashes) != 1 || hashes[0] != "new5678" {
+		t.Errorf("expected hashes [new5678], got %v", hashes)
+	}
+}
+
 func TestAddQueueItemAtDoneWithDomain(t *testing.T) {
 	dir := setupProjectDir(t)
 	forgeState := newSpecifyingForgeState(state.StateDone)
@@ -1175,6 +1232,63 @@ func TestSetRootsRejectsDomainWithNoCompletedSpecs(t *testing.T) {
 
 	setRootsDomain = ""
 	err := runSetRoots(setRootsCmd, []string{"unknown-domain/"})
+	if err == nil {
+		t.Error("expected error for domain with no completed specs")
+	}
+}
+
+// --- set-commit-hashes rejection tests ---
+
+func TestSetCommitHashesRejectsWrongPhase(t *testing.T) {
+	dir := setupProjectDir(t)
+	sd := resolvedStateDir(dir)
+	os.MkdirAll(sd, 0755)
+	s := &state.ForgeState{
+		Phase: state.PhasePlanning, State: state.StateOrient, Config: state.DefaultForgeConfig(),
+		Planning: &state.PlanningState{CurrentPlan: &state.ActivePlan{Name: "p", Domain: "d", File: "plan.json"}},
+	}
+	state.Save(sd, s)
+
+	setCommitHashesDomain = "test"
+	err := runSetCommitHashes(setCommitHashesCmd, []string{"abc1234"})
+	if err == nil {
+		t.Error("expected error for wrong phase")
+	}
+}
+
+func TestSetCommitHashesRejectsWrongState(t *testing.T) {
+	dir := setupProjectDir(t)
+	forgeState := newSpecifyingForgeState(state.StateDraft)
+	setupSpecifyingState(t, dir, forgeState)
+
+	setCommitHashesDomain = "test"
+	err := runSetCommitHashes(setCommitHashesCmd, []string{"abc1234"})
+	if err == nil {
+		t.Error("expected error for wrong state")
+	}
+}
+
+func TestSetCommitHashesRejectsNoHashes(t *testing.T) {
+	dir := setupProjectDir(t)
+	forgeState := newSpecifyingForgeState(state.StateCrossReferenceReview)
+	setupSpecifyingState(t, dir, forgeState)
+
+	setCommitHashesDomain = "test"
+	err := runSetCommitHashes(setCommitHashesCmd, []string{}) // no hashes
+	if err == nil {
+		t.Error("expected error for no hash arguments")
+	}
+}
+
+func TestSetCommitHashesRejectsDomainWithNoCompletedSpecs(t *testing.T) {
+	dir := setupProjectDir(t)
+	forgeState := newSpecifyingForgeState(state.StateCrossReferenceReview)
+	// Override current domain to one that has no completed specs.
+	forgeState.Specifying.CurrentDomain = "unknown-domain"
+	setupSpecifyingState(t, dir, forgeState)
+
+	setCommitHashesDomain = ""
+	err := runSetCommitHashes(setCommitHashesCmd, []string{"abc1234"})
 	if err == nil {
 		t.Error("expected error for domain with no completed specs")
 	}

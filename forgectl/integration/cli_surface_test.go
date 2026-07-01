@@ -146,6 +146,42 @@ func TestK3SetRootsGuards(t *testing.T) {
 	}
 }
 
+// TestK3SetCommitHashesGuards asserts the documented guard conditions for the
+// set-commit-hashes command:
+//
+//   - Wrong phase (planning) → error naming the specifying phase.
+//   - Specifying but wrong state (ORIENT) → error naming the state.
+func TestK3SetCommitHashesGuards(t *testing.T) {
+	// Guard: wrong phase. init planning, then call set-commit-hashes.
+	pPlan := NewProject(t)
+	pPlan.WriteConfig(minSpecifyingConfig)
+	pPlan.WriteFile("plan-queue.json", minPlanQueue)
+	pPlan.mustForge("init", "--phase", "planning", "--from", "plan-queue.json")
+	res := pPlan.forge("set-commit-hashes", "abc1234")
+	if res.Exit == 0 {
+		t.Error("set-commit-hashes in planning phase: expected non-zero exit")
+	}
+	if !strings.Contains(res.Out(), "specifying") {
+		t.Errorf("set-commit-hashes wrong-phase error should mention specifying:\n%s", res.Out())
+	}
+
+	// Guard: right phase but wrong state. set-commit-hashes is only valid at
+	// CROSS_REFERENCE_REVIEW and DONE; ORIENT must be rejected.
+	p := NewProject(t)
+	p.WriteConfig(minSpecifyingConfig)
+	p.WriteFile("spec-queue.json", oneSpecQueue)
+	p.mustForge("init", "--phase", "specifying", "--from", "spec-queue.json")
+	p.AssertAt(state.PhaseSpecifying, state.StateOrient)
+
+	res = p.forge("set-commit-hashes", "abc1234")
+	if res.Exit == 0 {
+		t.Error("set-commit-hashes at ORIENT: expected non-zero exit")
+	}
+	if !strings.Contains(res.Out(), "ORIENT") {
+		t.Errorf("set-commit-hashes wrong-state error should mention the current state ORIENT:\n%s", res.Out())
+	}
+}
+
 // TestK3AddDomainGuards asserts the documented guard condition for the
 // add-domain command: it is only valid during the reverse_engineering QUEUE
 // state. Calling it from any other phase produces a recognizable error.
