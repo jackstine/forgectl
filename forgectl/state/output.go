@@ -2464,7 +2464,7 @@ func printImplementingEval(w io.Writer, s *ForgeState, dir string) error {
 		return planErr
 	}
 
-	writeEvalItemList(w, plan, batch.Items)
+	writeEvalItemList(w, plan, batch.Items, s.Planning.CurrentPlan.SpecCommits)
 
 	// Previous evaluations + report output, per eval_mode.
 	evalDir := filepath.Join(currentPlanDir(s), "evals")
@@ -2476,8 +2476,12 @@ func printImplementingEval(w io.Writer, s *ForgeState, dir string) error {
 
 // writeEvalItemList renders the per-item block (description, specs, refs, files,
 // steps, tests) shared by the implementing and ui_implementing evaluation
-// contexts. Items not found in the plan are skipped.
-func writeEvalItemList(w io.Writer, plan *PlanJSON, items []string) {
+// contexts. Items not found in the plan are skipped. specCommits is the plan's
+// spec_commits list; when non-empty a copy-pasteable git show command is printed
+// under each spec entry, mirroring writeItemBody's IMPLEMENT-state behavior so
+// the eval sub-agent can inspect the exact spec definition regardless of
+// eval_mode.
+func writeEvalItemList(w io.Writer, plan *PlanJSON, items []string, specCommits []string) {
 	rendered := 0
 	for i, id := range items {
 		item := findItem(plan, id)
@@ -2496,6 +2500,10 @@ func writeEvalItemList(w io.Writer, plan *PlanJSON, items []string) {
 				fmt.Fprintf(w, "    Specs:       %s\n", spec)
 			} else {
 				fmt.Fprintf(w, "                 %s\n", spec)
+			}
+			if len(specCommits) > 0 {
+				file, _, _ := strings.Cut(spec, "#")
+				fmt.Fprintf(w, "    Read:        git show %s -- '**/%s'\n", strings.Join(specCommits, " "), file)
 			}
 		}
 		for j, ref := range item.Refs {
@@ -2569,7 +2577,7 @@ func printUICodeEval(w io.Writer, s *ForgeState, dir string) error {
 	if planErr != nil {
 		return planErr
 	}
-	writeEvalItemList(w, plan, batch.Items)
+	writeEvalItemList(w, plan, batch.Items, s.Planning.CurrentPlan.SpecCommits)
 
 	reportFile := filepath.Join(currentPlanDir(s), "evals", fmt.Sprintf("batch-%d-round-%d.md", ui.BatchNumber, evalRound))
 	writeEvalTrailingSections(w, EvalModeFor(cfg.Eval, s.Config.General), batch.Evals, reportFile, "batch", true)
@@ -2609,7 +2617,7 @@ func PrintUIQAEvalOutput(w io.Writer, s *ForgeState, dir string) error {
 	if planErr != nil {
 		return planErr
 	}
-	writeEvalItemList(w, plan, batch.Items)
+	writeEvalItemList(w, plan, batch.Items, s.Planning.CurrentPlan.SpecCommits)
 
 	stepList := qaStepListPath(s, ui.BatchNumber)
 	report := qaReportPath(s, ui.BatchNumber, round)

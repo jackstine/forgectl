@@ -262,6 +262,96 @@ func TestOutputImplementReadCommandPerSpecEntry(t *testing.T) {
 	}
 }
 
+// implEvalSpecReadState builds an implementing ForgeState at EVALUATE (round 1)
+// whose single batch item carries the given specs and whose current plan
+// carries the given spec_commits, for a given eval_mode. Used to verify that
+// `forgectl eval` surfaces the same bounded `git show` Read command as
+// IMPLEMENT, regardless of eval_mode.
+func implEvalSpecReadState(t *testing.T, dir, mode string, specs, commits []string) *ForgeState {
+	t.Helper()
+	planPath := filepath.Join(dir, "impl", "plan.json")
+	os.MkdirAll(filepath.Dir(planPath), 0755)
+	os.MkdirAll(filepath.Join(dir, "test"), 0755)
+	os.WriteFile(filepath.Join(dir, "test", "main.go"), []byte("package main"), 0644)
+
+	plan := PlanJSON{
+		Context: PlanContext{Domain: "test", Module: "mod"},
+		Layers:  []PlanLayerDef{{ID: "L0", Name: "Base", Items: []string{"x.item"}}},
+		Items: []PlanItem{
+			{
+				ID:          "x.item",
+				Name:        "X Item",
+				Description: "desc",
+				DependsOn:   []string{},
+				Passes:      "pending",
+				Specs:       specs,
+				Tests:       []PlanTest{{Category: "functional", Description: "works"}},
+			},
+		},
+	}
+	data, _ := json.Marshal(plan)
+	os.WriteFile(planPath, data, 0644)
+
+	s := &ForgeState{
+		Phase: PhaseImplementing,
+		State: StateOrient,
+		Config: ForgeConfig{
+			Implementing: ImplementingConfig{
+				Batch: 1,
+				Eval:  EvalConfig{MinRounds: 1, MaxRounds: 3, EvalMode: mode},
+			},
+		},
+		Planning: &PlanningState{
+			CurrentPlan: &ActivePlan{ID: 1, Name: "Test Plan", Domain: "test", File: "impl/plan.json", SpecCommits: commits},
+		},
+		Implementing: NewImplementingState(),
+	}
+
+	advanceImplToEvaluate(t, s, dir)
+	return s
+}
+
+// TestEvalOutputImplementingReadCommandPerSpec verifies `forgectl eval` emits
+// the same bounded `git show` Read command under each Specs: entry as
+// IMPLEMENT, in every eval_mode — the eval sub-agent needs the exact spec
+// definition to judge or correct code against it regardless of whether it is
+// writing a report, correcting files directly, or reporting verbally.
+func TestEvalOutputImplementingReadCommandPerSpec(t *testing.T) {
+	for _, mode := range []string{"report", "direct", "conversational"} {
+		t.Run(mode, func(t *testing.T) {
+			dir := t.TempDir()
+			s := implEvalSpecReadState(t, dir, mode, []string{"spec-sqlc-schemas.md#x"}, []string{"e742a1b", "694ca99"})
+			var buf bytes.Buffer
+			if err := PrintEvalOutput(&buf, s, dir); err != nil {
+				t.Fatalf("PrintEvalOutput: %v", err)
+			}
+			out := buf.String()
+
+			want := "Read:        git show e742a1b 694ca99 -- '**/spec-sqlc-schemas.md'"
+			if !strings.Contains(out, want) {
+				t.Errorf("mode %q: expected %q, got:\n%s", mode, want, out)
+			}
+			if strings.Contains(out, "git log") {
+				t.Errorf("mode %q: Read command must use git show, not git log, got:\n%s", mode, out)
+			}
+		})
+	}
+}
+
+// TestEvalOutputImplementingOmitsReadCommandWhenNoSpecCommits verifies no Read
+// line is emitted in eval output when spec_commits is empty.
+func TestEvalOutputImplementingOmitsReadCommandWhenNoSpecCommits(t *testing.T) {
+	dir := t.TempDir()
+	s := implEvalSpecReadState(t, dir, "report", []string{"spec-a.md#x"}, nil)
+	var buf bytes.Buffer
+	if err := PrintEvalOutput(&buf, s, dir); err != nil {
+		t.Fatalf("PrintEvalOutput: %v", err)
+	}
+	if strings.Contains(buf.String(), "Read:") {
+		t.Errorf("expected no Read line when spec_commits empty, got:\n%s", buf.String())
+	}
+}
+
 // TestOutputImplementReviewReminderEveryRound verifies the spec-review reminder
 // appears on subsequent (post-eval) rounds, not only the first round.
 func TestOutputImplementReviewReminderEveryRound(t *testing.T) {

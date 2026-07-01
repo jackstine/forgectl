@@ -414,6 +414,7 @@ Batch: 1/2
 [1] config.types — ServiceEndpoint and ServicesConfig structs
     Description: Go structs for validated service endpoint configuration.
     Specs:       service-configuration.md#interface-outputs
+    Read:        git show abc1234 def5678 -- '**/service-configuration.md'
     Refs:        notes/config.md#types
     Files:       internal/config/types.go
     Steps:
@@ -426,7 +427,9 @@ Batch: 1/2
 [2] config.load — Load YAML, apply defaults, validate strictly
     Description: Parse spectacular.yml, apply default host/port values.
     Specs:       service-configuration.md#behavior-loading
+    Read:        git show abc1234 def5678 -- '**/service-configuration.md'
                   config-validation.md#behavior-strict-mode
+    Read:        git show abc1234 def5678 -- '**/config-validation.md'
     Refs:        notes/config.md#load
     Files:       internal/config/load.go, internal/config/load_test.go
     Steps:
@@ -452,6 +455,13 @@ describe it):
 When done, your final message must be only this path and the verdict, e.g.:
   launcher/.forgectl_workspace/implementation_plan/evals/batch-1-round-1.md FAIL
 ```
+
+The `Read:` line under each `Specs:` entry carries the same bounded `git show
+<commits> -- '**/<file>'` command described under IMPLEMENT Behavior, using the
+current plan's `spec_commits`. It is present in `eval` output in every
+`eval_mode` — the eval sub-agent needs to inspect the exact spec definition to
+judge or correct code against it, independent of how it reports its verdict.
+When `spec_commits` is empty, the `Read:` line is omitted, mirroring IMPLEMENT.
 
 Subsequent rounds with `eval_mode: "report"` include previous evaluations:
 
@@ -729,7 +739,7 @@ When `enable_commits` is `true`, the engineer runs `forgectl advance --message <
 11. **Max rounds enforced.** FAIL at `implementing.eval.max_rounds` forces acceptance.
 12. **Guided pauses.** When `config.general.user_guided` is true, ORIENT output includes "STOP please review and discuss with user before continuing."
 13. **Auto-commit at commit points.** When `enable_commits` is `true`, `--message` is required at IMPLEMENT (first round) and COMMIT states. The scaffold runs `git add` with strategy-appropriate targets (per `implementing.commit_strategy`, default: `scoped`) to stage files, then runs `git commit -m <message>`. The `git add` step must precede `git commit` — committing without staging produces "no changes added to commit" and no commit is created. When `enable_commits` is `false`, `--message` is not shown in output; if provided, a warning is printed: `--message is ignored, commits are not enabled`. The warning does not instruct how to enable commits. See `docs/auto-committing.md`.
-14. **Spec `Read:` command is bounded.** When the current plan's `spec_commits` is non-empty, every `Specs:` entry in IMPLEMENT output is followed by a `Read:` line of the form `git show <commits> -- '**/<file>'`, using `git show` (not `git log -p`) so the command resolves to exactly the named spec commits. When `spec_commits` is empty, no `Read:` line is emitted.
+14. **Spec `Read:` command is bounded.** When the current plan's `spec_commits` is non-empty, every `Specs:` entry in IMPLEMENT and `eval` output is followed by a `Read:` line of the form `git show <commits> -- '**/<file>'`, using `git show` (not `git log -p`) so the command resolves to exactly the named spec commits. When `spec_commits` is empty, no `Read:` line is emitted. This applies uniformly across `eval_mode: "report"`, `"direct"`, and `"conversational"` — the `Read:` line is part of the item body, not the eval-mode-specific handoff section.
 15. **Spec review reminder always present.** Every IMPLEMENT action, on every round, includes the spec-review reminder. The Refs-review reminder is present if and only if the item has `Refs`.
 16. **Report path surfaced to both actors.** When `eval_mode: "report"`, the scaffold computes the eval report path deterministically (`<plan-dir>/evals/batch-N-round-M.md`) and prints the *same* path in two places: the EVALUATE Action (for the engineer to pass to `--eval-report`) and the `--- REPORT OUTPUT ---` section of `forgectl eval` (for the sub-agent to write). The engineer never needs to invent or reconstruct the path. `--eval-report` is a file path argument; passing report prose is an error (caught by invariant 17).
 17. **`--eval-report` value is validated as a path.** The scaffold stats the `--eval-report` value before recording it. If it is not an existing file, `advance` fails. When the value contains no path separator and looks like prose (whitespace, no `/`), the error additionally states that `--eval-report` expects the file path the eval sub-agent wrote, not the report text.
@@ -843,6 +853,18 @@ When `enable_commits` is `true`, the engineer runs `forgectl advance --message <
 - **Given:** IMPLEMENT, item with specs `["a.md#x", "b.md#y"]`, current plan `spec_commits: ["abc1234"]`.
 - **When:** `advance`
 - **Then:** Output contains `Read: git show abc1234 -- '**/a.md'` and `Read: git show abc1234 -- '**/b.md'`.
+
+### eval renders a Read command per spec regardless of eval_mode
+- **Verifies:** `forgectl eval` emits the same bounded `git show` Read command as IMPLEMENT, in every eval_mode.
+- **Given:** EVALUATE (implementing), item with specs `["spec-sqlc-schemas.md#x"]`, current plan `spec_commits: ["e742a1b", "694ca99"]`, `eval_mode` in turn `"report"`, `"direct"`, `"conversational"`.
+- **When:** `eval`
+- **Then:** Output contains `Read: git show e742a1b 694ca99 -- '**/spec-sqlc-schemas.md'` directly under the `Specs:` entry, for all three eval_modes.
+
+### eval omits the Read command when spec_commits is empty
+- **Verifies:** No `Read:` line in eval output without spec commits.
+- **Given:** EVALUATE (implementing), item with specs, current plan `spec_commits: []`.
+- **When:** `eval`
+- **Then:** Output contains no `Read:` line.
 
 ### IMPLEMENT review reminder present every round
 - **Verifies:** Spec-review reminder appears on first and subsequent rounds.
