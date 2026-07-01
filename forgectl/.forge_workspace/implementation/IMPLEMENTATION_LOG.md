@@ -55,6 +55,17 @@ Log of implementation updates across sessions. Add a new entry after each unit o
 - **Eval Rounds:** 1
 - **Notes:** e2e loop — advanceUIFromE2EAuthor bridges (e2e_round++ → E2E_VERIFY, zero-scenario advances), advanceUIFromE2EVerify records E2EEval and routes PASS>=e2e.min → COMMIT / FAIL>=e2e.max → E2EForceAccepted+COMMIT / else E2E_REMEDIATE, advanceUIFromE2ERemediate loops back (e2e_round++). COMMIT marking already observes all three force-accept flags. Full chain ORIENT→IMPLEMENT→EVALUATE→QA_TEST→E2E_AUTHOR→E2E_VERIFY→COMMIT now connected with three independent round budgets. L2 complete.
 
+---
+
+## Plan: Workflow Generation and Adversarial Evaluation Gauntlet
+
+### 2026-06-30 — L0 Evaluator Prompt: Batch 1 (evaluators.gauntlet-prompt)
+- **Errors:** None
+- **All Tests Pass:** Yes
+- **Batch:** 1/4
+- **Eval Rounds:** 1
+- **Notes:** Authored `evaluators/gauntlet-eval.md` — the adversarial, mutating, no-verdict contract the generated workflow bakes as the evaluator agent's instruction (review each item's `tests`, edit code directly, change nothing when already correct, never emit PASS/FAIL). Added the `GauntletEval` `//go:embed` var to `evaluators.go` and a `TestGauntletEvalEmbedded` guard asserting the var is non-empty at runtime and carries the adversarial/edit/no-verdict language.
+
 ### 2026-06-07 — L3 Commands & Phase-Shift Routing: Batch 8 (advance.phaseshift, cmd.init, cmd.evalwiring, cmd.handoff) — completes L3
 - **Errors:** None
 - **All Tests Pass:** Yes

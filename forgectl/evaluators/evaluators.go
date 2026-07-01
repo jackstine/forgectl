@@ -36,3 +36,9 @@ var UIQAEval string
 //
 //go:embed ui-e2e-eval.md
 var UIE2EEval string
+
+// GauntletEval contains the adversarial mutating evaluator prompt baked into
+// generated workflow scripts as the evaluator agent's instruction.
+//
+//go:embed gauntlet-eval.md
+var GauntletEval string
