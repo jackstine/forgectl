@@ -103,7 +103,7 @@ For each domain (in spec queue order — the order domains first appeared):
 | `domain` | Domain name from completed specs |
 | `file` | `<domain>/.forge_workspace/implementation_plan/plan.json` |
 | `specs` | All completed spec file paths for the domain |
-| `spec_commits` | Deduplicated list of all `commit_hashes` from the domain's completed specs |
+| `spec_commits` | Deduplicated list of all `commit_hashes` from the domain's completed specs (populated by auto-commit at COMPLETE, or via `set-commit-hashes`) |
 | `code_search_roots` | From `specifying.domains[<domain>].code_search_roots` if set via `set-roots`; otherwise `["<domain>/"]` |
 
 ### Architect Review (REFINE state)

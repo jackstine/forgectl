@@ -258,7 +258,7 @@ Each key in `domains` is a domain name, value is:
 | `domain` | string | Domain |
 | `file` | string | Path to spec file |
 | `rounds_taken` | int | Total eval rounds before acceptance |
-| `commit_hashes` | string[] | Git commit hashes registered via auto-commit at COMPLETE when `enable_commits: true` (optional, array only) |
+| `commit_hashes` | string[] | Git commit hashes registered via auto-commit at COMPLETE when `enable_commits: true`, or overwritten via `set-commit-hashes` (optional, array only) |
 | `evals` | EvalRecord[] | Evaluation history (optional) |
 
 ### ReconcileState
@@ -444,7 +444,7 @@ Records the three per-loop round totals and histories, feeding the DONE summary 
 1. Only one phase state object is active based on `phase` value.
 2. `planning` remains non-null during implementing and ui_implementing (holds `current_plan.file` reference).
 3. `config` mirrors `.forgectl/config` (TOML) structure at state init time; persisted in state for audit trail.
-4. `commit_hashes` (array) on completed specs contain hashes registered via auto-commit at COMPLETE when `enable_commits: true`.
+4. `commit_hashes` (array) on completed specs contain hashes registered via auto-commit at COMPLETE when `enable_commits: true`, or set directly via the `set-commit-hashes` command.
 5. `.workspace` renamed to `.forge_workspace` throughout.
 6. Empty arrays and null objects are omitted from JSON (`omitempty`).
 7. File is serialized with 2-space indentation.

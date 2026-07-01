@@ -42,6 +42,7 @@ The following state file operations do not produce activity log entries:
 
 - `add-queue-item` — queue manipulation
 - `set-roots` — root path modification
+- `set-commit-hashes` — commit hash modification
 
 These operations modify the persistent state file but do not represent user-driven activity flows. Only `init` and `advance` are logged.
 

@@ -148,6 +148,35 @@
   │   └─── Output: "Set code search roots for {domain}."
   │
   │
+  ├── set-commit-hashes ── Set commit hashes for a domain
+  │   │
+  │   │  Flags:
+  │   │    --domain <str>  Domain name (required at DONE, inferred elsewhere)
+  │   │    (positional)    One or more commit hashes
+  │   │
+  │   │  Overwrites commit_hashes on every completed spec in the domain.
+  │   │  Valid in: CROSS_REFERENCE_REVIEW, DONE
+  │   │
+  │   └─── Output: "Set commit hashes for domain {domain}: [{hashes}]"
+  │
+  │
+  ├── generate-workflow ── Compile a plan.json into a Claude Code workflow script
+  │   │
+  │   │  Arguments:
+  │   │    <plan.json>     Path to a produced plan; validated before emission
+  │   │
+  │   │  Optional flags:
+  │   │    -v, --verbose   Log resolved config + per-batch item ids (DEBUG)
+  │   │
+  │   │  Reads the active .forgectl/config; bakes implementing.{batch,implement,
+  │   │  eval} + general.enable_commits into the emitted adversarial-gauntlet loop.
+  │   │  Writes ONE self-contained script to
+  │   │  .claude/workflows/<domain>-<module>-impl.js (collision → prefixed fresh
+  │   │  name, never overwrites). Plan and config are read-only.
+  │   │
+  │   └─── Output: "wrote workflow <path> (slash command: /<domain>-<module>-impl)"
+  │
+  │
   └── --version ───────── Display version (v0.0.1)
 
 

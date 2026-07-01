@@ -80,6 +80,15 @@ Stores code search roots for use during the planning phase. Only valid in CROSS_
 | `--domain` | at DONE only | Domain to set roots for. Inferred from current domain at CROSS_REFERENCE_REVIEW. Required at DONE (no current domain). |
 | (positional) | yes | One or more directory paths |
 
+#### `set-commit-hashes` — Set commit hashes for a domain
+
+Stores commit hashes on every completed spec in a domain, for use as `spec_commits` during plan-queue generation in the generate_planning_queue phase. Only valid in CROSS_REFERENCE_REVIEW or DONE states within the specifying phase.
+
+| Flag | Required | Description |
+|------|----------|-------------|
+| `--domain` | at DONE only | Domain to set commit hashes for. Inferred from current domain at CROSS_REFERENCE_REVIEW. Required at DONE (no current domain). |
+| (positional) | yes | One or more commit hashes |
+
 ### Outputs
 
 #### `advance` output
@@ -370,6 +379,8 @@ Action:  STOP please review and discuss with user before continuing.
            forgectl add-queue-item --name <name> --topic <topic> --file <file> [--source <path>...]
          Set code search roots for this domain (used in planning phase):
            forgectl set-roots <path> [<path>...]
+         Set commit hashes for this domain (used in planning phase):
+           forgectl set-commit-hashes <hash> [<hash>...]
          After completion of the above, advance to continue.
 ```
 
@@ -390,6 +401,8 @@ Action:  Domain cross-reference complete.
            forgectl add-queue-item --name <name> --topic <topic> --file <file> [--source <path>...]
          Set code search roots for this domain (used in planning phase):
            forgectl set-roots <path> [<path>...]
+         Set commit hashes for this domain (used in planning phase):
+           forgectl set-commit-hashes <hash> [<hash>...]
          After completion of the above, advance to continue.
 ```
 
@@ -406,6 +419,8 @@ Action:  All individual specs complete.
            Adding specs here re-enters ORIENT for the new items before reconciliation.
          Set code search roots for any domain not yet configured (used in planning phase):
            forgectl set-roots --domain <domain> <path> [<path>...]
+         Set commit hashes for any domain not yet configured (used in planning phase):
+           forgectl set-commit-hashes --domain <domain> <hash> [<hash>...]
          When ready, advance to begin reconciliation.
 ```
 
@@ -748,6 +763,9 @@ Specifying eval reports:
 | `set-roots` outside of CROSS_REFERENCE_REVIEW or DONE | Error: "set-roots is only valid in CROSS_REFERENCE_REVIEW or DONE states (current state: \<state\>)." Exit code 1. | Code search roots are collected at domain completion boundaries |
 | `set-roots` outside of specifying phase | Error: "set-roots is only valid in the specifying phase (current phase: \<phase\>)." Exit code 1. | Code search roots feed into the planning phase via the generate_planning_queue phase |
 | `set-roots` at DONE without `--domain` | Error: "--domain is required at DONE (no current domain)." Exit code 1. | At DONE there is no current domain to infer from |
+| `set-commit-hashes` outside of CROSS_REFERENCE_REVIEW or DONE | Error: "set-commit-hashes is only valid in CROSS_REFERENCE_REVIEW or DONE states (current state: \<state\>)." Exit code 1. | Commit hashes are collected at domain completion boundaries |
+| `set-commit-hashes` outside of specifying phase | Error: "set-commit-hashes is only valid in the specifying phase (current phase: \<phase\>)." Exit code 1. | Commit hashes feed into the planning phase via the generate_planning_queue phase |
+| `set-commit-hashes` at DONE without `--domain` | Error: "--domain is required at DONE (no current domain)." Exit code 1. | At DONE there is no current domain to infer from |
 | `eval` outside of specifying EVALUATE or CROSS_REFERENCE_EVAL | Error naming current state and phase. Exit code 1. | Eval context only available in evaluation states |
 
 ---
@@ -890,6 +908,21 @@ When `add-queue-item` is used at DONE and the queue was previously empty, advanc
 
 Calling `set-roots` for a domain that already has roots overwrites the previous value.
 
+### Set Commit Hashes
+
+`forgectl set-commit-hashes` stores commit hashes on every completed spec in a domain. These hashes are deduplicated into `spec_commits` on the plan-queue entry during plan-queue generation in the generate_planning_queue phase (see phase-transitions).
+
+1. Validate the current phase is `specifying`.
+2. Validate the current state is CROSS_REFERENCE_REVIEW or DONE.
+3. Resolve domain: if `--domain` is provided, use it. Otherwise, infer from the current cross-reference domain at CROSS_REFERENCE_REVIEW. At DONE, `--domain` is required (no current domain).
+4. Validate the resolved domain has completed specs.
+5. Validate at least one positional hash argument is provided.
+6. Set `commit_hashes` on every `specifying.completed` entry whose domain matches the resolved domain to the given list, replacing any existing value.
+7. Write the state file.
+8. Print confirmation: domain and hashes.
+
+Calling `set-commit-hashes` for a domain that already has hashes overwrites the previous value on every completed spec in that domain. This is the only way to populate `commit_hashes` when `config.general.enable_commits` is false, or to correct hashes recorded by an earlier automatic COMPLETE-state commit (e.g., after a rebase, or when specs were committed manually outside forgectl).
+
 ---
 
 ## Invariants
@@ -909,6 +942,7 @@ Calling `set-roots` for a domain that already has roots overwrites the previous 
 13. **set-roots is state-gated.** Only valid in CROSS_REFERENCE_REVIEW or DONE within the specifying phase.
 14. **add-queue-item names are unique.** No duplicate names across queue and completed specs.
 15. **DONE re-enters ORIENT when queue is non-empty.** If `add-queue-item` populates the queue at DONE, advancing re-enters ORIENT instead of RECONCILE.
+16. **set-commit-hashes is state-gated.** Only valid in CROSS_REFERENCE_REVIEW or DONE within the specifying phase.
 
 ---
 
@@ -1009,6 +1043,18 @@ Calling `set-roots` for a domain that already has roots overwrites the previous 
 - **Scenario:** Phase shift to planning with no `set-roots` called for a domain.
   - **Expected:** `code_search_roots` defaults to `["<domain>/"]` in the generated plan-queue entry.
   - **Rationale:** The domain directory itself is the most common search root. Explicit roots override the default.
+
+- **Scenario:** `set-commit-hashes` called for a domain with no completed specs.
+  - **Expected:** Error: "domain '<domain>' has no completed specs." Exit code 1.
+  - **Rationale:** Commit hashes are recorded against specs that have been specified. Setting hashes for an unknown domain is likely a typo.
+
+- **Scenario:** `set-commit-hashes` called twice for the same domain.
+  - **Expected:** Second call overwrites the first on every completed spec in the domain. No error.
+  - **Rationale:** The architect may need to correct hashes after a manual commit or rebase.
+
+- **Scenario:** Phase shift to planning with no `set-commit-hashes` called for a domain and `enable_commits` is false.
+  - **Expected:** `spec_commits` is an empty array in the generated plan-queue entry.
+  - **Rationale:** Without an automatic COMPLETE-state commit or a manual `set-commit-hashes` call, no hashes exist to propagate.
 
 ---
 
@@ -1284,6 +1330,30 @@ Calling `set-roots` for a domain that already has roots overwrites the previous 
 - **When:** `set-roots --domain unknown unknown/`
 - **Then:** Exit code 1. Error names the domain.
 
+### set-commit-hashes stores hashes on every completed spec in a domain
+- **Verifies:** Hash storage in state file.
+- **Given:** CROSS_REFERENCE_REVIEW, domain is optimizer, 2 completed specs.
+- **When:** `set-commit-hashes --domain optimizer abc1234 def5678`
+- **Then:** Both completed specs' `commit_hashes` is `["abc1234", "def5678"]`.
+
+### set-commit-hashes rejected outside valid states
+- **Verifies:** State gate enforcement.
+- **Given:** DRAFT.
+- **When:** `set-commit-hashes --domain optimizer abc1234`
+- **Then:** Exit code 1. Error names current state.
+
+### set-commit-hashes overwrites previous value
+- **Verifies:** Idempotent overwrite.
+- **Given:** CROSS_REFERENCE_REVIEW. Domain optimizer's completed specs already have `commit_hashes: ["abc1234"]`.
+- **When:** `set-commit-hashes --domain optimizer def5678`
+- **Then:** `commit_hashes` updated to `["def5678"]` on every completed spec in the domain.
+
+### set-commit-hashes rejects unknown domain
+- **Verifies:** Domain must have completed specs.
+- **Given:** DONE. No completed specs for domain "unknown".
+- **When:** `set-commit-hashes --domain unknown abc1234`
+- **Then:** Exit code 1. Error names the domain.
+
 ---
 
 ## Implements
@@ -1299,4 +1369,5 @@ Calling `set-roots` for a domain that already has roots overwrites the previous 
 - No commits during specifying lifecycle (single commit at COMPLETE, see spec-reconciliation)
 - `add-queue-item`: state-gated queue append with domain resolution from configured domains, session domains, or explicit `--domain` (DRAFT, CROSS_REFERENCE_REVIEW, DONE)
 - `set-roots`: state-gated code search root collection per domain (CROSS_REFERENCE_REVIEW, DONE)
+- `set-commit-hashes`: state-gated commit hash collection per domain (CROSS_REFERENCE_REVIEW, DONE), overwrites `commit_hashes` on every completed spec in the domain
 - DONE re-enters ORIENT when queue is non-empty (supports late-added specs before reconciliation)

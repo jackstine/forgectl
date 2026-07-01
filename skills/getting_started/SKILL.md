@@ -34,7 +34,7 @@ That gives the **two-actor model** that everything else follows from:
 
 | Actor | Who | Does | Commands |
 |-------|-----|------|----------|
-| **Engineer** | The primary agent (the driver) | Writes specs, plans, code, notes | `init`, `advance`, `status`, `add-queue-item`, `set-roots` |
+| **Engineer** | The primary agent (the driver) | Writes specs, plans, code, notes | `init`, `advance`, `status`, `add-queue-item`, `set-roots`, `set-commit-hashes` |
 | **Sub-agent** | A spawned evaluator | Adversarially reviews the engineer's work, writes eval reports | `eval`, `handoff` |
 
 **The golden rule:** you never decide what to work on next. Every `forgectl status` and every `forgectl advance` prints an `Action:` line. **Read it and do exactly that.** When in doubt, run `forgectl status`. This single habit removes most of the friction newcomers hit.

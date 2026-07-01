@@ -258,6 +258,8 @@
       <span class="chip"><b>handoff</b></span>
       <span class="chip"><b>add-queue-item</b></span>
       <span class="chip"><b>set-roots</b></span>
+      <span class="chip"><b>set-commit-hashes</b></span>
+      <span class="chip"><b>generate-workflow</b></span>
     </div>
   </header>
 
@@ -709,6 +711,68 @@
         </div>
       </div>
 
+      <!-- set-commit-hashes -->
+      <div class="panel accent" data-reveal>
+        <div class="panel-title">
+          <span class="n">forgectl set-commit-hashes</span>
+          Set commit hashes for a domain
+        </div>
+        <div class="reveal">
+          <p class="desc">Overwrites <code>commit_hashes</code> on every completed spec in a domain. These hashes are deduplicated into <code>spec_commits</code> on the plan-queue entry during plan-queue generation. Only valid in CROSS_REFERENCE_REVIEW or DONE within the specifying phase. This is the only way to populate commit hashes when <code>enable_commits</code> is false, or to correct hashes after the fact.</p>
+
+          <div class="flag-group-label">Flags</div>
+          <div class="flag-grid">
+            <span class="flag-name">--domain &lt;str&gt;</span>
+            <span class="flag-desc">Domain name. Required at DONE; inferred from the current domain at CROSS_REFERENCE_REVIEW.</span>
+            <span class="flag-name">(positional)</span>
+            <span class="flag-desc">One or more commit hashes</span>
+          </div>
+        </div>
+
+        <div class="reveal">
+          <div class="flag-group-label">Example invocations</div>
+          <div class="code-block">
+<span class="prompt">$ </span><span class="cmd">forgectl set-commit-hashes</span> <span class="flag">--domain</span> <span class="val">auth</span> <span class="val">abc1234 def5678</span>
+<span class="prompt">$ </span><span class="cmd">forgectl set-commit-hashes</span> <span class="val">abc1234</span></div>
+        </div>
+
+        <div class="output-note reveal">
+          <span class="out-tag">output</span>
+          <span>Set commit hashes for domain "{domain}": [{hashes}]</span>
+        </div>
+      </div>
+
+      <!-- generate-workflow -->
+      <div class="panel accent" data-reveal>
+        <div class="panel-title">
+          <span class="n">forgectl generate-workflow</span>
+          Compile a plan.json into a Claude Code workflow script
+        </div>
+        <div class="reveal">
+          <p class="desc">Compiles a validated <code>plan.json</code> plus the active <code>.forgectl/config</code> into ONE self-contained Claude Code workflow under <code>.claude/workflows/</code>. The emitted script bakes the plan's items as ordered batches and runs the adversarial evaluation gauntlet — one primary pass per batch, then a bounded mutating-evaluator loop with a git change-detector deciding convergence. It bakes <code>implementing.{batch,implement,eval}</code> and <code>general.enable_commits</code> in at generation time; the script re-reads nothing at run time. The plan and config are read-only. A name collision never overwrites — a prefixed fresh name is chosen and a WARN names both.</p>
+
+          <div class="flag-group-label">Arguments &amp; flags</div>
+          <div class="flag-grid">
+            <span class="flag-name">&lt;plan.json&gt;</span>
+            <span class="flag-desc">Path to a produced plan; validated (same rules as <code>forgectl validate</code>) before any file is emitted.</span>
+            <span class="flag-name">-v, --verbose</span>
+            <span class="flag-desc">Print DEBUG diagnostics: the resolved config baked into the script and the per-batch item ids in run order.</span>
+          </div>
+        </div>
+
+        <div class="reveal">
+          <div class="flag-group-label">Example invocations</div>
+          <div class="code-block">
+<span class="prompt">$ </span><span class="cmd">forgectl generate-workflow</span> <span class="val">auth/.forge_workspace/implementation_plan/plan.json</span>
+<span class="prompt">$ </span><span class="cmd">forgectl generate-workflow</span> <span class="val">plan.json</span> <span class="flag">-v</span></div>
+        </div>
+
+        <div class="output-note reveal">
+          <span class="out-tag">output</span>
+          <span>wrote workflow &lt;path&gt; (slash command: /&lt;domain&gt;-&lt;module&gt;-impl)</span>
+        </div>
+      </div>
+
       <!-- --version -->
       <div class="panel" data-reveal>
         <div class="panel-title">
@@ -743,10 +807,12 @@
             <li><code>forgectl status</code></li>
             <li><code>forgectl add-queue-item</code></li>
             <li><code>forgectl set-roots</code></li>
+            <li><code>forgectl set-commit-hashes</code></li>
+            <li><code>forgectl generate-workflow</code></li>
           </ul>
           <div style="margin-top:14px;font-size:11px;color:var(--muted);font-family:'JetBrains Mono',monospace;">
             <b style="color:var(--text);display:block;margin-bottom:6px">Writes:</b>
-            <span>Specs · Plans · Code · Notes</span>
+            <span>Specs · Plans · Code · Notes · Workflows</span>
           </div>
         </div>
         <div class="actor-box steel">
