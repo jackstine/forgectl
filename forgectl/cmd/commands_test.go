@@ -1527,6 +1527,84 @@ func TestEvalCommandReconcileEvalOutputsReconciliationContext(t *testing.T) {
 	}
 }
 
+// TestEvalCommandImplementingRendersSpecReadCommand verifies that `forgectl
+// eval` in implementing EVALUATE resolves the plan from disk, loads the active
+// plan's spec_commits, and emits the same bounded `git show` Read: command
+// under each Specs: entry as IMPLEMENT — across all three eval_modes. This
+// exercises the full CLI path (resolveSession -> state.Load -> loadPlan from
+// the real plan.json on disk), not just PrintEvalOutput against an in-memory
+// state.
+func TestEvalCommandImplementingRendersSpecReadCommand(t *testing.T) {
+	for _, mode := range []string{"report", "direct", "conversational"} {
+		t.Run(mode, func(t *testing.T) {
+			dir := setupProjectDir(t)
+			sd := resolvedStateDir(dir)
+			os.MkdirAll(sd, 0755)
+
+			planRelPath := filepath.Join("impl", "plan.json")
+			os.MkdirAll(filepath.Join(dir, "impl"), 0755)
+			plan := state.PlanJSON{
+				Context: state.PlanContext{Domain: "test", Module: "mod"},
+				Layers:  []state.PlanLayerDef{{ID: "L0", Name: "Base", Items: []string{"x.item"}}},
+				Items: []state.PlanItem{
+					{
+						ID:          "x.item",
+						Name:        "X Item",
+						Description: "desc",
+						Passes:      "done",
+						Specs:       []string{"spec-sqlc-schemas.md#x"},
+						Tests:       []state.PlanTest{{Category: "functional", Description: "works"}},
+					},
+				},
+			}
+			data, err := json.Marshal(plan)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(filepath.Join(dir, planRelPath), data, 0644); err != nil {
+				t.Fatal(err)
+			}
+
+			s := &state.ForgeState{
+				Phase: state.PhaseImplementing,
+				State: state.StateEvaluate,
+				Config: state.ForgeConfig{
+					Implementing: state.ImplementingConfig{
+						Batch: 1,
+						Eval:  state.EvalConfig{MinRounds: 1, MaxRounds: 3, EvalMode: mode},
+					},
+				},
+				Planning: &state.PlanningState{
+					CurrentPlan: &state.ActivePlan{
+						ID: 1, Name: "Test Plan", Domain: "test", File: planRelPath,
+						SpecCommits: []string{"e742a1b", "694ca99"},
+					},
+				},
+				Implementing: &state.ImplementingState{
+					CurrentLayer:    &state.LayerRef{ID: "L0", Name: "Base"},
+					BatchNumber:     1,
+					CurrentPlanFile: planRelPath,
+					CurrentBatch:    &state.BatchState{Items: []string{"x.item"}},
+				},
+			}
+			if err := state.Save(sd, s); err != nil {
+				t.Fatal(err)
+			}
+
+			var buf bytes.Buffer
+			rootCmd.SetOut(&buf)
+			if err := runEval(evalCmd, nil); err != nil {
+				t.Fatalf("eval: %v", err)
+			}
+
+			want := "Read:        git show e742a1b 694ca99 -- '**/spec-sqlc-schemas.md'"
+			if !strings.Contains(buf.String(), want) {
+				t.Errorf("mode %q: expected %q, got:\n%s", mode, want, buf.String())
+			}
+		})
+	}
+}
+
 // TestEvalCommandCrossRefEvalOutputsCrossReferenceContext verifies that eval in
 // specifying CROSS_REFERENCE_EVAL state outputs cross-reference context.
 func TestEvalCommandCrossRefEvalOutputsCrossReferenceContext(t *testing.T) {
