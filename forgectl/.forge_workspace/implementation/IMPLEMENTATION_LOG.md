@@ -66,6 +66,13 @@ Log of implementation updates across sessions. Add a new entry after each unit o
 - **Eval Rounds:** 1
 - **Notes:** Authored `evaluators/gauntlet-eval.md` — the adversarial, mutating, no-verdict contract the generated workflow bakes as the evaluator agent's instruction (review each item's `tests`, edit code directly, change nothing when already correct, never emit PASS/FAIL). Added the `GauntletEval` `//go:embed` var to `evaluators.go` and a `TestGauntletEvalEmbedded` guard asserting the var is non-empty at runtime and carries the adversarial/edit/no-verdict language.
 
+### 2026-06-30 — L1 Core Logic: Batch 2 (workflow.batch-compute, workflow.output-name) — completes L1
+- **Errors:** None
+- **All Tests Pass:** Yes
+- **Batch:** 2/4
+- **Eval Rounds:** 1
+- **Notes:** New `cmd/generateworkflow.go`. `computeBatches` walks layers in declared order, `topoSortLayer` stably topo-sorts each layer's items by in-layer `depends_on` (declared order tiebreak, break-and-restart scan), chunks by batch size via `min`, and numbers batches 1-based across layer boundaries. `deriveOutputName`/`sanitizeSegment` reduce `<domain>-<module>` to the slash-command charset (lowercase, `[a-z0-9-]`, collapsed/trimmed hyphens); `resolveWorkflowPath` never overwrites — on collision it prepends a numeric prefix to a fresh name and logs a WARN naming both. These functions are consumed by L3 (`cmd.generate-workflow`), so they read as unused until then. L1 complete.
+
 ### 2026-06-07 — L3 Commands & Phase-Shift Routing: Batch 8 (advance.phaseshift, cmd.init, cmd.evalwiring, cmd.handoff) — completes L3
 - **Errors:** None
 - **All Tests Pass:** Yes
