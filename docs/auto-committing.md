@@ -4,20 +4,35 @@ This document defines how forgectl handles automatic git commits when `enable_co
 
 ## Overview
 
-When `general.enable_commits` is `true`, forgectl automatically stages and commits files at defined commit points in the lifecycle. The `--message` (`-m`) flag provides the commit message. After a successful commit, the resulting hash is automatically registered against the relevant completed specs or plan items in the state file.
+When `general.enable_commits` is `true`, forgectl automatically stages and commits files at defined commit points in the lifecycle. At most commit points the message is synthesized by the scaffold itself (see Message Synthesis); the `--message` (`-m`) flag, where accepted, supplements that synthesized message rather than replacing it. After a successful commit, the resulting hash is automatically registered against the relevant completed specs or plan items in the state file.
 
 When `general.enable_commits` is `false` (default), forgectl does not perform any git operations. The user commits manually.
 
 ## `--message` / `-m` Flag Behavior
 
-| `enable_commits` | `--message` provided | Behavior |
-|-----------------|---------------------|----------|
-| `true` | yes | Required. Scaffold commits with the message. |
-| `true` | no | Error. Exit code 1. |
-| `false` | yes | Warning: `--message is ignored, commits are not enabled`. Command proceeds. Message discarded. |
-| `false` | no | Normal. No warning. |
+| Commit point | `enable_commits` | `--message` provided | Behavior |
+|--------------|-----------------|---------------------|----------|
+| Implementing/`ui_implementing` IMPLEMENT (per item) | `true` | yes | Optional. Appended to the item-description-synthesized message. Scaffold commits. |
+| Implementing/`ui_implementing` IMPLEMENT (per item) | `true` | no | Normal. Scaffold commits with the synthesized message alone. |
+| Implementing/`ui_implementing` terminal EVALUATE (batch, inline) | `true` | yes | Optional. Appended to the batch-description-synthesized message. Scaffold commits. |
+| Implementing/`ui_implementing` terminal EVALUATE (batch, inline) | `true` | no | Normal. Scaffold commits with the synthesized message alone. |
+| Specifying COMPLETE / Planning ACCEPT | `true` | yes | Required. Scaffold commits with the message. |
+| Specifying COMPLETE / Planning ACCEPT | `true` | no | Error. Exit code 1. |
+| any | `false` | yes | Warning: `--message is ignored, commits are not enabled`. Command proceeds. Message discarded. |
+| any | `false` | no | Normal. No warning. |
 
 The warning when `--message` is ignored does **not** instruct the user how to enable commits. This is intentional — users who do not need auto-commits should not be prompted to change their configuration.
+
+When `enable_commits: true`, the implementing and `ui_implementing` phases never require `--message`: the IMPLEMENT and terminal-EVALUATE commit points always have a synthesized message available, and their COMMIT state is skipped entirely (see Commit Points below), so it never has to be reached to demand one. `--message` remains required only at the commit points that have no synthesized message of their own — specifying's COMPLETE and planning's ACCEPT — which are unaffected by this change.
+
+## Message Synthesis
+
+For the implementing and `ui_implementing` phases' per-item and batch-terminal commit points, the scaffold synthesizes the commit message rather than requiring one:
+
+- **Per-item IMPLEMENT commit:** the message is the item's `description` field from plan.json, verbatim.
+- **Batch-terminal commit (inline at terminal EVALUATE):** the message is a synthesized summary line listing every item in the batch, in order — for example `Batch 2: Load YAML, apply defaults, validate strictly; ServiceEndpoint and ServicesConfig structs`.
+
+In both cases, if the operator or agent also supplies `--message "<text>"` on the `advance` call, that text is appended as a second paragraph (separated by a blank line) rather than replacing the synthesized message. Specifying's COMPLETE and planning's ACCEPT commit points are unaffected by this synthesis rule — they continue to require an explicit `--message`.
 
 ## Commit Points
 
@@ -37,14 +52,21 @@ One commit for the entire specifying phase. Individual eval rounds, refinements,
 
 One commit per plan. When `planning.batch` > 1 is supported, each plan acceptance produces its own commit.
 
-### Implementing Phase
+### Implementing Phase (and `ui_implementing`'s code-eval loop, which reuses this spine unchanged)
 
 | Commit Point | State | What is committed |
 |-------------|-------|------------------|
-| Per item (first round only) | IMPLEMENT | Source and test files for the implemented item |
-| Per batch (after terminal eval) | COMMIT | Corrections from evaluation rounds 2+ |
+| Per item, every round | IMPLEMENT | Source and test files for that item, message synthesized from the item's `description` |
+| Per batch, inline at the terminal EVALUATE transition (`enable_commits: true` only) | EVALUATE (terminal) | Any remaining corrections since the batch's per-item commits, message synthesized from the batch's item descriptions |
+| Per batch (`enable_commits: false` only — no git operation, bookkeeping no-op) | COMMIT | — |
 
-First-round implementation commits provide crash safety for new work. The COMMIT state after evaluation captures any corrections. Subsequent-round IMPLEMENT states (after eval FAIL) do not produce commits — corrections accumulate and are committed at the batch COMMIT state.
+Every IMPLEMENT round commits its item immediately — first round and every round after an eval FAIL alike; the previous "first round only" rule no longer applies. This provides crash safety for new work and for every correction pass.
+
+When `enable_commits: true`, the COMMIT state does not appear in the transition path. Instead, the moment EVALUATE reaches a terminal verdict for the batch — PASS with sufficient rounds, or FAIL at `max_rounds` (force-accept) — the scaffold auto-commits any remaining uncommitted corrections inline as part of that same `advance`, then proceeds directly to ORIENT/DONE. This commit follows the same empty-commit skip rule as any other commit point: if every item was already committed per-item and no evaluator round left further changes, the commit is skipped silently.
+
+When `enable_commits: false`, the COMMIT state is unchanged from before: it still appears as a distinct state/transition for bookkeeping and plan-completion purposes, but no git operation occurs there (as with all commit points when commits are disabled).
+
+`ui_implementing`'s QA loop (QA_TEST ⟲ UI_REFINE) and e2e loop (E2E_AUTHOR → E2E_VERIFY ⟲ E2E_REMEDIATE) produce no commits of their own; only the code-eval loop above and the phase's own COMMIT/inline-auto-commit boundary (reached after all three loops terminate) do.
 
 ## Staging Strategies
 

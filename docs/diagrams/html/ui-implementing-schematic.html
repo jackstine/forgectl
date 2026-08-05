@@ -161,9 +161,12 @@
     <h1 class="page-title">UI Implementing</h1>
     <p class="lede">
       The <code>kind: "ui"</code> implementation phase as a <strong>high-level state-machine schematic</strong> —
-      the implementing spine plus <strong>two extra verification loops</strong>. Every batch passes
-      <strong>three sequential gates</strong>: code eval, Playwright-MCP QA, and authored Playwright e2e —
-      each with its own round budget before COMMIT decides terminal status.
+      the implementing spine (each IMPLEMENT item auto-commits when <code>enable_commits: true</code>) plus
+      <strong>two extra verification loops</strong>. Every batch passes <strong>three sequential gates</strong>:
+      code eval, Playwright-MCP QA, and authored Playwright e2e — each with its own round budget — before a
+      terminal verdict decides item status. <strong>COMMIT</strong> only appears as its own state when
+      <code>enable_commits: false</code>; when commits are enabled, the terminal e2e-gate transition
+      auto-commits the batch inline and skips straight onward.
     </p>
     <div class="meta-row">
       <span class="chip"><b>Role</b> Senior Engineer (UI)</span>
@@ -219,8 +222,10 @@
     <div class="read g1" data-reveal>
       <h4>Gate 1 · Code Eval</h4>
       <p><b>EVALUATE</b> spawns an Opus sub-agent on <code>impl-eval.md</code> to check code against specs.
-      <b>FAIL &lt; max</b> drops to <b>re-IMPLEMENT</b> and re-evaluates; <b>PASS</b> (or force-accept at
-      max) proceeds to QA. Counter: <b>eval_round</b>.</p>
+      Under <code>report</code>/<code>conversational</code>, <b>FAIL &lt; max</b> drops to
+      <b>re-IMPLEMENT</b> and re-evaluates. Under <code>direct</code>, IMPLEMENT runs once per batch and
+      FAIL loops straight back to EVALUATE instead. <b>PASS</b> (or force-accept at max) proceeds to QA.
+      Counter: <b>eval_round</b>.</p>
       <div class="tool">impl-eval.md · forgectl eval</div>
     </div>
     <div class="read g2" data-reveal>
@@ -234,7 +239,9 @@
       <h4>Gate 3 · E2E Verify</h4>
       <p><b>E2E_AUTHOR</b> turns the step list into runnable Playwright tests, then <b>E2E_VERIFY</b> confirms
       they run, pass, and cover. <b>FAIL</b> loops to <b>E2E_REMEDIATE</b>; zero scenarios is a vacuous PASS.
-      Counter: <b>e2e_round</b> → <b>COMMIT</b>.</p>
+      Counter: <b>e2e_round</b>. On a terminal verdict: <code>enable_commits: false</code> proceeds to
+      <b>COMMIT</b>; <code>enable_commits: true</code> auto-commits the batch inline at this same
+      transition and skips COMMIT.</p>
       <div class="tool">ui-e2e-eval.md · Playwright runner</div>
     </div>
   </div>
@@ -268,7 +275,7 @@ const N = {
 
   // lower row — e2e + ship  (reads right → left)
   verify:    { cx:1028, cy:462, w:132, h:48, type:'gate',     label:['E2E_VERIFY'] },
-  commit:    { cx:812,  cy:462, w:120, h:48, type:'work',     label:['COMMIT'] },
+  commit:    { cx:812,  cy:462, w:120, h:48, type:'work',     label:['COMMIT'], note:'enable_commits: false only — else inline auto-commit' },
   done:      { cx:600,  cy:462, w:108, h:48, type:'accept',   label:['DONE'] },
   shift:     { cx:372,  cy:462, w:146, h:48, type:'shift',    label:['PHASE_SHIFT'], note:'→ planning · next domain' },
 
@@ -308,8 +315,8 @@ const E = [
   { a1:['author','b'],      a2:['verify','t'],   label:'run suite', lp:{x:1028,y:312} },
 
   // lower row forward (right → left)
-  { a1:['verify','l'],      a2:['commit','r'],   label:'PASS / force', cls:'pass', lp:{x:872,y:450} },
-  { a1:['commit','l'],      a2:['done','r'],     label:'all done',     cls:'pass', lp:{x:678,y:450} },
+  { a1:['verify','l'],      a2:['commit','r'],   label:'PASS / force (terminal)', cls:'pass', lp:{x:872,y:450} },
+  { a1:['commit','l'],      a2:['done','r'],     label:'all done (or inline auto-commit)', cls:'pass', lp:{x:678,y:450} },
   { a1:['done','l'],        a2:['shift','r'],    label:'layers done',  lp:{x:478,y:450} },
 
   // gate 3 loop

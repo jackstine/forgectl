@@ -73,9 +73,11 @@
   ║  ║  │  5. Run tests for changed/added code                    │   ║   ║
   ║  ║  │  6. Fix any failures                                    │   ║   ║
   ║  ║  │                                                         │   ║   ║
-  ║  ║  │  Action: forgectl advance --message "<what I did>"      │   ║   ║
-  ║  ║  │         (--message required on first round if           │   ║   ║
-  ║  ║  │          enable_commits: true; auto-commit fires)       │   ║   ║
+  ║  ║  │  Action: forgectl advance [--message "<extra note>"]    │   ║   ║
+  ║  ║  │         (--message optional, every round; when          │   ║   ║
+  ║  ║  │          enable_commits: true the item auto-commits     │   ║   ║
+  ║  ║  │          with a message synthesized from the item's     │   ║   ║
+  ║  ║  │          description — any --message text is appended)  │   ║   ║
   ║  ║  │                                                         │   ║   ║
   ║  ║  │  Item marked: pending ──► done                          │   ║   ║
   ║  ║  └────────────────────────┬────────────────────────────────┘   ║   ║
@@ -126,34 +128,38 @@
   ║  │   │        │           │           │    (forced)                  │  ║
   ║  │   ▼        ▼           │           ▼                             │  ║
   ║  │                        │                                         │  ║
-  ║  │   IMPLEMENT (round 2+) │      COMMIT                             │  ║
-  ║  │                        │     items: passed                        │  ║
-  ║  │   Apply eval_mode:     │                                         │  ║
-  ║  │    report: study file  │      COMMIT                             │  ║
-  ║  │    direct: review diff │     items: failed (force-accept)         │  ║
-  ║  │    conversational:     │                                         │  ║
+  ║  │  report / conversational:         [TERMINAL]                     │  ║
+  ║  │   IMPLEMENT (round 2+)│      PASS >= min_rounds:                  │  ║
+  ║  │   Apply eval_mode:     │       items: passed                     │  ║
+  ║  │    report: study file  │      FAIL >= max_rounds (forced):        │  ║
+  ║  │    conversational:     │       items: failed (force-accept)      │  ║
   ║  │      relay verbally    │                                         │  ║
-  ║  │                        │                                         │  ║
-  ║  │   - Fix deficiencies   │                                         │  ║
-  ║  │   - Run tests          │                                         │  ║
-  ║  │   - No --message       │                                         │  ║
-  ║  │   - No auto-commit     │                                        │  ║
-  ║  │                        │                                         │  ║
-  ║  │   forgectl advance     │                                         │  ║
-  ║  │       │                │                                         │  ║
+  ║  │   - Fix deficiencies   │      enable_commits: true                │  ║
+  ║  │   - Run tests          │        auto-commit batch INLINE          │  ║
+  ║  │   - --message optional │        (message synthesized from batch  │  ║
+  ║  │   - item auto-commits  │         item descriptions; skipped      │  ║
+  ║  │     (same as round 1)  │         silently if nothing staged)     │  ║
+  ║  │   forgectl advance     │        ──► straight to ORIENT/DONE       │  ║
+  ║  │       │                │        (COMMIT state does not appear)   │  ║
   ║  │       └──► EVALUATE    │                                         │  ║
+  ║  │                        │      enable_commits: false               │  ║
+  ║  │  direct:                │        ──► COMMIT (see below)           │  ║
+  ║  │   EVALUATE (re-evaluate,│                                         │  ║
+  ║  │   no re-implement)      │                                         │  ║
+  ║  │   forgectl advance      │                                         │  ║
+  ║  │   --verdict PASS|FAIL   │                                         │  ║
+  ║  │       │                 │                                        │  ║
+  ║  │       └──► EVALUATE     │                                        │  ║
   ║  │                        │                                         │  ║
   ║  └ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─┼─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ┘  ║
   ║                           │                                            ║
   ║                           ▼                                            ║
   ║  ┌────────────────────────────────────────────────────────────────┐   ║
-  ║  │  COMMIT  (batch boundary — pause before continuing)            │   ║
+  ║  │  COMMIT  (batch boundary pause — only when enable_commits: false)│  ║
   ║  │                                                                │   ║
-  ║  │  When enable_commits: true                                     │   ║
-  ║  │    forgectl advance --message "<commit msg>"                   │   ║
-  ║  │    (auto-commits staged work before proceeding)                │   ║
+  ║  │  No git operation occurs (enable_commits is false at this      │   ║
+  ║  │  point by construction — the true path skips this state).      │   ║
   ║  │                                                                │   ║
-  ║  │  When enable_commits: false                                    │   ║
   ║  │    forgectl advance                                            │   ║
   ║  │    (no commit, just proceed)                                   │   ║
   ║  └────────────────────────────┬───────────────────────────────────┘   ║

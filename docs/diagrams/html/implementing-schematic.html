@@ -167,8 +167,13 @@
     <p class="lede">
       The <code>kind: "code"</code> implementation phase as a <strong>high-level state-machine
       schematic</strong> — the default code path on a single board. Batches of unblocked items are
-      implemented and run through <strong>one bounded eval / refine loop</strong> before each
-      <strong>COMMIT</strong> decides terminal status and the batch cycle repeats.
+      implemented — each item auto-commits immediately when <code>enable_commits: true</code> — and
+      run through <strong>one bounded eval / refine loop</strong> (re-IMPLEMENT on FAIL for
+      <code>report</code>/<code>conversational</code>; a direct re-EVALUATE loop with no
+      re-implementation for <code>direct</code>) before the batch reaches a terminal verdict and
+      the batch cycle repeats. <strong>COMMIT</strong> only appears as its own state when
+      <code>enable_commits: false</code>; when commits are enabled, the terminal EVALUATE
+      transition auto-commits the batch inline and skips straight to the next ORIENT/DONE.
     </p>
     <div class="meta-row">
       <span class="chip"><b>Role</b> Senior Engineer</span>
@@ -224,22 +229,30 @@
       <h4>Batch loop</h4>
       <p><b>ORIENT → IMPLEMENT → EVALUATE.</b> ORIENT selects up to <code>batch</code> unblocked
       items in layer order; <b>IMPLEMENT</b> writes complete code for each item in turn — no stubs —
-      running tests as it goes, then hands the whole batch to EVALUATE.</p>
+      running tests as it goes, then hands the whole batch to EVALUATE. Every item auto-commits
+      immediately when <code>enable_commits: true</code> (message synthesized from the item's
+      <code>description</code>; <code>--message</code> optional, appended if given) — every round,
+      not just the first.</p>
       <div class="tool">forgectl advance · plan.json</div>
     </div>
     <div class="read g2" data-reveal>
       <h4>Eval / refine</h4>
       <p><b>EVALUATE</b> spawns an AI sub-agent that scores the batch across <b>7 dimensions</b> and
-      writes <code>evals/batch-N-round-M.md</code>. <b>FAIL &lt; max</b> drops to
-      <b>re-IMPLEMENT</b> and re-evaluates; <b>PASS ≥ min</b> (or force-accept at max) proceeds to
-      COMMIT. Counter: <b>rounds</b>.</p>
+      writes <code>evals/batch-N-round-M.md</code>. Under <code>report</code>/<code>conversational</code>,
+      <b>FAIL &lt; max</b> (or PASS &lt; min) drops to <b>re-IMPLEMENT</b> and re-evaluates. Under
+      <code>direct</code>, IMPLEMENT runs once per batch and FAIL/below-min PASS loops directly back
+      to EVALUATE instead. <b>PASS ≥ min</b> (or force-accept at max) reaches a terminal verdict.
+      Counter: <b>rounds</b>.</p>
       <div class="tool">impl-eval.md · forgectl eval</div>
     </div>
     <div class="read g3" data-reveal>
       <h4>Commit &amp; shift</h4>
-      <p><b>COMMIT</b> is the batch boundary — <b>passed</b> and <b>force-accepted</b> items land
-      together. More batches / layers loop back to ORIENT; when every layer is terminal, <b>DONE</b>
-      hands off to <b>PHASE_SHIFT</b>, routed onward by plan queue and <code>kind</code>.</p>
+      <p>When <code>enable_commits: false</code>, <b>COMMIT</b> is the batch boundary —
+      <b>passed</b> and <b>force-accepted</b> items land together. When <code>enable_commits: true</code>,
+      COMMIT is skipped: the terminal EVALUATE transition auto-commits the batch inline (message
+      synthesized from the batch's item descriptions) and proceeds straight onward. More batches /
+      layers loop back to ORIENT; when every layer is terminal, <b>DONE</b> hands off to
+      <b>PHASE_SHIFT</b>, routed onward by plan queue and <code>kind</code>.</p>
       <div class="tool">enable_commits · PHASE_SHIFT</div>
     </div>
   </div>
@@ -264,11 +277,11 @@ const N = {
   orient:    { cx:300,  cy:150, w:116, h:48, type:'work',     label:['ORIENT'] },
   implement: { cx:498,  cy:150, w:142, h:48, type:'work',     label:['IMPLEMENT'], note:'items 1..n' },
   evaluate:  { cx:702,  cy:150, w:132, h:48, type:'decision', label:['EVALUATE'], note:'7 dimensions' },
-  commit:    { cx:906,  cy:150, w:120, h:48, type:'work',     label:['COMMIT'] },
+  commit:    { cx:906,  cy:150, w:120, h:48, type:'work',     label:['COMMIT'], note:'enable_commits: false only — else inline auto-commit' },
   done:      { cx:1100, cy:150, w:112, h:48, type:'terminal', label:['DONE'] },
 
   // refine loop under the eval gate
-  reimpl:    { cx:702,  cy:304, w:152, h:48, type:'refine',   label:['re-IMPLEMENT'], note:'round 2+' },
+  reimpl:    { cx:702,  cy:304, w:152, h:48, type:'refine',   label:['re-IMPLEMENT'], note:'round 2+ · report/conversational only — direct loops EVALUATE→EVALUATE' },
 
   // phase shift — drops below DONE
   shift:     { cx:1100, cy:360, w:156, h:48, type:'shift',    label:['PHASE_SHIFT'], note:'→ planning · next domain' },
@@ -291,8 +304,8 @@ const E = [
   { a1:['src','r'],        a2:['orient','l'],   label:'kind: code', lp:{x:202,y:136} },
   { a1:['orient','r'],     a2:['implement','l'] },
   { a1:['implement','r'],  a2:['evaluate','l'] },
-  { a1:['evaluate','r'],   a2:['commit','l'],   label:'PASS / force', cls:'pass', lp:{x:805,y:138} },
-  { a1:['commit','r'],     a2:['done','l'],     label:'all done',     cls:'pass', lp:{x:1005,y:138} },
+  { a1:['evaluate','r'],   a2:['commit','l'],   label:'PASS / force (terminal)', cls:'pass', lp:{x:805,y:138} },
+  { a1:['commit','r'],     a2:['done','l'],     label:'all done (or inline auto-commit)', cls:'pass', lp:{x:1005,y:138} },
 
   // eval refine loop
   { a1:['evaluate','b',48], a2:['reimpl','t',48], label:'FAIL < max', cls:'loop', lp:{x:758,y:227} },

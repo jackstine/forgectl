@@ -50,7 +50,7 @@ Forgectl drives a state machine. Every `forgectl advance` and `forgectl status` 
 
 After each advance, forgectl prints the new state. Handle it and repeat until DONE.
 
-The states in the implementing phase are: **ORIENT → IMPLEMENT → EVALUATE → COMMIT → ORIENT → ... → DONE**
+The states in the implementing phase are: **ORIENT → IMPLEMENT → EVALUATE → ORIENT → ... → DONE**, with a **COMMIT** state in between only when `enable_commits: false` (when `enable_commits: true`, the batch-terminal commit happens inline at the terminal EVALUATE transition and COMMIT never appears).
 
 For detailed instructions on what to do in each state (ORIENT, IMPLEMENT round 1, IMPLEMENT round 2+, EVALUATE, COMMIT, DONE), including required flags and exact commands, see:
 

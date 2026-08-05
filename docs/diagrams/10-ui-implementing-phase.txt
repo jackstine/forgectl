@@ -12,10 +12,15 @@
     - ui-e2e-eval.md   end-to-end verification   (Playwright test runner)
 
   The ui_implementing phase reuses the implementing phase's spine — layers,
-  dependency-ordered batches, one-item-at-a-time IMPLEMENT, the code EVALUATE
-  loop, and the COMMIT batch boundary — and inserts TWO additional verification
-  loops between code EVALUATE and COMMIT: a QA placement loop and an end-to-end
-  (e2e) loop. Each batch passes three sequential gates before it can commit.
+  dependency-ordered batches, one-item-at-a-time IMPLEMENT (per-item auto-commit
+  every round when enable_commits: true), the code EVALUATE loop (including its
+  eval_mode: "direct" retry, which loops EVALUATE→EVALUATE without re-implementing),
+  and the batch-terminal commit boundary — and inserts TWO additional verification
+  loops between code EVALUATE and that boundary: a QA placement loop and an
+  end-to-end (e2e) loop. Each batch passes three sequential gates before it can
+  commit. The batch-terminal commit is COMMIT when enable_commits: false, or an
+  inline auto-commit at the terminal E2E_VERIFY transition when enable_commits: true
+  (COMMIT is skipped in that case — see LOOP 3 below).
 
   ┌─────────────────────────────────────────────────────────────────────────┐
   │  INITIALIZATION                                                         │
@@ -62,8 +67,9 @@
   ║  ╠════════════════════════════════════════════════════════════════╣   ║
   ║  ║  IMPLEMENT(1) ──► IMPLEMENT(2) ──► ... ──► IMPLEMENT(n)         ║   ║
   ║  ║  - One item per advance; full context (steps/files/specs/refs) ║   ║
-  ║  ║  - First round commits each item when enable_commits: true     ║   ║
-  ║  ║    (--message required); item marked pending ──► done          ║   ║
+  ║  ║  - EVERY round commits each item when enable_commits: true      ║   ║
+  ║  ║    (--message optional, appended to a message synthesized from  ║   ║
+  ║  ║    the item's description); item marked pending ──► done        ║   ║
   ║  ║  - Identical to the implementing phase IMPLEMENT behaviour      ║   ║
   ║  ╚════════════════════════════════════════╤════════════════════════╝   ║
   ║                                           │ batch complete             ║
@@ -84,9 +90,16 @@
   ║  │  └──────────┬───────────────────────┬─────────────────────┘     │  ║
   ║  │   FAIL <max │ / PASS <min            │ PASS >=min / FAIL >=max    │  ║
   ║  │             ▼                        ▼  (force-accept flagged)    │  ║
-  ║  │     IMPLEMENT (round 2+)        ───► QA_TEST  (qa_round = 1)      │  ║
+  ║  │   report/conversational:        ───► QA_TEST  (qa_round = 1)      │  ║
+  ║  │     IMPLEMENT (round 2+)             │                            │  ║
   ║  │     apply eval_mode, fix,            │                            │  ║
+  ║  │     item auto-commits (same          │                            │  ║
+  ║  │     as round 1);                     │                            │  ║
   ║  │     forgectl advance ──► EVALUATE    │                            │  ║
+  ║  │   direct:                            │                            │  ║
+  ║  │     EVALUATE (re-evaluate directly,  │                            │  ║
+  ║  │     no re-implement — IMPLEMENT ran  │                            │  ║
+  ║  │     exactly once for this batch)     │                            │  ║
   ║  └ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─│─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ┘  ║
   ║                                         ▼                            ║
   ║  ┌ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─┐  ║
@@ -155,7 +168,7 @@
   ║  │  └──────────┬───────────────────────┬─────────────────────┘     │  ║
   ║  │   FAIL <max │ / PASS <min            │ PASS >=min / FAIL >=max    │  ║
   ║  │             ▼                        ▼  (e2e force-accept flagged)│  ║
-  ║  │  ┌────────────────────┐         ───► COMMIT                      │  ║
+  ║  │  ┌────────────────────┐    [TERMINAL — see COMMIT block below]   │  ║
   ║  │  │  E2E_REMEDIATE     │                                          │  ║
   ║  │  │  Fix the failing   │                                          │  ║
   ║  │  │  tests OR the UI   │                                          │  ║
@@ -169,13 +182,20 @@
   ║                               │                                       ║
   ║                               ▼                                       ║
   ║  ┌────────────────────────────────────────────────────────────────┐   ║
-  ║  │  COMMIT  (batch boundary — terminal status decided HERE)       │   ║
+  ║  │  COMMIT / INLINE AUTO-COMMIT (terminal status decided HERE)     │   ║
   ║  │                                                                │   ║
   ║  │  Items ──► passed   when code, qa AND e2e all PASSed in budget │   ║
   ║  │  Items ──► failed   when ANY loop force-accepted at its max    │   ║
   ║  │                                                                │   ║
-  ║  │  enable_commits: true  → advance --message "<commit msg>"      │   ║
-  ║  │  enable_commits: false → advance                              │   ║
+  ║  │  enable_commits: true                                          │   ║
+  ║  │    COMMIT is SKIPPED. The terminal E2E_VERIFY advance itself    │   ║
+  ║  │    auto-commits the batch inline (message synthesized from      │   ║
+  ║  │    the batch's item descriptions; skipped silently if nothing  │   ║
+  ║  │    is staged), then proceeds straight to ORIENT/DONE.          │   ║
+  ║  │                                                                │   ║
+  ║  │  enable_commits: false                                         │   ║
+  ║  │    COMMIT appears as its own state (no git operation):          │   ║
+  ║  │      forgectl advance                                          │   ║
   ║  └────────────────────────────┬───────────────────────────────────┘   ║
   ║                               │                                       ║
   ║              ┌────────────────┴────────────────┐                      ║
@@ -213,12 +233,13 @@
   THREE SEQUENTIAL GATES PER BATCH
   ═══════════════════════════════════════════════════════════════════════════
 
-  Every batch passes all three loops, in order, before COMMIT — none skipped:
+  Every batch passes all three loops, in order, before the batch-terminal
+  commit boundary — none skipped:
 
-    IMPLEMENT(s) ─► [ CODE EVAL ] ─► [ QA ] ─► [ E2E ] ─► COMMIT
-                     impl-eval        ui-qa     ui-e2e
-                     report           Playwright Playwright
-                     verdict          MCP        test runner
+    IMPLEMENT(s) ─► [ CODE EVAL ] ─► [ QA ] ─► [ E2E ] ─► COMMIT or
+                     impl-eval        ui-qa     ui-e2e     inline auto-commit
+                     report           Playwright Playwright (enable_commits:
+                     verdict          MCP        test runner true skips COMMIT)
 
   A loop "terminates" when it reaches PASS with rounds >= its min_rounds, or
   force-accepts at its max_rounds. Each loop carries its own round budget and
@@ -254,8 +275,10 @@
   pending ──► done ──► passed   (all three loops PASSed within their budgets)
                  └──► failed   (any loop force-accepted at its max_rounds)
 
-  Terminal status is decided ONLY at COMMIT, after all three loops have
-  terminated. While the batch moves through code / qa / e2e, items stay "done".
+  Terminal status is decided ONLY at the batch-terminal commit boundary (COMMIT
+  when enable_commits: false; the inline auto-commit at the terminal E2E_VERIFY
+  transition when enable_commits: true), after all three loops have terminated.
+  While the batch moves through code / qa / e2e, items stay "done".
 
   The plan.json items[].rounds field holds eval_round + qa_round + e2e_round
   (a compatibility value matching the implementing-phase shape); the per-loop

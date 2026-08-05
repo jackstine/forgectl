@@ -42,11 +42,15 @@ Always run from the project root. **Never assume a workspace path — use the pa
 ## State Machine
 
 ```
-ORIENT → IMPLEMENT(1..n) → EVALUATE ──► QA_TEST ⟲ UI_REFINE ──► E2E_AUTHOR → E2E_VERIFY ⟲ E2E_REMEDIATE ──► COMMIT → ORIENT → … → DONE
+ORIENT → IMPLEMENT(1..n) → EVALUATE ──► QA_TEST ⟲ UI_REFINE ──► E2E_AUTHOR → E2E_VERIFY ⟲ E2E_REMEDIATE ──► ORIENT → … → DONE
                             (code loop)   (qa loop)                            (e2e loop)
 ```
 
-Three sequential gates per batch — **code eval, then QA, then e2e** — before COMMIT. Each loop has its own round budget (`eval`, `qa`, `e2e` — each `min_rounds`/`max_rounds`). A loop terminates on PASS at/above its `min_rounds`, or force-accepts at its `max_rounds`. **Any force-accept marks the batch's items `failed` at COMMIT but does not abort the phase.**
+Three sequential gates per batch — **code eval, then QA, then e2e** — before the batch-terminal commit. Each loop has its own round budget (`eval`, `qa`, `e2e` — each `min_rounds`/`max_rounds`). A loop terminates on PASS at/above its `min_rounds`, or force-accepts at its `max_rounds`. **Any force-accept marks the batch's items `failed` at the commit boundary but does not abort the phase.**
+
+Under `eval.eval_mode: "direct"`, the code loop's IMPLEMENT runs exactly once per batch — a FAIL, or a PASS below `eval.min_rounds`, loops directly back to EVALUATE instead of re-entering IMPLEMENT. Under `"report"`/`"conversational"`, FAIL/below-min-rounds PASS still re-enters IMPLEMENT as shown above.
+
+When E2E_VERIFY reaches a terminal verdict (PASS ≥ `e2e.min_rounds`, or FAIL force-accepted at `e2e.max_rounds`): with `enable_commits: true`, that same `advance` auto-commits the batch inline and proceeds straight to ORIENT/DONE — **COMMIT does not appear**. With `enable_commits: false`, it proceeds to the COMMIT state (a no-op advance) first.
 
 ### Transition Table (abridged — see the spec for the authoritative table)
 
@@ -54,18 +58,17 @@ Three sequential gates per batch — **code eval, then QA, then e2e** — before
 |------|-------|----|-----------|
 | ORIENT | — | IMPLEMENT | Batch selected (resets `eval_round`, `qa_round`, `e2e_round`) |
 | ORIENT | — | DONE | All layers complete |
-| IMPLEMENT (round 1) | `--message` | IMPLEMENT / EVALUATE | More items / last item in batch |
-| IMPLEMENT (round 2+) | — | IMPLEMENT / EVALUATE | More items / last item |
+| IMPLEMENT (any round) | `[--message]` (optional) | IMPLEMENT / EVALUATE | More items / last item in batch |
 | EVALUATE | `--verdict --eval-report` | QA_TEST | PASS ≥ min, or FAIL force-accept at max |
-| EVALUATE | `--verdict --eval-report` | IMPLEMENT | PASS < min, or FAIL < max |
+| EVALUATE | `--verdict --eval-report` | IMPLEMENT (report/conversational) or EVALUATE (direct) | PASS < min, or FAIL < max |
 | QA_TEST | `--verdict --eval-report` | E2E_AUTHOR | PASS ≥ min, or FAIL force-accept at max (**step list must be present**) |
 | QA_TEST | `--verdict --eval-report` | UI_REFINE | PASS < min, or FAIL < max |
 | UI_REFINE | — | QA_TEST | Increment `qa_round` |
 | E2E_AUTHOR | — | E2E_VERIFY | Increment `e2e_round` |
-| E2E_VERIFY | `--verdict --eval-report` | COMMIT | PASS ≥ min, or FAIL force-accept at max |
+| E2E_VERIFY | `--verdict --eval-report` | ORIENT/DONE (`enable_commits: true`) or COMMIT (`enable_commits: false`) | PASS ≥ min, or FAIL force-accept at max |
 | E2E_VERIFY | `--verdict --eval-report` | E2E_REMEDIATE | PASS < min, or FAIL < max |
 | E2E_REMEDIATE | — | E2E_VERIFY | Increment `e2e_round` |
-| COMMIT | `--message` | ORIENT / DONE | More work / finished |
+| COMMIT (only when `enable_commits: false`) | — | ORIENT / DONE | More work / finished |
 
 ---
 
@@ -85,14 +88,15 @@ Build the UI item. The output shows item ID, name, description, steps, files, sp
 2. Search the codebase (via subagent) to confirm the feature/component doesn't already exist.
 3. Implement completely — no placeholders or stubs.
 4. Run the tests for what you changed; fix failures, including unrelated ones, as part of this increment.
-5. Advance (**forgectl auto-commits on round 1**): `forgectl advance --message "<what you implemented>"`
+5. Advance (**forgectl auto-commits this item when `enable_commits: true`**, message synthesized from the item's `description`): `forgectl advance`
+   — pass `--message "<extra context>"` only to append to the synthesized message.
 6. Handle the next state (another IMPLEMENT, or EVALUATE when the batch is complete).
 
-### IMPLEMENT (round 2+ — after a code eval)
-The output shows the eval report path.
+### IMPLEMENT (round 2+ — after a code eval, `eval_mode: "report"` or `"conversational"` only)
+The output shows the eval report path. (Under `eval_mode: "direct"`, this state never recurs — a FAIL or below-min-rounds PASS re-enters EVALUATE directly; see below.)
 1. **Study the eval report** for specific deficiencies.
 2. Fix them; if it was a PASS below min rounds, verify and harden.
-3. Run tests. Advance (**no message on round 2+**): `forgectl advance`
+3. Run tests. Advance (**auto-commits again, exactly like round 1**): `forgectl advance`
 
 ### EVALUATE (code loop)
 All batch items are implemented; evaluate the code.
@@ -104,7 +108,7 @@ All batch items are implemented; evaluate the code.
    - returns the verdict and report path.
 2. Review the handed-off report, then advance:
    `forgectl advance --eval-report <path> --verdict PASS|FAIL`
-3. On a terminal code verdict (PASS ≥ min, or force-accept), the batch moves to **QA_TEST**.
+3. On a terminal code verdict (PASS ≥ min, or force-accept), the batch moves to **QA_TEST**. On a non-terminal verdict: under `"report"`/`"conversational"`, back to IMPLEMENT; under `"direct"`, back to EVALUATE directly for another round (no re-implementation).
 
 ### QA_TEST (qa loop) — the running UI, driven by the Playwright MCP
 The output shows the app launch command, URL, the batch items, and the step-list path.
@@ -141,7 +145,7 @@ The output shows the step-list path and its scenario count, the test dir, and th
    - returns the verdict.
 2. Review the handed-off report, then advance:
    `forgectl advance --eval-report <e2e-report> --verdict PASS|FAIL`
-   - PASS ≥ `e2e.min_rounds` (or FAIL force-accept at max) → **COMMIT**.
+   - PASS ≥ `e2e.min_rounds` (or FAIL force-accept at max) → this is the terminal transition for the batch. With `enable_commits: true`, this same `advance` auto-commits the batch inline (message synthesized from the batch's item descriptions) and proceeds straight to **ORIENT/DONE** — COMMIT does not appear. With `enable_commits: false`, it proceeds to **COMMIT**.
    - otherwise → **E2E_REMEDIATE**.
 
 ### E2E_REMEDIATE (e2e loop — the fixer)
@@ -149,10 +153,10 @@ The output shows the step-list path and its scenario count, the test dir, and th
 2. Fix the UI under test or the test; re-run the suite. No commit, no `--message`.
 3. `forgectl advance` → back to E2E_VERIFY (`e2e_round` increments).
 
-### COMMIT
-The batch is terminal after the e2e loop. Items are marked `passed` (all three loops passed within budget) or `failed` (any loop force-accepted).
+### COMMIT (only reached when `enable_commits: false`)
+The batch is terminal after the e2e loop. Items are marked `passed` (all three loops passed within budget) or `failed` (any loop force-accepted). This state is a no-op advance — no git operation occurs (when `enable_commits: true`, the batch already auto-committed inline at the terminal E2E_VERIFY `advance` above, and this state never appears).
 1. Add a log entry to the implementation log.
-2. Advance: `forgectl advance --message "<commit message>"` (when `enable_commits: true`; the scaffold stages per `commit_strategy` and commits). When `false`, `forgectl advance`.
+2. Advance: `forgectl advance`
 3. Next state: ORIENT (more work) or DONE.
 
 ### DONE
@@ -177,7 +181,9 @@ Rejections (exit 1): `handoff` outside an evaluator state; `handoff` with no fil
 
 ## Important Details
 
-- **Round 1 IMPLEMENT** requires `--message` (auto-commit per item). **Round 2+ IMPLEMENT** does not.
+- **Every IMPLEMENT round** auto-commits its item when `enable_commits: true` — first round and every round after a code-eval FAIL alike. `--message` is optional and, when given, is appended to the message synthesized from the item's `description`.
+- **`eval.eval_mode: "direct"`** runs IMPLEMENT exactly once per batch; a FAIL or below-min-rounds PASS loops directly back to EVALUATE instead of re-entering IMPLEMENT.
+- **COMMIT** only appears when `enable_commits: false`. When `enable_commits: true`, the batch-terminal commit happens inline as part of the terminal E2E_VERIFY `advance`, and the scaffold proceeds directly to ORIENT/DONE.
 - **ORIENT** is a guided pause when `general.user_guided` is true — stop and discuss.
 - The three loops count rounds **independently** (`eval_round`, `qa_round`, `e2e_round`), reset when a batch is selected.
 - The **step list is always produced** every QA round, in every `eval_mode`, and must be present to leave the QA loop toward E2E_AUTHOR.

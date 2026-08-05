@@ -200,9 +200,12 @@
         <p class="desc reveal">
           Identical to the implementing phase spine: dependency-ordered batches, one item
           at a time, with full context (steps / files / specs / refs) per item.
-          First-round commits when <code>enable_commits: true</code>; items move
+          Every round auto-commits that item when <code>enable_commits: true</code> — first
+          round and every round after an eval FAIL alike (message synthesized from the item's
+          <code>description</code>; <code>--message</code> optional and appended); items move
           <strong>pending → done</strong> here. Terminal status (<strong>passed / failed</strong>)
-          is decided later at COMMIT after all three loops complete.
+          is decided later at the batch-terminal commit boundary (COMMIT, or an inline
+          auto-commit when <code>enable_commits: true</code>) after all three loops complete.
         </p>
         <div class="track-label reveal">Batch sequence</div>
         <div class="track reveal">
@@ -441,7 +444,7 @@
           <span class="arrow">→</span>
           <span class="state gate">E2E_VERIFY <span class="sub">(e2e_round++)</span></span>
           <span class="arrow">→</span>
-          <span class="state">COMMIT</span>
+          <span class="state">COMMIT / inline auto-commit</span>
         </div>
         <div class="branch reveal" style="margin-top:14px">
           <div class="bln">
@@ -452,11 +455,14 @@
           </div>
           <div class="bln">
             <span class="verdict pass">PASS ≥min</span>
-            → proceed to <span class="state">COMMIT</span>
+            → <code>enable_commits: true</code>: auto-commit batch inline → <span class="state terminal">ORIENT/DONE</span> directly (COMMIT skipped)
+            &nbsp;·&nbsp; <code>enable_commits: false</code>: proceed to <span class="state">COMMIT</span>
           </div>
           <div class="bln">
             <span class="verdict fail">FAIL ≥max</span>
-            → <span style="color:var(--muted-2)">e2e force-accept flagged</span> → proceed to <span class="state">COMMIT</span>
+            → <span style="color:var(--muted-2)">e2e force-accept flagged</span> →
+            <code>enable_commits: true</code>: auto-commit batch inline → <span class="state terminal">ORIENT/DONE</span>
+            &nbsp;·&nbsp; <code>enable_commits: false</code>: proceed to <span class="state">COMMIT</span>
           </div>
         </div>
       </article>
@@ -482,7 +488,10 @@
           <strong>passed</strong> = code eval, QA, and E2E all passed within their respective
           round budgets. <strong>failed</strong> = any loop reached its <code>max_rounds</code>
           and was force-accepted. Items stay <code>done</code> while the batch moves
-          through the three loops; status is only finalized at COMMIT.
+          through the three loops; status is only finalized at this boundary — the COMMIT
+          state when <code>enable_commits: false</code>, or the inline auto-commit at the
+          terminal E2E_VERIFY transition when <code>enable_commits: true</code> (in which case
+          COMMIT never renders).
         </p>
         <div class="track-label reveal">Item state progression</div>
         <div class="item-states reveal">
@@ -505,12 +514,12 @@
         <div class="track reveal">
           <span class="state eval">enable_commits: true</span>
           <span class="arrow">→</span>
-          <span class="state">forgectl advance --message "&lt;msg&gt;"</span>
+          <span class="state">COMMIT is skipped; the batch already auto-committed inline at the terminal E2E_VERIFY <code>advance</code> (message synthesized from item descriptions)</span>
         </div>
         <div class="track reveal" style="margin-top:6px">
           <span class="state loop">enable_commits: false</span>
           <span class="arrow">→</span>
-          <span class="state">forgectl advance</span>
+          <span class="state">forgectl advance <span class="sub">(no git operation)</span></span>
         </div>
         <div class="track-label reveal" style="margin-top:18px">After commit</div>
         <div class="branch reveal">
@@ -583,7 +592,7 @@
           <div class="ml"><span class="mk">Tool</span><span class="mv tool">forgectl eval (code review)</span></div>
           <div class="ml"><span class="mk">Budget</span><span class="mv">ui_implementing.eval.min / max</span></div>
           <div class="ml"><span class="mk">PASS</span><span class="mv">→ QA_TEST</span></div>
-          <div class="ml"><span class="mk">FAIL</span><span class="mv">→ IMPLEMENT (round 2+) → EVALUATE</span></div>
+          <div class="ml"><span class="mk">FAIL</span><span class="mv">report/conversational → IMPLEMENT (round 2+) → EVALUATE &nbsp;·&nbsp; direct → EVALUATE directly (no re-implement)</span></div>
           <div class="ml"><span class="mk">Force</span><span class="mv">at max_rounds → proceed (flagged)</span></div>
         </div>
       </div>
@@ -607,7 +616,7 @@
           <div class="ml"><span class="mk">Tool</span><span class="mv tool">Playwright test runner</span></div>
           <div class="ml"><span class="mk">Budget</span><span class="mv">ui_implementing.e2e.min / max</span></div>
           <div class="ml"><span class="mk">Zero</span><span class="mv">scenarios → PASS (vacuous)</span></div>
-          <div class="ml"><span class="mk">PASS</span><span class="mv">→ COMMIT</span></div>
+          <div class="ml"><span class="mk">PASS</span><span class="mv">→ COMMIT (enable_commits: false) or inline auto-commit → ORIENT/DONE (enable_commits: true)</span></div>
           <div class="ml"><span class="mk">FAIL</span><span class="mv">→ E2E_REMEDIATE → E2E_VERIFY</span></div>
         </div>
       </div>
@@ -689,7 +698,7 @@
         <span class="arrow loopback">⟲</span>
         <span class="state loop">E2E_REMEDIATE</span>
         <span class="arrow">→</span>
-        <span class="state">COMMIT</span>
+        <span class="state">COMMIT <span class="sub">(enable_commits: false)</span> / inline auto-commit <span class="sub">(enable_commits: true)</span></span>
         <span class="arrow">→</span>
         <span class="state terminal">DONE</span>
       </div>

@@ -66,9 +66,9 @@ Forgectl drives a state machine. Every `forgectl advance` and `forgectl status` 
 
 The states in the `ui_implementing` phase are:
 
-**ORIENT → IMPLEMENT → EVALUATE → QA_TEST ⟲ UI_REFINE → E2E_AUTHOR → E2E_VERIFY ⟲ E2E_REMEDIATE → COMMIT → ORIENT → … → DONE**
+**ORIENT → IMPLEMENT → EVALUATE → QA_TEST ⟲ UI_REFINE → E2E_AUTHOR → E2E_VERIFY ⟲ E2E_REMEDIATE → ORIENT → … → DONE**, with a **COMMIT** state in between only when `enable_commits: false` (when `enable_commits: true`, the batch-terminal commit happens inline at the terminal E2E_VERIFY transition and COMMIT never appears).
 
-Each batch passes through three sequential gates — code EVALUATE, then the QA loop, then the e2e loop — before COMMIT. The three loops have independent round budgets; any of them may force-accept at its maximum rounds, which marks the batch's items `failed` at COMMIT (but does not abort the phase).
+Each batch passes through three sequential gates — code EVALUATE, then the QA loop, then the e2e loop — before the batch-terminal commit. The three loops have independent round budgets; any of them may force-accept at its maximum rounds, which marks the batch's items `failed` at that commit boundary (but does not abort the phase). Every IMPLEMENT round auto-commits its item when `enable_commits: true`, and under `eval.eval_mode: "direct"` the code loop re-evaluates directly on FAIL rather than re-entering IMPLEMENT.
 
 For detailed per-state instructions — including the Playwright MCP QA step, Playwright test authoring, the `handoff` command, required flags, and exact commands — see:
 
@@ -111,7 +111,7 @@ See: [references/subagent-usage.md](references/subagent-usage.md)
 <IMPORTANT_INFO>
 
 99999. Forgectl is the driver. Run `forgectl status` when unsure. Read and follow the `Action:` line and the resolved paths in every output — never assume a workspace path.
-999999. Every batch passes through all three gates (code eval → QA → e2e) before COMMIT. Do not try to skip a loop.
+999999. Every batch passes through all three gates (code eval → QA → e2e) before the batch-terminal commit (COMMIT, or the inline auto-commit at terminal E2E_VERIFY when `enable_commits: true`). Do not try to skip a loop.
 9999999. The QA sub-agent QAs the **running** app through the Playwright MCP. If the app will not launch or the URL will not load, that is a real defect — record it as a QA FAIL and fix it in UI_REFINE.
 99999999. E2E tests are authored **only** from the QA step list — do not invent scenarios absent from it. The most recent step list wins.
 999999999. The sub-agent hands its outputs back with `forgectl handoff` before you record a verdict. The step list is handed off in every mode.

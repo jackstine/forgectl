@@ -174,7 +174,7 @@
           <span class="state">IMPLEMENT <span class="sub">batch 1..n</span></span>
         </div>
         <div class="track reveal" style="margin-top:8px">
-          <span class="state loop">⟲ after COMMIT</span>
+          <span class="state loop">⟲ after COMMIT (enable_commits: false) or the terminal EVALUATE auto-commit (enable_commits: true)</span>
           <span class="arrow">→</span>
           <span class="state">ORIENT</span>
           <span class="arrow">→</span>
@@ -193,15 +193,18 @@
           </div>
           <div class="io reveal">
             <div class="ln"><span class="tag">action</span><span class="val">forgectl advance</span></div>
-            <div class="ln"><span class="tag">flag</span><span class="val">--message "&lt;what I did&gt;"</span></div>
+            <div class="ln"><span class="tag">flag</span><span class="val">--message "&lt;optional extra note&gt;"</span></div>
           </div>
         </div>
         <p class="desc reveal">
           One item at a time within the batch. forgectl displays the item card; the engineer
           reads spec contracts, consults notes, verifies the feature isn't already implemented,
           writes <strong>complete code with no stubs</strong>, runs tests, and fixes failures.
-          <code>--message</code> is required on round 1 when <code>enable_commits: true</code> —
-          this fires the auto-commit. Item advances from <code>pending → done</code>.
+          Every round auto-commits that item when <code>enable_commits: true</code> — first round
+          and every round after an eval FAIL alike. <code>--message</code> is optional: the commit
+          message is synthesized from the item's <code>description</code>, and any supplied
+          <code>--message</code> text is appended rather than substituted. Item advances from
+          <code>pending → done</code>.
         </p>
 
         <div class="track-label reveal">Example item card</div>
@@ -284,30 +287,36 @@
           <div class="bln">
             <span class="verdict pass">PASS ≥ min_rounds</span>
             <span class="arrow">→</span>
-            <span class="state">COMMIT</span>
+            <span class="state">enable_commits: true → auto-commit batch inline → ORIENT/DONE</span>
+            &nbsp;·&nbsp; <span class="state">enable_commits: false → COMMIT</span>
             &nbsp;·&nbsp; items: <span style="color:var(--ok)">passed</span>
           </div>
           <div class="bln">
             <span class="verdict pass">PASS &lt; min_rounds</span>
             <span class="arrow loopback">⟲</span>
-            <span class="state loop">IMPLEMENT <span class="sub">r2+</span></span>
+            <span class="state loop">report/conversational → IMPLEMENT <span class="sub">r2+</span></span>
+            &nbsp;·&nbsp;
+            <span class="state loop">direct → EVALUATE <span class="sub">re-evaluate</span></span>
             &nbsp;(still must hit min)
           </div>
           <div class="bln">
             <span class="verdict fail">FAIL &lt; max_rounds</span>
             <span class="arrow loopback">⟲</span>
-            <span class="state loop">IMPLEMENT <span class="sub">r2+</span></span>
+            <span class="state loop">report/conversational → IMPLEMENT <span class="sub">r2+</span></span>
+            &nbsp;·&nbsp;
+            <span class="state loop">direct → EVALUATE <span class="sub">re-evaluate</span></span>
             &nbsp;(fix deficiencies)
           </div>
           <div class="bln">
             <span class="verdict fail">FAIL ≥ max_rounds</span>
             <span class="arrow">→</span>
-            <span class="state">COMMIT</span>
+            <span class="state">enable_commits: true → auto-commit batch inline → ORIENT/DONE</span>
+            &nbsp;·&nbsp; <span class="state">enable_commits: false → COMMIT</span>
             &nbsp;·&nbsp; items: <span style="color:var(--fail)">failed</span> (force-accept)
           </div>
         </div>
 
-        <div class="track-label reveal">Re-implement (round 2+)</div>
+        <div class="track-label reveal">Re-implement (round 2+) — <code>eval_mode: report | conversational</code> only</div>
         <div class="track reveal">
           <span class="state loop">IMPLEMENT <span class="sub">r2+</span></span>
           <span class="arrow">→</span>
@@ -315,8 +324,19 @@
           <span class="arrow loopback">⟲</span>
         </div>
         <div class="branch reveal" style="margin-top:6px">
-          <div class="bln" style="color:var(--muted-2)">eval_mode: report → study eval file &nbsp;·&nbsp; direct → review diff &nbsp;·&nbsp; conversational → relay verbally</div>
-          <div class="bln" style="color:var(--muted-2)">No <code>--message</code> flag &nbsp;·&nbsp; No auto-commit on round 2+</div>
+          <div class="bln" style="color:var(--muted-2)">eval_mode: report → study eval file &nbsp;·&nbsp; conversational → relay verbally</div>
+          <div class="bln" style="color:var(--muted-2)"><code>--message</code> optional &nbsp;·&nbsp; item auto-commits on round 2+, same as round 1</div>
+        </div>
+
+        <div class="track-label reveal">Direct-mode retry — <code>eval_mode: direct</code> only</div>
+        <div class="track reveal">
+          <span class="state eval">EVALUATE <span class="sub">round M</span></span>
+          <span class="arrow">→</span>
+          <span class="state eval">EVALUATE <span class="sub">round M+1</span></span>
+          <span class="arrow loopback">⟲</span>
+        </div>
+        <div class="branch reveal" style="margin-top:6px">
+          <div class="bln" style="color:var(--muted-2)">IMPLEMENT runs exactly once per batch; the sub-agent makes further direct corrections and re-evaluates without an intervening IMPLEMENT round</div>
         </div>
 
         <div class="track-label reveal">Advance commands</div>
@@ -339,17 +359,23 @@
             <div class="phase-title">Commit</div>
           </div>
           <div class="io reveal">
-            <div class="ln"><span class="tag">flag</span><span class="val">--message "&lt;commit msg&gt;"</span></div>
+            <div class="ln"><span class="tag">action</span><span class="val">forgectl advance</span></div>
             <div class="ln"><span class="tag">config</span><span class="val">enable_commits</span></div>
           </div>
         </div>
         <p class="desc reveal">
-          Hard pause at the batch boundary. Commits include both
-          <strong>passed</strong> and <strong>force-accepted failed</strong> items.
-          When <code>enable_commits: false</code>, <code>forgectl advance</code> proceeds without
-          committing.
+          Appears only when <code>enable_commits: false</code> — a bookkeeping no-op hard pause at
+          the batch boundary, covering both <strong>passed</strong> and
+          <strong>force-accepted failed</strong> items. No git operation occurs here.
         </p>
-        <div class="track-label reveal">Flow</div>
+        <p class="desc reveal">
+          When <code>enable_commits: true</code>, this state is <strong>skipped entirely</strong>.
+          The batch-terminal commit happens inline as part of the terminal EVALUATE
+          <code>advance</code> itself (message synthesized from the batch's item descriptions,
+          any supplied <code>--message</code> appended; skipped silently if nothing is staged),
+          and the scaffold proceeds straight to ORIENT/DONE — see the Verdict routing branch above.
+        </p>
+        <div class="track-label reveal">Flow (enable_commits: false)</div>
         <div class="track reveal">
           <span class="state">COMMIT <span class="sub">passed items</span></span>
           <span class="arrow">→</span>
