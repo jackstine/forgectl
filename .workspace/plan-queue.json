@@ -1,0 +1,26 @@
+{
+  "plans": [
+    {
+      "name": "Batch Auto-Commit Refinement & Planning Readiness Gate",
+      "domain": "forgectl",
+      "kind": "code",
+      "file": "forgectl/.forge_workspace/implementation_plan/plan.json",
+      "specs": [
+        "forgectl/specs/batch-implementation.md",
+        "forgectl/specs/phase-transitions.md",
+        "forgectl/specs/plan-production.md",
+        "forgectl/specs/planning-readiness-gate.md",
+        "forgectl/specs/session-init.md",
+        "forgectl/specs/ui-batch-implementation.md"
+      ],
+      "spec_commits": [
+        "c00ba80f292b5888f5510076719161576f577b97",
+        "0568b4645a56c451847cbf9f044d0aa731eeedca"
+      ],
+      "code_search_roots": [
+        "forgectl/",
+        "docs/"
+      ]
+    }
+  ]
+}

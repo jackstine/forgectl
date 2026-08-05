@@ -1,7 +1,7 @@
 <role>
 You are a professional Staff Engineer.
 
-You are tasked to produce a `plan-queue.json` that will start the forgectl planning phase — without a forgectl specifying session. Specs exist on disk (committed, staged, or in a known directory), but the `generate_planning_queue` phase is not available because no specifying session was run.
+You are tasked to produce a `plan-queue.json` that will start the forgectl planning phase — without a forgectl specifying session. Specs exist on disk as either uncommitted changes you will commit, or as the tip commit already on the branch — but the `generate_planning_queue` phase is not available because no specifying session was run.
 This is a FRESH context window — you have no memory of previous sessions.
 </role>
 
@@ -16,16 +16,31 @@ The queue you produce answers: "Which implementation plans will be produced, in 
 <step_0>
 **Identify the specs to cover**
 
-Determine which spec files this queue must include. Try these in order:
+Specs must come from a canonical commit — never from a directory scan and never from an arbitrary window of commit history. Determine the spec set with exactly two methods, tried in order, and a hard gate if neither applies. Once a method matches, its result is the spec set — do not broaden it by also scanning history or the filesystem.
 
-1. **Staged specs** — `git diff --cached --name-only | grep 'specs/'`
-2. **Recent spec commits** — `git log --oneline --name-only -20 | grep 'specs/'`
-3. **User-provided list** — if the user named specific files or a directory
-4. **Known spec directories** — `find . -path '*/specs/*.md' -not -path '*/node_modules/*'`
+**Method 1 — specs provided to us, not yet committed.**
 
-Collect the full relative paths. These become the `specs` arrays in each plan entry.
+Check for spec files that are staged, modified, or untracked, or that the user explicitly named in the invocation:
 
-If no specs are found, stop and ask the user to point you at the spec files.
+```bash
+git status --porcelain -- '*specs/*.md'
+```
+
+If this returns files, or the user named specific spec files/a directory, those files ARE the spec set. Commit them now — group into one or more logically-coherent commits as appropriate (see the main session's own example: unrelated spec changes went into separate commits). These become the canonical commit(s); their hashes feed step_3. Do not add any other spec files after committing, even if related files exist elsewhere in the repo.
+
+**Method 2 — nothing provided, so the last commit only.**
+
+If Method 1 found nothing (git status is clean for spec paths and the user named no files), check only the single most recent commit — never a wider window:
+
+```bash
+git show --name-only --format=%H HEAD | grep 'specs/'
+```
+
+If the last commit touched one or more spec files, those files ARE the spec set, and `HEAD`'s hash is the `spec_commits` value for all of them.
+
+**Hard gate — neither method found specs.**
+
+If Method 1 and Method 2 both find nothing, STOP. Do not fall back to `git log -N`, do not fall back to scanning `specs/` directories with `find`. Ask the user which specs or which commit the queue should cover, and wait for their answer before continuing to step_1.
 </step_0>
 
 <step_1>
@@ -55,13 +70,13 @@ Instruct each sub-agent: "Read these spec files and return (1) a concise plan na
 <step_3>
 **Resolve spec_commits**
 
-For each spec file, get its most recent commit hash:
+Compute `spec_commits` only for the spec set step_0 determined — never expand it here. For each of those spec files, get its most recent commit hash:
 
 ```bash
 git log -1 --format=%H -- <spec-path>
 ```
 
-Collect the hashes into a deduplicated list per domain. If a spec file has no commit (unstaged, uncommitted), use an empty array for that domain's `spec_commits`.
+Under Method 1 this resolves to the commit(s) you just made in step_0. Under Method 2 it resolves to `HEAD` for every file. Collect the hashes into a deduplicated list per domain.
 
 Run these in parallel; one command per spec file is fine.
 </step_3>
