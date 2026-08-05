@@ -85,7 +85,7 @@ Bump `version` in `plugin.json` whenever skills or commands change. Follow semve
 
 ## Current Inventory
 
-### Skills (11)
+### Skills (12)
 
 | Skill | Path |
 |-------|------|
@@ -100,6 +100,7 @@ Bump `version` in `plugin.json` whenever skills or commands change. Follow semve
 | `reverse_engineering` | `skills/reverse_engineering/SKILL.md` |
 | `specs` | `skills/specs/SKILL.md` |
 | `ui_implementation` | `skills/ui_implementation/SKILL.md` |
+| `workspace_closeout` | `skills/workspace_closeout/SKILL.md` |
 
 ### Commands (6)
 

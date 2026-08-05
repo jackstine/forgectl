@@ -26,7 +26,8 @@
         "./skills/planner",
         "./skills/reverse_engineering",
         "./skills/specs",
-        "./skills/ui_implementation"
+        "./skills/ui_implementation",
+        "./skills/workspace_closeout"
       ]
     }
   ]
