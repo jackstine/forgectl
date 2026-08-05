@@ -10,6 +10,7 @@ The planning phase guides the architect through studying specs, codebase, and pa
 ## Depends On
 - **phase-transitions** — the generate_planning_queue→planning phase shift provides the plans queue and triggers ORIENT.
 - **session-init** — alternatively, `init --phase planning` starts the planning phase directly.
+- **planning-readiness-gate** — a cold-start entry into ORIENT proceeds only after the readiness gate confirms every incoming plan-queue domain's workspace is clean.
 - **state-persistence** — reads and writes the state file.
 
 ## Integration Points
@@ -20,6 +21,7 @@ The planning phase guides the architect through studying specs, codebase, and pa
 | Plan format definition (`PLAN_FORMAT.md`) | Defines the JSON schema for `plan.json` and conventions for notes files. Referenced during REVIEW, DRAFT, and validation. |
 | Plan evaluator prompt (`evaluators/plan-eval.md`, embedded in binary) | Full instructions for the planning evaluation sub-agent: dimensions, report format, verdict rules |
 | phase-transitions | ACCEPT transitions to PHASE_SHIFT (planning → implementing) |
+| planning-readiness-gate | Guards the three cold-start entries into planning ORIENT (`init --phase planning`, the generate_planning_queue→planning shift, and the specifying→generate_planning_queue `--from` skip); plan production assumes a clean workspace for the domain each cold-start begins with. Intra-session domain-boundary re-entries are not re-gated. |
 
 ---
 

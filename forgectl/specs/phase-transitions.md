@@ -35,6 +35,7 @@ The scaffold can be initialized at specifying, planning, or implementing — all
 | batch-implementation | Receives validated plan.json when planning→implementing advances (plan `kind: code`); DONE → PHASE_SHIFT (implementing → planning) when `plan_all_before_implementing: false` and plans remain; DONE → PHASE_SHIFT (implementing → next implementation phase) when `true` and plans remain |
 | ui-batch-implementation | Receives validated plan.json when planning→ui_implementing advances (plan `kind: ui`); DONE → PHASE_SHIFT (ui_implementing → planning) when `plan_all_before_implementing: false` and plans remain; DONE → PHASE_SHIFT (ui_implementing → next implementation phase) when `true` and plans remain |
 | session-init | Plan queue schema (same validation, including the `kind` routing field) reused at generate_planning_queue→planning shift |
+| planning-readiness-gate | The two cold-start phase shifts into planning ORIENT (generate_planning_queue→planning, and the specifying→generate_planning_queue `--from` skip that lands directly in planning) are blocked when an incoming plan-queue domain's workspace is non-empty; the shift does not occur. The intra-session domain-boundary re-entries into planning ORIENT (planning→planning, implementing/ui_implementing→planning) are NOT gated. |
 
 ---
 
@@ -198,6 +199,7 @@ When ready, run: forgectl advance
 | `advance` at PHASE_SHIFT (specifying→generate_planning_queue) with `--from` pointing to invalid plan queue | Validation errors printed. State remains PHASE_SHIFT. Exit code 1. | Override file must be valid |
 | `advance` at REFINE (generate_planning_queue) with invalid `<state_dir>/plan-queue.json` | Validation errors printed. State remains REFINE. Exit code 1. | Plan queue must be valid before transitioning |
 | `advance` at PHASE_SHIFT (generate_planning_queue→planning) with `--from` pointing to invalid plan queue | Validation errors printed. State remains PHASE_SHIFT. Exit code 1. | Override file must be valid |
+| `advance` at a cold-start PHASE_SHIFT into planning ORIENT (generate_planning_queue→planning, or the specifying→generate_planning_queue `--from` skip) when an incoming plan-queue domain's `<workspace_dir>/` contains prior-cycle artifacts | Dirty domains and the close-out remediation printed. Transition does not occur; state remains at the pre-planning phase. Exit code 1. | A planning cycle must not begin over unarchived prior work. The intra-session domain-boundary re-entries (planning→planning, implementing/ui_implementing→planning) are exempt (see planning-readiness-gate) |
 
 ---
 

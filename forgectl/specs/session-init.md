@@ -31,6 +31,7 @@ Sessions can begin at any of four phases — specifying, planning, implementing,
 | state-persistence | State file schema defines the structure created here; `session_id` stored at root |
 | activity-logging | `session_id` generated here; `[logs]` config validated here; pruning triggered here |
 | reverse-engineering | Consumes the init input (concept + domains) populated during reverse_engineering init |
+| planning-readiness-gate | `init --phase planning` evaluates the readiness gate against the `--from` plan queue's domains before creating the state file; a dirty domain workspace fails init with no state written |
 
 ---
 
@@ -144,6 +145,7 @@ The scaffold exits with a non-zero code on validation failure.
 | `--phase generate_planning_queue` | Error: "generate_planning_queue requires a completed specifying phase. Use --phase specifying instead." Exit code 1. | Cannot initialize mid-lifecycle phase directly |
 | `--phase ui_implementing` with any of `ui_implementing.app.launch_command`, `ui_implementing.app.url`, `ui_implementing.e2e.test_command`, `ui_implementing.e2e.test_dir` empty | Error naming each missing key. Exit code 1. | The QA and e2e loops require a launchable app and a test runner |
 | Plan queue entry `kind` is a value other than `code` or `ui` | Error naming the offending entry and value. Exit code 1. | Only the two defined implementation targets are routable |
+| `--phase planning` with one or more `--from` domains whose `<workspace_dir>/` contains prior-cycle artifacts | Error listing each dirty domain, its workspace path, and the close-out remediation. Exit code 1. No state file created. | A planning cycle must not begin over unarchived prior work (see planning-readiness-gate) |
 
 ---
 
