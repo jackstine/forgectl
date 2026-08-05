@@ -32,9 +32,9 @@ Layers enforce a coarse ordering (all layer N items must be terminal before laye
 
 | State | Flags |
 |-------|-------|
-| IMPLEMENT | `--message <text>` (required first round only, when `enable_commits: true`) |
+| IMPLEMENT | `--message <text>` (optional, every round, when `enable_commits: true`; appended to the synthesized item-description commit message — see docs/auto-committing.md) |
 | EVALUATE | `--verdict PASS\|FAIL` (required), `--eval-report <path>` (required when `eval_mode: "report"`) |
-| COMMIT | `--message <text>` (required when `enable_commits: true`) |
+| COMMIT | (no flags; state only appears when `enable_commits: false` — a no-op advance. When `enable_commits: true`, COMMIT is skipped and the batch-terminal commit happens inline at the terminal EVALUATE transition — see COMMIT State) |
 
 #### `eval` command
 
@@ -151,36 +151,7 @@ Action:  Study the eval file "launcher/.forgectl_workspace/implementation_plan/e
          After completion of the above, advance to continue.
 ```
 
-**Entering IMPLEMENT** (first item in batch, after eval — round 2+, `eval_mode: "direct"`):
-
-```
-State:   IMPLEMENT
-Phase:   implementing
-Layer:   L0 Foundation
-Batch:   1/2
-Round:   1/3
-Note:    PASS recorded for round 1. Minimum rounds not yet met (1/2).
-Item:    [config.types] ServiceEndpoint and ServicesConfig structs
-         Go structs for validated service endpoint configuration.
-         (1 of 2 in batch)
-Steps:
-  1. Define ServiceEndpoint struct with Host (string) and Port (int) fields
-  2. Define ServicesConfig struct with three named ServiceEndpoint fields
-  3. Add YAML struct tags for deserialization
-Files:   internal/config/types.go
-Specs:   service-configuration.md#interface-outputs
-         Read: git show abc1234 def5678 -- '**/service-configuration.md'
-Refs:    notes/config.md#types
-Tests:   1 functional
-Action:  Review unstaged changes from the evaluator (git diff).
-         Accept, revise, or revert corrections as needed.
-         Apply "fresh" eyes and a tightened lens when reviewing the work,
-         then apply corrections as needed.
-         Please review the specification(s) above if you have not already done so —
-         run the git command shown under each spec to read its definition.
-         Please review the reference file(s) under Refs if you have not already done so.
-         After completion of the above, advance to continue.
-```
+**`eval_mode: "direct"` never re-enters IMPLEMENT after round 1.** IMPLEMENT runs exactly once per batch under `eval_mode: "direct"`. A FAIL, or a PASS below `min_rounds`, re-enters EVALUATE directly for another round instead of cycling back through IMPLEMENT — see the "Entering EVALUATE (implementing phase, subsequent round, `eval_mode: "direct"`)" example below. There is no IMPLEMENT round-2+ example for `eval_mode: "direct"` because that state transition does not occur.
 
 **Entering IMPLEMENT** (first item in batch, after eval — round 2+, `eval_mode: "conversational"`):
 
@@ -254,6 +225,26 @@ Action:   Please spawn 1 sonnet general-purpose sub-agent to evaluate and correc
           After completion of the above, advance with --verdict PASS|FAIL
 ```
 
+**Entering EVALUATE** (implementing phase, subsequent round, `eval_mode: "direct"`):
+
+```
+State:    EVALUATE
+Phase:    implementing
+Layer:    L0 Foundation
+Batch:    1/2
+Round:    2/3
+Note:     FAIL recorded for round 1. Corrections were made directly to batch files.
+Items:
+  - [config.types] ServiceEndpoint and ServicesConfig structs
+  - [config.load] Load YAML, apply defaults, validate strictly
+Action:   Please spawn 1 sonnet general-purpose sub-agent to evaluate and correct the batch.
+          Sub-agent runs: forgectl eval
+          Batch files have been staged. Sub-agent makes corrections directly.
+          After completion of the above, advance with --verdict PASS|FAIL
+```
+
+Under `eval_mode: "direct"`, every round after the first re-enters EVALUATE in this same form — Round increments, a `Note:` line records the prior round's verdict, and no intervening IMPLEMENT state is presented. This continues until PASS at or above `min_rounds`, or FAIL at `max_rounds` (force-accept).
+
 **Entering EVALUATE** (implementing phase, `eval_mode: "conversational"`):
 
 ```
@@ -270,18 +261,9 @@ Action:   Please spawn 1 sonnet general-purpose sub-agent to evaluate the implem
           After completion of the above, advance with --verdict PASS|FAIL
 ```
 
-**Entering COMMIT** (after EVALUATE, batch terminal, `enable_commits: true`):
+**Terminal EVALUATE auto-commit** (`enable_commits: true`) — COMMIT does not render:
 
-```
-State:   COMMIT
-Phase:   implementing
-Layer:   L0 Foundation
-Batch:   1/2
-Items:
-  - [config.types] passed
-  - [config.load] passed
-Action:  Advance with --message "your commit message" to commit and continue.
-```
+When `enable_commits` is `true`, the batch-terminal commit happens inline as part of the same `advance` that records the terminal verdict at EVALUATE. No COMMIT state is presented, no `--message` flag is involved, and the very next rendered state is ORIENT or DONE (shown further below) — the engineer's `advance --eval-report ... --verdict PASS` (or `FAIL` at force-accept) both records the verdict and produces the commit in one step. The commit message is synthesized from the batch's item descriptions (see docs/auto-committing.md); if nothing is left to stage (every item already committed per-item and no evaluator left corrections), the commit is skipped silently.
 
 **Entering COMMIT** (after EVALUATE, batch terminal, `enable_commits: false`):
 
@@ -294,19 +276,6 @@ Items:
   - [config.types] passed
   - [config.load] passed
 Action:  Advance to continue.
-```
-
-**Entering COMMIT** (after force-accept, `enable_commits: true`):
-
-```
-State:   COMMIT
-Phase:   implementing
-Layer:   L1 Core
-Batch:   3/3
-Items:
-  - [daemon.types] failed (force-accept, 3/3 rounds)
-  - [daemon.io] failed (force-accept, 3/3 rounds)
-Action:  Advance with --message "your commit message" to commit and continue.
 ```
 
 **Entering COMMIT** (after force-accept, `enable_commits: false`):
@@ -322,7 +291,7 @@ Items:
 Action:  Advance to continue.
 ```
 
-**Entering ORIENT** (after COMMIT, more items in layer):
+**Entering ORIENT** (batch complete, more items in layer — reached via COMMIT when `enable_commits: false`, or directly from the terminal EVALUATE auto-commit when `enable_commits: true`):
 
 ```
 State:    ORIENT
@@ -334,7 +303,7 @@ Action:   STOP please review and discuss with user before continuing.
           After completion of the above, advance to select next batch.
 ```
 
-**Entering ORIENT** (after COMMIT, layer complete, more layers):
+**Entering ORIENT** (batch complete, layer complete, more layers):
 
 ```
 State:    ORIENT
@@ -346,7 +315,7 @@ Action:   STOP please review and discuss with user before continuing.
           After completion of the above, advance to next layer.
 ```
 
-**Entering ORIENT** (after COMMIT, layer complete, last layer):
+**Entering ORIENT** (batch complete, layer complete, last layer):
 
 ```
 State:    ORIENT
@@ -612,8 +581,6 @@ With `--verbose`, the full layer-by-item breakdown is appended, including spec a
 
 | Condition | Signal | Rationale |
 |-----------|--------|-----------|
-| `advance` in implementing IMPLEMENT (first round) without `--message` when `enable_commits: true` | Error. Exit code 1. | First-round items need a commit message when commits are enabled |
-| `advance` in implementing COMMIT without `--message` when `enable_commits: true` | Error. Exit code 1. | Batch completion needs a commit message when commits are enabled |
 | `advance` in implementing EVALUATE without `--verdict` | Error. Exit code 1. | Verdict determines the transition |
 | `advance` in implementing EVALUATE without `--eval-report` when `eval_mode: "report"` | Error. Exit code 1. | Every evaluation must reference its report when eval output is enabled |
 | `advance --eval-report` pointing to non-existent file | Error naming the path. Exit code 1. | Report must exist to be recorded |
@@ -638,23 +605,34 @@ Items are selected in the order they appear in the layer's `items` array.
 ### State Machine
 
 ```
-ORIENT → IMPLEMENT(1) → IMPLEMENT(2) → ... → EVALUATE
-                                                  │
-                                    ┌──────────────┼──────────────┐
-                                    │              │              │
-                              PASS + rounds    FAIL + rounds   PASS/FAIL
-                              >= min_rounds    < max_rounds    at boundary
-                                    │              │              │
-                                    ▼              ▼              │
-                                 COMMIT      IMPLEMENT(1)→...    │
-                                    │        (re-implement)      │
-                                    ▼                            │
-                              ORIENT/DONE ◄──────────────────────┘
-                                                FAIL + rounds
-                                                >= max_rounds
-                                                      │
-                                                      ▼
-                                                   COMMIT → ORIENT/DONE
+ORIENT → IMPLEMENT(1)* → IMPLEMENT(2)* → ... → EVALUATE
+                                                    │
+                                      ┌──────────────┼──────────────┐
+                                      │              │              │
+                                PASS + rounds   FAIL + rounds   PASS/FAIL
+                                >= min_rounds   < max_rounds    at boundary
+                                      │              │              │
+                                      │   report/conversational:    │
+                                      │   IMPLEMENT(1)*→...         │
+                                      │   (re-implement)             │
+                                      │   direct:                   │
+                                      │   EVALUATE (re-evaluate,     │
+                                      │   no re-implement)           │
+                                      ▼                              │
+                        [terminal: PASS >= min_rounds, or            │
+                         FAIL >= max_rounds (force-accept)] ◄────────┘
+                                      │
+                        ┌─────────────┴─────────────┐
+                        │                            │
+             enable_commits: true         enable_commits: false
+             auto-commit batch inline     COMMIT
+                        │                            │
+                        └─────────────┬──────────────┘
+                                      ▼
+                                ORIENT/DONE
+
+* Each IMPLEMENT item auto-commits immediately when `enable_commits: true`
+  (message synthesized from the item's `description`).
 ```
 
 ### Transition Table
@@ -664,12 +642,16 @@ ORIENT → IMPLEMENT(1) → IMPLEMENT(2) → ... → EVALUATE
 | ORIENT | unblocked items exist in current layer | IMPLEMENT | Select batch. Present first item. |
 | ORIENT | all layer items terminal, more layers | ORIENT (next layer) | Advance `current_layer`. |
 | ORIENT | all layers complete | DONE | — |
-| IMPLEMENT | more items in batch | IMPLEMENT | Mark current item `done`. Present next item. |
-| IMPLEMENT | last item in batch | EVALUATE | Mark current item `done`. Increment `rounds` on all batch items. |
-| EVALUATE | PASS, rounds >= `implementing.eval.min_rounds` | COMMIT | Mark items `passed`. Record eval. |
-| EVALUATE | PASS, rounds < `implementing.eval.min_rounds` | IMPLEMENT | Record eval. Re-present first item with eval file. |
-| EVALUATE | FAIL, rounds < `implementing.eval.max_rounds` | IMPLEMENT | Record eval. Re-present first item with eval file. |
-| EVALUATE | FAIL, rounds >= `implementing.eval.max_rounds` | COMMIT | Mark items `failed`. Record eval. Force-accept. |
+| IMPLEMENT | more items in batch | IMPLEMENT | Mark current item `done`. Auto-commit item when `enable_commits: true` (message synthesized from item `description`, optional `--message` appended). Present next item. |
+| IMPLEMENT | last item in batch | EVALUATE | Mark current item `done`. Auto-commit item when `enable_commits: true`. Increment `rounds` on all batch items. |
+| EVALUATE | PASS, rounds >= `implementing.eval.min_rounds`, `enable_commits: false` | COMMIT | Mark items `passed`. Record eval. |
+| EVALUATE | PASS, rounds >= `implementing.eval.min_rounds`, `enable_commits: true` | ORIENT/DONE | Mark items `passed`. Record eval. Auto-commit batch inline (message synthesized from batch item descriptions; skipped silently if nothing staged). |
+| EVALUATE | PASS, rounds < `implementing.eval.min_rounds`, `eval_mode` is `"report"` or `"conversational"` | IMPLEMENT | Record eval. Re-present first item with eval file. |
+| EVALUATE | PASS, rounds < `implementing.eval.min_rounds`, `eval_mode: "direct"` | EVALUATE | Record eval. Re-evaluate directly (no re-implement round). |
+| EVALUATE | FAIL, rounds < `implementing.eval.max_rounds`, `eval_mode` is `"report"` or `"conversational"` | IMPLEMENT | Record eval. Re-present first item with eval file. |
+| EVALUATE | FAIL, rounds < `implementing.eval.max_rounds`, `eval_mode: "direct"` | EVALUATE | Record eval. Re-evaluate directly (no re-implement round). |
+| EVALUATE | FAIL, rounds >= `implementing.eval.max_rounds`, `enable_commits: false` | COMMIT | Mark items `failed`. Record eval. Force-accept. |
+| EVALUATE | FAIL, rounds >= `implementing.eval.max_rounds`, `enable_commits: true` | ORIENT/DONE | Mark items `failed`. Record eval. Force-accept. Auto-commit batch inline. |
 | COMMIT | more batches or layers | ORIENT | — |
 | COMMIT | all layers complete | DONE | — |
 | DONE | `plan_all_before_implementing: false`, planning queue non-empty | PHASE_SHIFT | PHASE_SHIFT (implementing → planning). Return to planning for next domain. |
@@ -698,9 +680,9 @@ Presents **one item at a time**. Displays full context: name, description, steps
 
 **Review reminders.** Every IMPLEMENT action — first round and every subsequent round — includes a reminder to review the specs before implementing: "Please review the specification(s) above if you have not already done so — run the git command shown under each spec to read its definition." When the item has `Refs`, a second line is added: "Please review the reference file(s) under Refs if you have not already done so." Both lines are phrased as "if you have not already done so" because the item context is presented on every round and the engineer may have seen it before.
 
-**First round (no prior eval):** Action says "Implement this item." Advance requires `--message` — the scaffold commits after each item.
+**First round (no prior eval):** Action says "Implement this item." Every advance out of IMPLEMENT auto-commits that item when `enable_commits: true`. `--message` is optional; the commit message is synthesized from the item's `description` field in plan.json, and any supplied `--message` text is appended to (not a replacement for) the synthesized message. See docs/auto-committing.md.
 
-**Subsequent rounds (after eval):** When `eval_mode: "report"`, action says "Study the eval file and implement any corrections." When `eval_mode: "direct"`, action says "Review unstaged changes from the evaluator (git diff)." When `eval_mode: "conversational"`, action says "Make corrections based off communication with the evaluator." No `--message` required — corrections are committed at the COMMIT state after the batch passes. The spec `Read:` lines and review reminders are present in every round.
+**Subsequent rounds (after eval FAIL, or PASS below min_rounds):** Applies to `eval_mode: "report"` and `eval_mode: "conversational"` — `eval_mode: "direct"` re-enters EVALUATE directly instead of IMPLEMENT (see EVALUATE Behavior) and so has no subsequent IMPLEMENT round. When `eval_mode: "report"`, action says "Study the eval file and implement any corrections." When `eval_mode: "conversational"`, action says "Make corrections based off communication with the evaluator." Every advance still auto-commits the item exactly as the first round does — every IMPLEMENT round commits, not just the first. The spec `Read:` lines and review reminders are present in every round.
 
 ### EVALUATE Behavior
 
@@ -712,15 +694,19 @@ Two actors:
 
 The report-mode handoff (deterministic path surfaced to both actors, sub-agent writes the file, engineer passes the path) is the shared **eval-report-contract**; see `specs/eval-report-contract.md`. This section is the fully worked example of that contract.
 
+**`eval_mode: "direct"` retry.** IMPLEMENT runs exactly once per batch under `eval_mode: "direct"`. A FAIL with rounds below `max_rounds`, or a PASS with rounds below `min_rounds`, re-enters EVALUATE directly for another round — the sub-agent runs again and makes further direct corrections — rather than cycling back through IMPLEMENT. `eval_mode: "report"` and `"conversational"` are unaffected by this: FAIL or below-min-rounds PASS in those modes still re-enters IMPLEMENT, re-presenting every item in the batch (each of which auto-commits again on this pass, per IMPLEMENT Behavior).
+
+**Terminal auto-commit.** The moment EVALUATE reaches a terminal outcome — PASS with rounds at or above `min_rounds`, or FAIL at `max_rounds` (force-accept) — and `enable_commits` is `true`, the scaffold commits the batch inline (message synthesized from the batch's item descriptions, per docs/auto-committing.md; skipped silently if nothing is staged) and transitions straight to ORIENT/DONE — the COMMIT state does not appear and no `--message` flag or additional advance is needed. When `enable_commits` is `false`, the transition instead goes to the COMMIT state, unchanged from today.
+
 ### COMMIT State
 
-Hard stop after a batch reaches terminal evaluation. Ensures all implementation work is committed before proceeding.
+Appears only when `enable_commits` is `false`. It is a bookkeeping no-op hard stop after a batch reaches terminal evaluation — no git operation occurs. The engineer runs `forgectl advance` to proceed to ORIENT/DONE.
 
 Appears after:
 - EVALUATE with PASS + sufficient rounds
 - EVALUATE with FAIL at max_rounds (force-accept)
 
-When `enable_commits` is `true`, the engineer runs `forgectl advance --message <commit msg>` to commit and proceed. When `false`, the engineer runs `forgectl advance` to proceed.
+When `enable_commits` is `true`, the COMMIT state is skipped entirely — the batch-terminal commit happens inline as part of the terminal EVALUATE transition (see EVALUATE Behavior above), and the scaffold proceeds directly to ORIENT/DONE.
 
 ---
 
@@ -731,18 +717,19 @@ When `enable_commits` is `true`, the engineer runs `forgectl advance --message <
 3. **Item order preserved.** Items delivered in layer's `items` array order.
 4. **One item at a time.** IMPLEMENT presents a single item per advance.
 5. **plan.json is the progress record.** `passes` and `rounds` reflect current state.
-6. **COMMIT precedes progression.** Every batch boundary passes through COMMIT before ORIENT/DONE.
-7. **First-round commits.** When `enable_commits` is `true`, IMPLEMENT advance requires `--message` and commits on the first round only. When `enable_commits` is `false`, `--message` is not required at IMPLEMENT or COMMIT.
+6. **COMMIT precedes progression only when commits are disabled.** When `enable_commits` is `false`, every batch boundary passes through COMMIT before ORIENT/DONE. When `enable_commits` is `true`, COMMIT is skipped — the terminal EVALUATE transition commits inline and proceeds directly to ORIENT/DONE.
+7. **Per-item commits, every round.** When `enable_commits` is `true`, every IMPLEMENT advance auto-commits that item — first round and every subsequent round alike; the "first round only" rule no longer applies. `--message` is optional at IMPLEMENT; the commit message is synthesized from the item's `description` field, with any supplied `--message` text appended rather than substituted. When `enable_commits` is `false`, `--message` is not required or shown at IMPLEMENT or COMMIT.
 8. **Two actors, two commands.** Engineer uses `advance`; sub-agent uses `eval`.
 9. **Scaffold does not parse eval files.** Verdict provided via `--verdict`; when `eval_mode: "report"`, file path stored as reference. When `eval_mode` is `"direct"` or `"conversational"`, no file path is stored.
-10. **Min rounds enforced.** PASS below `implementing.eval.min_rounds` forces another implementation cycle.
+10. **Min rounds enforced.** PASS below `implementing.eval.min_rounds` forces another evaluation cycle (another IMPLEMENT round under `"report"`/`"conversational"`; another EVALUATE round under `"direct"`).
 11. **Max rounds enforced.** FAIL at `implementing.eval.max_rounds` forces acceptance.
-12. **Guided pauses.** When `config.general.user_guided` is true, ORIENT output includes "STOP please review and discuss with user before continuing."
-13. **Auto-commit at commit points.** When `enable_commits` is `true`, `--message` is required at IMPLEMENT (first round) and COMMIT states. The scaffold runs `git add` with strategy-appropriate targets (per `implementing.commit_strategy`, default: `scoped`) to stage files, then runs `git commit -m <message>`. The `git add` step must precede `git commit` — committing without staging produces "no changes added to commit" and no commit is created. When `enable_commits` is `false`, `--message` is not shown in output; if provided, a warning is printed: `--message is ignored, commits are not enabled`. The warning does not instruct how to enable commits. See `docs/auto-committing.md`.
-14. **Spec `Read:` command is bounded.** When the current plan's `spec_commits` is non-empty, every `Specs:` entry in IMPLEMENT and `eval` output is followed by a `Read:` line of the form `git show <commits> -- '**/<file>'`, using `git show` (not `git log -p`) so the command resolves to exactly the named spec commits. When `spec_commits` is empty, no `Read:` line is emitted. This applies uniformly across `eval_mode: "report"`, `"direct"`, and `"conversational"` — the `Read:` line is part of the item body, not the eval-mode-specific handoff section.
-15. **Spec review reminder always present.** Every IMPLEMENT action, on every round, includes the spec-review reminder. The Refs-review reminder is present if and only if the item has `Refs`.
-16. **Report path surfaced to both actors.** When `eval_mode: "report"`, the scaffold computes the eval report path deterministically (`<plan-dir>/evals/batch-N-round-M.md`) and prints the *same* path in two places: the EVALUATE Action (for the engineer to pass to `--eval-report`) and the `--- REPORT OUTPUT ---` section of `forgectl eval` (for the sub-agent to write). The engineer never needs to invent or reconstruct the path. `--eval-report` is a file path argument; passing report prose is an error (caught by invariant 17).
-17. **`--eval-report` value is validated as a path.** The scaffold stats the `--eval-report` value before recording it. If it is not an existing file, `advance` fails. When the value contains no path separator and looks like prose (whitespace, no `/`), the error additionally states that `--eval-report` expects the file path the eval sub-agent wrote, not the report text.
+12. **Direct-mode eval loop skips re-implementation.** When `eval_mode: "direct"`, IMPLEMENT runs exactly once per batch. A FAIL, or a PASS below `min_rounds`, re-enters EVALUATE directly rather than IMPLEMENT. `eval_mode: "report"` and `"conversational"` retain the IMPLEMENT re-entry on FAIL or below-min-rounds PASS.
+13. **Guided pauses.** When `config.general.user_guided` is true, ORIENT output includes "STOP please review and discuss with user before continuing."
+14. **Auto-commit at commit points.** When `enable_commits` is `true`, every IMPLEMENT advance auto-commits (message synthesized from the item's `description`, optional `--message` appended), and the terminal EVALUATE transition auto-commits the batch (message synthesized from the batch's item descriptions, optional `--message` appended) before proceeding directly to ORIENT/DONE — no separate COMMIT advance occurs. The scaffold runs `git add` with strategy-appropriate targets (per `implementing.commit_strategy`, default: `scoped`) to stage files, then runs `git commit -m <message>`. The `git add` step must precede `git commit` — committing without staging produces "no changes added to commit" and no commit is created; if nothing is staged, the commit is skipped silently. When `enable_commits` is `false`, `--message` is not shown in output at IMPLEMENT, and the COMMIT state remains a no-op advance; if `--message` is provided anywhere, a warning is printed: `--message is ignored, commits are not enabled`. The warning does not instruct how to enable commits. See `docs/auto-committing.md`.
+15. **Spec `Read:` command is bounded.** When the current plan's `spec_commits` is non-empty, every `Specs:` entry in IMPLEMENT and `eval` output is followed by a `Read:` line of the form `git show <commits> -- '**/<file>'`, using `git show` (not `git log -p`) so the command resolves to exactly the named spec commits. When `spec_commits` is empty, no `Read:` line is emitted. This applies uniformly across `eval_mode: "report"`, `"direct"`, and `"conversational"` — the `Read:` line is part of the item body, not the eval-mode-specific handoff section.
+16. **Spec review reminder always present.** Every IMPLEMENT action, on every round, includes the spec-review reminder. The Refs-review reminder is present if and only if the item has `Refs`.
+17. **Report path surfaced to both actors.** When `eval_mode: "report"`, the scaffold computes the eval report path deterministically (`<plan-dir>/evals/batch-N-round-M.md`) and prints the *same* path in two places: the EVALUATE Action (for the engineer to pass to `--eval-report`) and the `--- REPORT OUTPUT ---` section of `forgectl eval` (for the sub-agent to write). The engineer never needs to invent or reconstruct the path. `--eval-report` is a file path argument; passing report prose is an error (caught by invariant 18).
+18. **`--eval-report` value is validated as a path.** The scaffold stats the `--eval-report` value before recording it. If it is not an existing file, `advance` fails. When the value contains no path separator and looks like prose (whitespace, no `/`), the error additionally states that `--eval-report` expects the file path the eval sub-agent wrote, not the report text.
 
 ---
 
@@ -756,29 +743,41 @@ When `enable_commits` is `true`, the engineer runs `forgectl advance --message <
   - **Expected:** IMPLEMENT → EVALUATE directly.
   - **Rationale:** Single-item batches skip the multi-item advance loop; the item is marked `done` and evaluation begins.
 
-- **Scenario:** EVALUATE PASS but rounds < min_rounds.
-  - **Expected:** Re-enter IMPLEMENT. No commit reminder (not first round).
-  - **Rationale:** Minimum evaluation rounds must be met regardless of verdict. The engineer gets another pass through the items.
+- **Scenario:** EVALUATE PASS but rounds < min_rounds, `eval_mode` is `"report"` or `"conversational"`.
+  - **Expected:** Re-enter IMPLEMENT. Every item still auto-commits (per-item commits are not gated on round number).
+  - **Rationale:** Minimum evaluation rounds must be met regardless of verdict. The engineer gets another pass through the items, and each item's advance continues to commit.
 
-- **Scenario:** EVALUATE FAIL at max_rounds.
+- **Scenario:** EVALUATE PASS but rounds < min_rounds, `eval_mode: "direct"`.
+  - **Expected:** Re-enter EVALUATE directly (no IMPLEMENT round).
+  - **Rationale:** Under `"direct"`, IMPLEMENT runs exactly once per batch; the minimum-rounds requirement is satisfied by looping within EVALUATE.
+
+- **Scenario:** EVALUATE FAIL at max_rounds, `enable_commits: false`.
   - **Expected:** Items `failed`. COMMIT. ORIENT.
   - **Rationale:** The maximum rounds are exhausted. Items are force-accepted as failed to prevent indefinite loops.
+
+- **Scenario:** EVALUATE FAIL at max_rounds, `enable_commits: true`.
+  - **Expected:** Items `failed`. Batch auto-commits inline (COMMIT does not render). ORIENT/DONE.
+  - **Rationale:** Force-acceptance still needs to capture any accumulated corrections; the terminal transition itself performs that commit.
 
 - **Scenario:** Item depends on a `failed` item.
   - **Expected:** Still unblocked — `failed` is terminal.
   - **Rationale:** `failed` is a terminal state just like `passed`. Dependent items proceed regardless of whether dependencies passed or failed.
 
-- **Scenario:** All layers complete, no plans remaining.
+- **Scenario:** All layers complete, no plans remaining, `enable_commits: false`.
   - **Expected:** COMMIT → DONE. Session complete.
   - **Rationale:** DONE with no remaining plans is the terminal state.
 
+- **Scenario:** All layers complete, no plans remaining, `enable_commits: true`.
+  - **Expected:** Terminal EVALUATE auto-commits inline → DONE directly (COMMIT skipped). Session complete.
+  - **Rationale:** DONE with no remaining plans is the terminal state; the batch-terminal commit still occurs, just without a separate COMMIT advance.
+
 - **Scenario:** All layers complete, `plan_all_before_implementing: false`, planning queue has plans remaining.
-  - **Expected:** COMMIT → DONE → PHASE_SHIFT (implementing → planning).
-  - **Rationale:** Interleaved mode returns to planning for the next domain.
+  - **Expected:** (`enable_commits: false`) COMMIT → DONE → PHASE_SHIFT (implementing → planning). (`enable_commits: true`) terminal EVALUATE auto-commits inline → DONE → PHASE_SHIFT (implementing → planning), with COMMIT skipped.
+  - **Rationale:** Interleaved mode returns to planning for the next domain regardless of commit gating.
 
 - **Scenario:** All layers complete, `plan_all_before_implementing: true`, implementing plan queue has plans remaining.
-  - **Expected:** COMMIT → DONE → PHASE_SHIFT (implementing → next implementation phase, next domain). The next domain enters `implementing` or `ui_implementing` per its plan's `kind`.
-  - **Rationale:** All-planning-first mode continues with the next domain's plan, routing by `kind`.
+  - **Expected:** (`enable_commits: false`) COMMIT → DONE → PHASE_SHIFT (implementing → next implementation phase, next domain). (`enable_commits: true`) terminal EVALUATE auto-commits inline → DONE → PHASE_SHIFT, with COMMIT skipped. The next domain enters `implementing` or `ui_implementing` per its plan's `kind`.
+  - **Rationale:** All-planning-first mode continues with the next domain's plan, routing by `kind`, regardless of commit gating.
 
 - **Scenario:** `eval` called outside EVALUATE.
   - **Expected:** Error.
@@ -797,44 +796,68 @@ When `enable_commits` is `true`, the engineer runs `forgectl advance --message <
 ### IMPLEMENT presents items one at a time
 - **Verifies:** Single-item presentation with batch progression.
 - **Given:** IMPLEMENT, batch has 2 items, on item 1.
-- **When:** `advance --message "Implement config types"`
+- **When:** `advance`
 - **Then:** Item 1 `done`. Item 2 presented.
 
 ### IMPLEMENT last item → EVALUATE
 - **Verifies:** Last item triggers evaluation.
 - **Given:** IMPLEMENT, last item in batch.
-- **When:** `advance --message "Implement config load"`
+- **When:** `advance`
 - **Then:** Item `done`. Rounds incremented. State is EVALUATE.
 
-### First-round IMPLEMENT requires --message when enable_commits is true
-- **Verifies:** Commit message required on first round when commits enabled.
-- **Given:** IMPLEMENT, first round (no prior eval), `enable_commits: true`.
-- **When:** `advance` without `--message`
-- **Then:** Exit code 1.
+### IMPLEMENT does not require --message on any round
+- **Verifies:** `--message` is optional at IMPLEMENT regardless of round or `enable_commits`.
+- **Given:** IMPLEMENT, first round and, separately, a subsequent round (after EVALUATE FAIL), `enable_commits: true`.
+- **When:** `advance` without `--message`, in each case.
+- **Then:** Advances. No error. The item commits with a synthesized message (see next criteria).
 
-### First-round IMPLEMENT without --message when enable_commits is false
-- **Verifies:** No commit message required when commits disabled.
+### IMPLEMENT auto-commits every round when enable_commits is true
+- **Verifies:** Invariant 7 — per-item commits are not limited to the first round.
+- **Given:** IMPLEMENT, `enable_commits: true`; first a first-round item, then (after an EVALUATE FAIL cycles back) the same item's subsequent round.
+- **When:** `advance` (no `--message`) on each round.
+- **Then:** Both advances produce a commit. Neither round is skipped for committing.
+
+### IMPLEMENT commit message is synthesized from item description
+- **Verifies:** Point 2 of the commit-message synthesis rule.
+- **Given:** IMPLEMENT, `enable_commits: true`, item with `description: "Parse spectacular.yml, apply default host/port values."`.
+- **When:** `advance` without `--message`.
+- **Then:** The commit message is `"Parse spectacular.yml, apply default host/port values."`.
+
+### IMPLEMENT appends supplied --message to the synthesized description
+- **Verifies:** Point 2 — `--message` augments rather than replaces the synthesized message.
+- **Given:** IMPLEMENT, `enable_commits: true`, item with `description: "Parse spectacular.yml, apply default host/port values."`.
+- **When:** `advance --message "double-checked against staging config"`
+- **Then:** The commit message contains both the item description and the supplied text, with the supplied text appended (not substituted).
+
+### IMPLEMENT without enable_commits does not commit
+- **Verifies:** No commit occurs when commits are disabled.
 - **Given:** IMPLEMENT, first round (no prior eval), `enable_commits: false`.
 - **When:** `advance`
-- **Then:** Advances. No error.
-
-### Subsequent-round IMPLEMENT does not require --message
-- **Verifies:** No commit on subsequent rounds.
-- **Given:** IMPLEMENT, entered after EVALUATE (round 2+).
-- **When:** `advance`
-- **Then:** Advances without committing. No error.
+- **Then:** Advances. No error. No commit produced.
 
 ### First-round IMPLEMENT stages files before committing
 - **Verifies:** `git add` runs before `git commit` on first-round advance.
-- **Given:** IMPLEMENT, first round, `enable_commits: true`, `commit_strategy: "scoped"`, domain `"api"`.
-- **When:** `advance --message "Implement config types"`
+- **Given:** IMPLEMENT, first round, `enable_commits: true`, `commit_strategy: "scoped"`, domain `"api"`, item `description: "Implement config types"`.
+- **When:** `advance` (no `--message`)
 - **Then:** `git add api/` is run before `git commit -m "Implement config types"`. The commit succeeds. No error.
 
-### COMMIT state stages files before committing
-- **Verifies:** `git add` runs before `git commit` in COMMIT state.
-- **Given:** COMMIT, `enable_commits: true`, `commit_strategy: "scoped"`, domain `"api"`.
-- **When:** `advance --message "Batch 1 corrections"`
-- **Then:** `git add api/` is run before `git commit -m "Batch 1 corrections"`. The commit succeeds. No error.
+### Subsequent-round IMPLEMENT stages and commits per item
+- **Verifies:** Point 1 — corrections rounds commit exactly like the first round.
+- **Given:** IMPLEMENT, entered after EVALUATE (round 2+, `eval_mode: "report"` or `"conversational"`), `enable_commits: true`, `commit_strategy: "scoped"`, domain `"api"`, item `description: "Implement config load"`.
+- **When:** `advance` (no `--message`)
+- **Then:** `git add api/` is run before `git commit -m "Implement config load"`. The commit succeeds. No error.
+
+### Terminal EVALUATE stages and commits the batch inline when enable_commits is true
+- **Verifies:** Point 3 — the COMMIT state is skipped and the batch-terminal commit happens as part of the terminal EVALUATE `advance`.
+- **Given:** EVALUATE, rounds >= `implementing.eval.min_rounds`, `enable_commits: true`, `commit_strategy: "scoped"`, domain `"api"`, batch items with descriptions `"Implement config types"` and `"Implement config load"`.
+- **When:** `advance --eval-report ... --verdict PASS`
+- **Then:** `git add api/` runs before `git commit` with a message synthesized from both item descriptions. State transitions directly to ORIENT or DONE — COMMIT is never entered.
+
+### Terminal EVALUATE commit is skipped silently when nothing is staged
+- **Verifies:** Point 3 — the empty-commit rule applies to the batch-terminal auto-commit.
+- **Given:** EVALUATE, rounds >= `implementing.eval.min_rounds`, `enable_commits: true`; every batch item already committed per-item with no further changes since.
+- **When:** `advance --eval-report ... --verdict PASS`
+- **Then:** No commit is created. No error. State transitions directly to ORIENT or DONE.
 
 ### IMPLEMENT renders a Read command per spec when spec_commits exist
 - **Verifies:** Spec `Read:` line is emitted with a bounded `git show` command.
@@ -878,33 +901,51 @@ When `enable_commits` is `true`, the engineer runs `forgectl advance --message <
 - **When:** `advance` on each
 - **Then:** The item with Refs shows "Please review the reference file(s) under Refs if you have not already done so"; the item without Refs omits that line.
 
-### EVALUATE PASS with sufficient rounds → COMMIT
-- **Verifies:** PASS with sufficient rounds marks items passed.
-- **Given:** EVALUATE, rounds >= `implementing.eval.min_rounds`.
+### EVALUATE PASS with sufficient rounds → COMMIT (enable_commits: false)
+- **Verifies:** PASS with sufficient rounds marks items passed and enters COMMIT when commits are disabled.
+- **Given:** EVALUATE, rounds >= `implementing.eval.min_rounds`, `enable_commits: false`.
 - **When:** `advance --eval-report ... --verdict PASS`
 - **Then:** Items `passed`. State is COMMIT.
 
-### EVALUATE FAIL at max_rounds → COMMIT
-- **Verifies:** FAIL at max rounds marks items failed.
-- **Given:** EVALUATE, rounds == `implementing.eval.max_rounds`.
+### EVALUATE PASS with sufficient rounds → ORIENT/DONE directly (enable_commits: true)
+- **Verifies:** PASS with sufficient rounds skips COMMIT and auto-commits inline when commits are enabled.
+- **Given:** EVALUATE, rounds >= `implementing.eval.min_rounds`, `enable_commits: true`.
+- **When:** `advance --eval-report ... --verdict PASS`
+- **Then:** Items `passed`. Batch auto-commits. State is ORIENT or DONE — never COMMIT.
+
+### EVALUATE FAIL at max_rounds → COMMIT (enable_commits: false)
+- **Verifies:** FAIL at max rounds marks items failed and enters COMMIT when commits are disabled.
+- **Given:** EVALUATE, rounds == `implementing.eval.max_rounds`, `enable_commits: false`.
 - **When:** `advance --eval-report ... --verdict FAIL`
 - **Then:** Items `failed`. State is COMMIT.
 
-### EVALUATE FAIL within max_rounds → IMPLEMENT
-- **Verifies:** FAIL within max rounds triggers re-implementation.
-- **Given:** EVALUATE, rounds < `implementing.eval.max_rounds`.
+### EVALUATE FAIL at max_rounds → ORIENT/DONE directly (enable_commits: true)
+- **Verifies:** Force-accept still auto-commits inline and skips COMMIT when commits are enabled.
+- **Given:** EVALUATE, rounds == `implementing.eval.max_rounds`, `enable_commits: true`.
+- **When:** `advance --eval-report ... --verdict FAIL`
+- **Then:** Items `failed`. Batch auto-commits. State is ORIENT or DONE — never COMMIT.
+
+### EVALUATE FAIL within max_rounds → IMPLEMENT (report/conversational)
+- **Verifies:** FAIL within max rounds triggers re-implementation for `"report"` and `"conversational"` eval_modes.
+- **Given:** EVALUATE, rounds < `implementing.eval.max_rounds`, `eval_mode` is `"report"` or `"conversational"`.
 - **When:** `advance --eval-report ... --verdict FAIL`
 - **Then:** State is IMPLEMENT. First item with eval file.
 
-### COMMIT → ORIENT (more items)
-- **Verifies:** Batch completion returns to ORIENT for next batch.
-- **Given:** COMMIT, more items in layer.
+### EVALUATE FAIL within max_rounds → EVALUATE (direct)
+- **Verifies:** Invariant 12 — `eval_mode: "direct"` re-evaluates directly instead of re-implementing.
+- **Given:** EVALUATE, rounds < `implementing.eval.max_rounds`, `eval_mode: "direct"`.
+- **When:** `advance --verdict FAIL`
+- **Then:** State is EVALUATE. Round incremented. No IMPLEMENT state is presented.
+
+### COMMIT → ORIENT (more items, enable_commits: false)
+- **Verifies:** Batch completion returns to ORIENT for next batch when the COMMIT state is in use.
+- **Given:** COMMIT, `enable_commits: false`, more items in layer.
 - **When:** `advance`
 - **Then:** State is ORIENT.
 
-### COMMIT → DONE (all complete)
-- **Verifies:** Final batch completion reaches terminal state.
-- **Given:** COMMIT, all layers complete.
+### COMMIT → DONE (all complete, enable_commits: false)
+- **Verifies:** Final batch completion reaches terminal state when the COMMIT state is in use.
+- **Given:** COMMIT, `enable_commits: false`, all layers complete.
 - **When:** `advance`
 - **Then:** State is DONE.
 
@@ -925,6 +966,12 @@ When `enable_commits` is `true`, the engineer runs `forgectl advance --message <
 - **Given:** EVALUATE (implementing), batch has 2 items, `eval_mode: "conversational"`.
 - **When:** `forgectl eval`
 - **Then:** Output includes impl-eval.md contents, item details. No report target path.
+
+### Direct-mode batch never returns to IMPLEMENT after round 1
+- **Verifies:** Invariant 12 across a full FAIL → FAIL → PASS cycle.
+- **Given:** ORIENT, `eval_mode: "direct"`, batch of 2 items, `implementing.eval.max_rounds: 3`.
+- **When:** The batch is driven: IMPLEMENT both items → EVALUATE round 1 (`--verdict FAIL`) → EVALUATE round 2 (`--verdict FAIL`) → EVALUATE round 3 (`--verdict PASS`).
+- **Then:** IMPLEMENT is entered exactly once for the batch. All three EVALUATE rounds occur consecutively with no intervening IMPLEMENT state.
 
 ### Failed items don't block dependents
 - **Verifies:** Failed items are terminal for dependency resolution.
@@ -955,7 +1002,9 @@ When `enable_commits` is `true`, the engineer runs `forgectl advance --message <
 - Implementing phase: layer-ordered batched item delivery with one-at-a-time presentation
 - Batch size controlled by `implementing.batch`
 - Eval round enforcement (`implementing.eval.min_rounds`/`max_rounds`) with forced acceptance
-- COMMIT state for batch boundary pauses
+- `eval_mode: "direct"` runs IMPLEMENT exactly once per batch; FAIL/below-min-rounds PASS re-enters EVALUATE directly rather than IMPLEMENT
+- Per-item auto-commit at every IMPLEMENT round, message synthesized from the item's `description` (optional `--message` appended)
+- COMMIT state for batch boundary pauses when `enable_commits: false`; skipped in favor of an inline batch-terminal auto-commit at the terminal EVALUATE transition when `enable_commits: true`
 - Commit gating via `enable_commits` configuration
 - Domain artifacts in `.forgectl_workspace/`
 - Dual evaluator prompts: impl-eval.md for implementation sub-agent
