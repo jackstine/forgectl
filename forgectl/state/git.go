@@ -71,6 +71,67 @@ func AutoCommit(projectRoot string, strategy string, stageTargets []string, mess
 	return strings.TrimSpace(string(out)), nil
 }
 
+// ItemCommitMessage returns the synthesized commit message for a per-item
+// IMPLEMENT commit: the plan item's description field, verbatim.
+//
+// The item is resolved through findItem, so an ID that is not present in the
+// plan yields a message rather than a panic. Description is validated non-empty
+// for every plan item (validate.go), so the ID fallback below only fires for a
+// malformed or missing item — it exists to guarantee git never receives an
+// empty -m argument, which would abort the commit.
+func ItemCommitMessage(plan *PlanJSON, itemID string) string {
+	if plan == nil {
+		return itemID
+	}
+	item := findItem(plan, itemID)
+	if item == nil || strings.TrimSpace(item.Description) == "" {
+		return itemID
+	}
+	return item.Description
+}
+
+// BatchCommitMessage returns the synthesized commit message for a batch-terminal
+// commit: "Batch <N>: " followed by every batch item's description in batch
+// order, joined with "; ".
+//
+// Items that cannot be resolved, or that carry a blank description, are omitted
+// rather than contributing an empty segment. When no description resolves at
+// all the message degrades to "Batch <N>" — still non-empty, so the commit is
+// never rejected for a blank message.
+func BatchCommitMessage(plan *PlanJSON, batchNumber int, itemIDs []string) string {
+	var descs []string
+	if plan != nil {
+		for _, id := range itemIDs {
+			item := findItem(plan, id)
+			if item == nil || strings.TrimSpace(item.Description) == "" {
+				continue
+			}
+			descs = append(descs, item.Description)
+		}
+	}
+	if len(descs) == 0 {
+		return fmt.Sprintf("Batch %d", batchNumber)
+	}
+	return fmt.Sprintf("Batch %d: %s", batchNumber, strings.Join(descs, "; "))
+}
+
+// AppendSuppliedMessage appends operator-supplied --message text to a
+// synthesized commit message as a second paragraph, separated by one blank
+// line. Supplied text augments the synthesized message; it never replaces it.
+//
+// When no text is supplied the synthesized message is returned unchanged.
+func AppendSuppliedMessage(synthesized string, supplied string) string {
+	supplied = strings.TrimSpace(supplied)
+	if supplied == "" {
+		return synthesized
+	}
+	synthesized = strings.TrimRight(synthesized, "\n")
+	if strings.TrimSpace(synthesized) == "" {
+		return supplied
+	}
+	return synthesized + "\n\n" + supplied
+}
+
 // GitHashExists checks if a commit hash exists in the repository.
 func GitHashExists(workDir string, hash string) error {
 	cmd := exec.Command("git", "cat-file", "-t", hash)

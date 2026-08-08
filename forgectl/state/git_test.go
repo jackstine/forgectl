@@ -267,3 +267,118 @@ func TestPlanningAcceptWithCommitsEnabledAutoCommits(t *testing.T) {
 		t.Errorf("expected PHASE_SHIFT, got %s", s.State)
 	}
 }
+
+// --- Commit message synthesis -------------------------------------------------
+//
+// The implementing and ui_implementing commit points no longer require an
+// operator-supplied message: the scaffold synthesizes one from plan.json. These
+// tests pin the exact strings because the synthesized message is the only
+// record of what a batch did — a reformatted or truncated description makes the
+// commit history unreadable, and an empty one makes git reject the commit
+// outright.
+
+func planForMessages() *PlanJSON {
+	return &PlanJSON{
+		Items: []PlanItem{
+			{ID: "cfg.types", Description: "ServiceEndpoint and ServicesConfig structs"},
+			{ID: "cfg.load", Description: "Load YAML, apply defaults, validate strictly"},
+			{ID: "cfg.blank", Description: ""},
+		},
+	}
+}
+
+func TestItemCommitMessageIsDescriptionVerbatim(t *testing.T) {
+	plan := planForMessages()
+
+	got := ItemCommitMessage(plan, "cfg.load")
+	want := "Load YAML, apply defaults, validate strictly"
+	if got != want {
+		t.Errorf("ItemCommitMessage = %q, want %q", got, want)
+	}
+}
+
+func TestItemCommitMessageMissingItemFallsBackToID(t *testing.T) {
+	plan := planForMessages()
+
+	// A missing ID must not panic, and must not yield an empty message —
+	// git commit -m "" aborts.
+	if got := ItemCommitMessage(plan, "no.such.item"); got != "no.such.item" {
+		t.Errorf("missing item: got %q, want the item ID", got)
+	}
+	if got := ItemCommitMessage(nil, "cfg.load"); got != "cfg.load" {
+		t.Errorf("nil plan: got %q, want the item ID", got)
+	}
+	if got := ItemCommitMessage(plan, "cfg.blank"); got != "cfg.blank" {
+		t.Errorf("blank description: got %q, want the item ID", got)
+	}
+}
+
+func TestBatchCommitMessageJoinsDescriptionsInBatchOrder(t *testing.T) {
+	plan := planForMessages()
+
+	got := BatchCommitMessage(plan, 2, []string{"cfg.load", "cfg.types"})
+	want := "Batch 2: Load YAML, apply defaults, validate strictly; ServiceEndpoint and ServicesConfig structs"
+	if got != want {
+		t.Errorf("BatchCommitMessage = %q, want %q", got, want)
+	}
+}
+
+func TestBatchCommitMessageSingleItemHasNoTrailingSeparator(t *testing.T) {
+	plan := planForMessages()
+
+	got := BatchCommitMessage(plan, 1, []string{"cfg.types"})
+	want := "Batch 1: ServiceEndpoint and ServicesConfig structs"
+	if got != want {
+		t.Errorf("BatchCommitMessage = %q, want %q", got, want)
+	}
+	if strings.HasSuffix(got, ";") || strings.HasSuffix(got, "; ") {
+		t.Errorf("single-item batch message has a trailing separator: %q", got)
+	}
+}
+
+func TestBatchCommitMessageSkipsUnresolvableItems(t *testing.T) {
+	plan := planForMessages()
+
+	// Unresolvable and blank-description items contribute no empty segment.
+	got := BatchCommitMessage(plan, 3, []string{"cfg.types", "no.such.item", "cfg.blank"})
+	want := "Batch 3: ServiceEndpoint and ServicesConfig structs"
+	if got != want {
+		t.Errorf("BatchCommitMessage = %q, want %q", got, want)
+	}
+
+	// With nothing resolvable at all the message still must not be empty.
+	if got := BatchCommitMessage(plan, 4, []string{"no.such.item"}); got != "Batch 4" {
+		t.Errorf("all-unresolvable batch: got %q, want %q", got, "Batch 4")
+	}
+	if got := BatchCommitMessage(nil, 5, []string{"cfg.types"}); got != "Batch 5" {
+		t.Errorf("nil plan: got %q, want %q", got, "Batch 5")
+	}
+}
+
+func TestAppendSuppliedMessageAppendsAsSecondParagraph(t *testing.T) {
+	synthesized := "Load YAML, apply defaults, validate strictly"
+
+	got := AppendSuppliedMessage(synthesized, "double-checked against staging config")
+	want := "Load YAML, apply defaults, validate strictly\n\ndouble-checked against staging config"
+	if got != want {
+		t.Errorf("AppendSuppliedMessage = %q, want %q", got, want)
+	}
+	// The synthesized text is augmented, never replaced.
+	if !strings.HasPrefix(got, synthesized) {
+		t.Errorf("synthesized message was not preserved as the first paragraph: %q", got)
+	}
+}
+
+func TestAppendSuppliedMessageWithoutSuppliedTextIsUnchanged(t *testing.T) {
+	synthesized := "Load YAML, apply defaults, validate strictly"
+
+	for _, supplied := range []string{"", "   ", "\n\t "} {
+		got := AppendSuppliedMessage(synthesized, supplied)
+		if got != synthesized {
+			t.Errorf("AppendSuppliedMessage(%q) = %q, want %q", supplied, got, synthesized)
+		}
+		if strings.HasSuffix(got, "\n") {
+			t.Errorf("AppendSuppliedMessage(%q) left a trailing newline: %q", supplied, got)
+		}
+	}
+}

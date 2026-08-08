@@ -1,0 +1,1022 @@
+{
+  "context": {
+    "domain": "forgectl",
+    "module": "forgectl"
+  },
+  "refs": [
+    {
+      "id": "spec-batch-implementation",
+      "path": "../../specs/batch-implementation.md"
+    },
+    {
+      "id": "spec-ui-batch-implementation",
+      "path": "../../specs/ui-batch-implementation.md"
+    },
+    {
+      "id": "spec-planning-readiness-gate",
+      "path": "../../specs/planning-readiness-gate.md"
+    },
+    {
+      "id": "spec-phase-transitions",
+      "path": "../../specs/phase-transitions.md"
+    },
+    {
+      "id": "spec-session-init",
+      "path": "../../specs/session-init.md"
+    },
+    {
+      "id": "spec-plan-production",
+      "path": "../../specs/plan-production.md"
+    },
+    {
+      "id": "notes-commit-flow",
+      "path": "notes/commit-flow.md"
+    },
+    {
+      "id": "notes-readiness-gate",
+      "path": "notes/readiness-gate.md"
+    },
+    {
+      "id": "notes-output-rendering",
+      "path": "notes/output-rendering.md"
+    },
+    {
+      "id": "notes-testing",
+      "path": "notes/testing.md"
+    },
+    {
+      "id": "notes-docs-sync",
+      "path": "notes/docs-sync.md"
+    }
+  ],
+  "layers": [
+    {
+      "id": "L0",
+      "name": "Foundations",
+      "items": [
+        "git.message-synthesis",
+        "state.workspace-inspection"
+      ]
+    },
+    {
+      "id": "L1",
+      "name": "Implementing Commit Flow \u0026 Gate Evaluation",
+      "items": [
+        "impl.per-item-commit",
+        "impl.inline-terminal-commit",
+        "impl.direct-mode-reentry",
+        "state.readiness-gate"
+      ]
+    },
+    {
+      "id": "L2",
+      "name": "UI Phase Parity \u0026 Gate Wiring",
+      "items": [
+        "ui.per-item-commit",
+        "ui.inline-terminal-commit",
+        "ui.direct-mode-reentry",
+        "cmd.preflight",
+        "gate.enforce-init",
+        "gate.enforce-phase-shift",
+        "gate.logging"
+      ]
+    },
+    {
+      "id": "L3",
+      "name": "Output Rendering \u0026 Derived Docs",
+      "items": [
+        "output.commit-flow",
+        "docs.sync"
+      ]
+    }
+  ],
+  "items": [
+    {
+      "id": "git.message-synthesis",
+      "name": "Synthesize commit messages from plan item descriptions",
+      "description": "Add message-synthesis helpers so the implementing and ui_implementing commit points no longer require an operator-supplied message. Per-item commits use the item's description verbatim; batch-terminal commits use a summary line over the batch's item descriptions. Any supplied --message is appended as a second paragraph rather than substituted.",
+      "depends_on": [],
+      "steps": [
+        "Add a helper that returns the per-item commit message: the item's description field verbatim.",
+        "Add a helper that returns the batch-terminal commit message: 'Batch \u003cN\u003e: ' followed by every batch item's description in batch order, joined with '; '.",
+        "Add a helper that appends supplied --message text to a synthesized message as a second paragraph separated by one blank line, and returns the synthesized message unchanged when no text is supplied.",
+        "Keep AutoCommit's signature unchanged — it continues to receive a fully-formed message string; synthesis happens in the callers.",
+        "Resolve item descriptions through the existing findItem helper so a missing item ID cannot panic."
+      ],
+      "files": [
+        "forgectl/state/git.go",
+        "forgectl/state/git_test.go"
+      ],
+      "specs": [
+        "forgectl/specs/batch-implementation.md",
+        "forgectl/specs/ui-batch-implementation.md"
+      ],
+      "refs": [
+        "notes/commit-flow.md"
+      ],
+      "tests": [
+        {
+          "category": "functional",
+          "description": "The per-item message equals the plan item's description field exactly, with no prefix, suffix, or reformatting",
+          "passes": false
+        },
+        {
+          "category": "functional",
+          "description": "The batch-terminal message for a two-item batch is 'Batch \u003cN\u003e: \u003cfirst description\u003e; \u003csecond description\u003e', preserving batch item order",
+          "passes": false
+        },
+        {
+          "category": "functional",
+          "description": "Supplying --message text appends it as a second paragraph separated by a blank line; the synthesized first paragraph is unchanged and is not replaced",
+          "passes": false
+        },
+        {
+          "category": "edge_case",
+          "description": "With no --message supplied, the returned message is the synthesized message alone, with no trailing blank line",
+          "passes": false
+        },
+        {
+          "category": "edge_case",
+          "description": "A single-item batch produces a batch-terminal message with no trailing separator",
+          "passes": false
+        }
+      ],
+      "passes": "passed",
+      "rounds": 1
+    },
+    {
+      "id": "state.workspace-inspection",
+      "name": "Inspect domain workspace cleanliness",
+      "description": "Add the filesystem inspection the planning readiness gate is built on: resolve a domain name to its \u003cdomain-path\u003e/\u003cworkspace_dir\u003e/ path and classify that workspace as clean or dirty. This is pure inspection with no verdict formatting and no enforcement.",
+      "depends_on": [],
+      "steps": [
+        "Define a domain workspace status type carrying the domain name, the project-root-relative workspace path, a clean boolean, and an error string set only when an existing directory cannot be traversed.",
+        "Resolve a domain name to its path via the configured [[domains]] list, falling back to the domain name itself when no matching domain is configured.",
+        "Build the workspace path as \u003cdomain-path\u003e/\u003cworkspace_dir\u003e/ using cfg.Paths.WorkspaceDir rather than a hardcoded '.forge_workspace' literal.",
+        "Classify the workspace: absent directory is clean; a directory containing no regular files at any depth is clean; any regular file at any depth including dotfiles makes it dirty.",
+        "Walk with filepath.WalkDir and stop at the first regular file found rather than traversing the whole tree.",
+        "Treat a traversal failure on an existing directory as dirty and retain the OS error detail in the error field.",
+        "Perform no writes of any kind — no directory creation, no file creation, no deletion."
+      ],
+      "files": [
+        "forgectl/state/readiness.go",
+        "forgectl/state/readiness_test.go"
+      ],
+      "specs": [
+        "forgectl/specs/planning-readiness-gate.md"
+      ],
+      "refs": [
+        "notes/readiness-gate.md"
+      ],
+      "tests": [
+        {
+          "category": "functional",
+          "description": "A domain whose workspace directory does not exist is reported clean with a nil error",
+          "passes": false
+        },
+        {
+          "category": "functional",
+          "description": "A workspace containing a single regular file at the top level is reported dirty",
+          "passes": false
+        },
+        {
+          "category": "functional",
+          "description": "A workspace containing a regular file nested several directories deep is reported dirty",
+          "passes": false
+        },
+        {
+          "category": "functional",
+          "description": "The reported workspace_path is project-root-relative and honors a non-default paths.workspace_dir value from config rather than a hardcoded .forge_workspace",
+          "passes": false
+        },
+        {
+          "category": "functional",
+          "description": "A domain name is resolved to its configured [[domains]] path; with no domains configured it falls back to the domain name as the path",
+          "passes": false
+        },
+        {
+          "category": "edge_case",
+          "description": "A domain name containing a path separator, such as 'protocols/ws1', resolves to 'protocols/ws1/\u003cworkspace_dir\u003e/' and that nested directory is the one inspected",
+          "passes": false
+        },
+        {
+          "category": "edge_case",
+          "description": "A workspace containing only empty subdirectories, at any nesting depth, is reported clean",
+          "passes": false
+        },
+        {
+          "category": "edge_case",
+          "description": "A workspace whose only content is a dotfile such as .gitkeep is reported dirty, not clean",
+          "passes": false
+        },
+        {
+          "category": "edge_case",
+          "description": "An existing workspace directory that cannot be traversed is reported dirty with the OS error detail retained in the error field",
+          "passes": false
+        },
+        {
+          "category": "rejection",
+          "description": "Inspecting a workspace creates, modifies, and deletes nothing on disk — the directory tree is byte-identical before and after",
+          "passes": false
+        }
+      ],
+      "passes": "passed",
+      "rounds": 1
+    },
+    {
+      "id": "impl.per-item-commit",
+      "name": "Commit each implementing item on every round",
+      "description": "Change advanceImplFromImplement so an auto-commit happens on every IMPLEMENT round rather than only the first, using the synthesized item-description message. Remove the first-round --message requirement; --message becomes optional and is appended to the synthesized message.",
+      "depends_on": [
+        "git.message-synthesis"
+      ],
+      "steps": [
+        "Delete the batch.EvalRound == 0 --message requirement error in advanceImplFromImplement.",
+        "Remove the batch.EvalRound == 0 guard from the auto-commit block so every round commits when enable_commits is true.",
+        "Pass the synthesized per-item message, with any supplied --message appended, instead of in.Message.",
+        "Preserve the existing ordering: mark the item done, commit, then save the plan only after the commit succeeds, so plan.json stays consistent with the state file if the commit fails.",
+        "Leave the remaining item-index advance and end-of-batch round-increment logic unchanged."
+      ],
+      "files": [
+        "forgectl/state/advance.go",
+        "forgectl/state/advance_test.go"
+      ],
+      "specs": [
+        "forgectl/specs/batch-implementation.md"
+      ],
+      "refs": [
+        "notes/commit-flow.md"
+      ],
+      "tests": [
+        {
+          "category": "functional",
+          "description": "With enable_commits true, advancing out of IMPLEMENT on round 2 produces a commit — the first-round-only restriction is gone",
+          "passes": false
+        },
+        {
+          "category": "functional",
+          "description": "The per-item commit message is the item's description when no --message is supplied",
+          "passes": false
+        },
+        {
+          "category": "functional",
+          "description": "With enable_commits false, no commit is made on any round and the advance still succeeds",
+          "passes": false
+        },
+        {
+          "category": "rejection",
+          "description": "Advancing out of IMPLEMENT with enable_commits true and no --message succeeds rather than erroring — the first-round --message requirement no longer exists",
+          "passes": false
+        },
+        {
+          "category": "edge_case",
+          "description": "When AutoCommit fails, the error is surfaced and plan.json is not saved, leaving plan.json and the state file consistent",
+          "passes": false
+        }
+      ],
+      "passes": "pending"
+    },
+    {
+      "id": "impl.inline-terminal-commit",
+      "name": "Commit the implementing batch inline at terminal EVALUATE",
+      "description": "When enable_commits is true, the terminal EVALUATE transition commits the batch inline and proceeds directly to ORIENT or DONE, skipping the COMMIT state entirely. When enable_commits is false, COMMIT is still entered as a no-op advance.",
+      "depends_on": [
+        "git.message-synthesis"
+      ],
+      "steps": [
+        "Extract the COMMIT state's post-commit work — archiveBatch, then allLayersComplete deciding StateDone versus StateOrient — into a helper both the COMMIT state and the new inline path call.",
+        "In advanceImplFromEvaluate, after marking items passed or failed on either terminal branch, branch on enable_commits: when true, stage per implementing.commit_strategy with the batch stage targets, commit with the synthesized batch-terminal message, then run the shared post-commit helper; when false, set StateCommit as today.",
+        "Apply the inline path to both terminal branches — PASS at or above min_rounds and FAIL at or above max_rounds.",
+        "Rely on AutoCommit's existing nothing-to-commit handling so an already-fully-committed batch skips silently rather than erroring.",
+        "Remove the now-unreachable --message requirement in the COMMIT state, since COMMIT is only reached when enable_commits is false."
+      ],
+      "files": [
+        "forgectl/state/advance.go",
+        "forgectl/state/advance_test.go"
+      ],
+      "specs": [
+        "forgectl/specs/batch-implementation.md"
+      ],
+      "refs": [
+        "notes/commit-flow.md"
+      ],
+      "tests": [
+        {
+          "category": "functional",
+          "description": "With enable_commits true, a terminal PASS at min_rounds transitions from EVALUATE directly to ORIENT without passing through COMMIT",
+          "passes": false
+        },
+        {
+          "category": "functional",
+          "description": "With enable_commits true, a terminal PASS on the final layer's last batch transitions from EVALUATE directly to DONE",
+          "passes": false
+        },
+        {
+          "category": "functional",
+          "description": "With enable_commits true, a forced-acceptance FAIL at max_rounds also commits inline and skips COMMIT, with items marked failed",
+          "passes": false
+        },
+        {
+          "category": "functional",
+          "description": "With enable_commits false, the terminal EVALUATE still transitions to COMMIT and COMMIT remains a no-op advance to ORIENT or DONE",
+          "passes": false
+        },
+        {
+          "category": "functional",
+          "description": "The inline commit uses the synthesized batch-terminal message listing every item in the batch",
+          "passes": false
+        },
+        {
+          "category": "edge_case",
+          "description": "When per-item commits already captured every change, the inline batch commit finds nothing staged and is skipped silently — the transition still completes",
+          "passes": false
+        },
+        {
+          "category": "rejection",
+          "description": "With enable_commits true, no advance in the implementing phase requires --message at any point",
+          "passes": false
+        }
+      ],
+      "passes": "pending"
+    },
+    {
+      "id": "impl.direct-mode-reentry",
+      "name": "Re-enter EVALUATE directly under eval_mode direct",
+      "description": "Under eval_mode 'direct', IMPLEMENT runs exactly once per batch: a FAIL, or a PASS below min_rounds, re-enters EVALUATE for another round instead of cycling back through IMPLEMENT. Report and conversational modes keep the existing IMPLEMENT re-entry.",
+      "depends_on": [],
+      "steps": [
+        "In the non-terminal branches of advanceImplFromEvaluate, resolve the mode with EvalModeFor over implementing.eval and general config.",
+        "When the mode is 'direct', set StateEvaluate and increment the batch eval round so the loop advances toward max_rounds; do not reset the current item index.",
+        "When the mode is 'report' or 'conversational', keep the existing behavior: reset the current item index to 0 and set StateImplement.",
+        "Apply this to both non-terminal branches — PASS below min_rounds and FAIL below max_rounds."
+      ],
+      "files": [
+        "forgectl/state/advance.go",
+        "forgectl/state/advance_test.go"
+      ],
+      "specs": [
+        "forgectl/specs/batch-implementation.md"
+      ],
+      "refs": [
+        "notes/commit-flow.md"
+      ],
+      "tests": [
+        {
+          "category": "functional",
+          "description": "Under eval_mode direct, a FAIL below max_rounds transitions EVALUATE to EVALUATE rather than to IMPLEMENT",
+          "passes": false
+        },
+        {
+          "category": "functional",
+          "description": "Under eval_mode direct, a PASS below min_rounds transitions EVALUATE to EVALUATE rather than to IMPLEMENT",
+          "passes": false
+        },
+        {
+          "category": "functional",
+          "description": "Under eval_mode report and under conversational, a FAIL below max_rounds still transitions EVALUATE to IMPLEMENT with the item index reset to 0",
+          "passes": false
+        },
+        {
+          "category": "functional",
+          "description": "Under eval_mode direct, IMPLEMENT is entered exactly once for the batch across the whole evaluation loop",
+          "passes": false
+        },
+        {
+          "category": "edge_case",
+          "description": "A direct-mode batch that FAILs every round terminates: the eval round increments on each re-entry, reaches max_rounds, and force-accepts rather than looping indefinitely",
+          "passes": false
+        }
+      ],
+      "passes": "pending"
+    },
+    {
+      "id": "state.readiness-gate",
+      "name": "Evaluate and report planning readiness",
+      "description": "Build the readiness verdict over a plan queue's domain set and the exact READY and BLOCKED output the spec defines. This is the shared evaluation both preflight and the three cold-start enforcement points call.",
+      "depends_on": [
+        "state.workspace-inspection"
+      ],
+      "steps": [
+        "Resolve the distinct domain set from a plan queue's entries, preserving queue order and inspecting each domain once even when several entries name it.",
+        "Inspect each domain's workspace and assemble a verdict that is ready only when every status is clean.",
+        "Render the READY output as 'Planning readiness: READY' followed by 'Inspected N domain workspaces — all clean.'",
+        "Render the BLOCKED output as 'Planning readiness: BLOCKED', then 'The following domain workspaces contain prior-cycle artifacts:', then one indented line per dirty domain giving its name and workspace path, then the two-line close-out remediation instruction ending in 'then re-run preflight.'",
+        "List only dirty domains in the BLOCKED output; clean domains are not named.",
+        "Include the retained OS error detail for any domain that was dirty because it could not be traversed.",
+        "Keep the verdict stateless: it reads only the filesystem and the supplied domain list, consults no marker file, and records nothing."
+      ],
+      "files": [
+        "forgectl/state/readiness.go",
+        "forgectl/state/readiness_test.go"
+      ],
+      "specs": [
+        "forgectl/specs/planning-readiness-gate.md"
+      ],
+      "refs": [
+        "notes/readiness-gate.md"
+      ],
+      "tests": [
+        {
+          "category": "functional",
+          "description": "A queue whose domains all have clean workspaces yields a ready verdict and the READY output naming the count of inspected workspaces",
+          "passes": false
+        },
+        {
+          "category": "functional",
+          "description": "A queue with two dirty domains yields a blocked verdict whose output lists both domains with their workspace paths and the close-out remediation instruction",
+          "passes": false
+        },
+        {
+          "category": "functional",
+          "description": "The BLOCKED output omits clean domains, listing only the dirty ones",
+          "passes": false
+        },
+        {
+          "category": "functional",
+          "description": "One dirty domain among otherwise clean domains is enough to block the verdict",
+          "passes": false
+        },
+        {
+          "category": "edge_case",
+          "description": "A plan queue with several entries naming the same domain inspects that workspace once and lists it once in the output",
+          "passes": false
+        },
+        {
+          "category": "edge_case",
+          "description": "A domain that is dirty because its workspace could not be traversed reports the OS error detail alongside the domain",
+          "passes": false
+        },
+        {
+          "category": "functional",
+          "description": "Evaluating readiness twice over an unchanged filesystem returns the identical verdict, confirming the gate holds no state between calls",
+          "passes": false
+        },
+        {
+          "category": "edge_case",
+          "description": "Domain 'a' has a full workspace but the plan queue lists only domain 'b', whose workspace is empty: the verdict is READY and domain 'a' is never inspected — a dirty workspace outside the incoming plan queue never blocks the verdict",
+          "passes": false
+        }
+      ],
+      "passes": "pending"
+    },
+    {
+      "id": "ui.per-item-commit",
+      "name": "Commit each ui_implementing item on every round",
+      "description": "Apply the per-item commit change to advanceUIFromImplement: commit every IMPLEMENT round with the synthesized item-description message, and drop the first-round --message requirement.",
+      "depends_on": [
+        "impl.per-item-commit"
+      ],
+      "steps": [
+        "Delete the batch.EvalRound == 0 --message requirement error in advanceUIFromImplement.",
+        "Remove the batch.EvalRound == 0 guard from the auto-commit block so every round commits when enable_commits is true.",
+        "Pass the synthesized per-item message with any supplied --message appended, staging via effectiveUIStrategy and uiScopeTargets.",
+        "Preserve the commit-then-save ordering already used in the implementing phase."
+      ],
+      "files": [
+        "forgectl/state/advance.go",
+        "forgectl/state/advance_test.go"
+      ],
+      "specs": [
+        "forgectl/specs/ui-batch-implementation.md"
+      ],
+      "refs": [
+        "notes/commit-flow.md"
+      ],
+      "tests": [
+        {
+          "category": "functional",
+          "description": "With enable_commits true, advancing out of ui IMPLEMENT on a post-first round produces a commit",
+          "passes": false
+        },
+        {
+          "category": "functional",
+          "description": "The ui per-item commit message is the item's description when no --message is supplied",
+          "passes": false
+        },
+        {
+          "category": "rejection",
+          "description": "Advancing out of ui IMPLEMENT with enable_commits true and no --message succeeds rather than erroring",
+          "passes": false
+        }
+      ],
+      "passes": "pending"
+    },
+    {
+      "id": "ui.inline-terminal-commit",
+      "name": "Commit the ui batch inline at terminal E2E_VERIFY",
+      "description": "When enable_commits is true, the terminal E2E_VERIFY transition marks item terminal status, commits the batch inline, and proceeds directly to ORIENT or DONE, skipping COMMIT. The terminal item marking currently lives only in the COMMIT state and must be shared so both paths agree.",
+      "depends_on": [
+        "impl.inline-terminal-commit",
+        "ui.per-item-commit"
+      ],
+      "steps": [
+        "Extract the ui COMMIT state's terminal item marking into a helper: items are marked failed when any of CodeForceAccepted, QAForceAccepted, or E2EForceAccepted is set, and passed otherwise.",
+        "Extract the ui post-commit work — archiveUIBatch, then allLayersComplete deciding StateDone versus StateOrient — into a helper shared by COMMIT and the inline path.",
+        "In advanceUIFromE2EVerify's terminal branch, branch on enable_commits: when true, apply the terminal marking helper, commit the batch inline with the synthesized batch-terminal message, then run the shared post-commit helper; when false, set StateCommit as today.",
+        "Ensure the terminal marking runs exactly once per batch — the COMMIT path must not re-apply it after the inline path already has.",
+        "Remove the now-unreachable --message requirement in the ui COMMIT state."
+      ],
+      "files": [
+        "forgectl/state/advance.go",
+        "forgectl/state/advance_test.go"
+      ],
+      "specs": [
+        "forgectl/specs/ui-batch-implementation.md"
+      ],
+      "refs": [
+        "notes/commit-flow.md"
+      ],
+      "tests": [
+        {
+          "category": "functional",
+          "description": "With enable_commits true, a terminal e2e PASS transitions from E2E_VERIFY directly to ORIENT or DONE without passing through COMMIT",
+          "passes": false
+        },
+        {
+          "category": "functional",
+          "description": "With enable_commits true and all three loops within budget, batch items are marked passed on the inline path",
+          "passes": false
+        },
+        {
+          "category": "functional",
+          "description": "With enable_commits true and any loop force-accepted, batch items are marked failed on the inline path",
+          "passes": false
+        },
+        {
+          "category": "functional",
+          "description": "With enable_commits false, the terminal E2E_VERIFY still transitions to COMMIT and COMMIT performs the terminal marking as before",
+          "passes": false
+        },
+        {
+          "category": "edge_case",
+          "description": "A code-eval force-accept alone, with QA and e2e both passing within budget, still marks items failed on the inline path",
+          "passes": false
+        },
+        {
+          "category": "edge_case",
+          "description": "When the per-item commits already captured every change, the inline batch commit at terminal E2E_VERIFY finds nothing staged and is skipped silently, and the transition still completes",
+          "passes": false
+        },
+        {
+          "category": "rejection",
+          "description": "With enable_commits true, no advance in the ui_implementing phase requires --message at any point",
+          "passes": false
+        }
+      ],
+      "passes": "pending"
+    },
+    {
+      "id": "ui.direct-mode-reentry",
+      "name": "Re-enter the ui code-eval loop directly under eval_mode direct",
+      "description": "Apply the direct-mode fix to the ui_implementing code-evaluation loop: a FAIL below max_rounds, or a PASS below min_rounds, re-enters EVALUATE rather than IMPLEMENT. The QA and e2e loops are unaffected — they have their own iteration states.",
+      "depends_on": [
+        "impl.direct-mode-reentry"
+      ],
+      "steps": [
+        "In advanceUIFromEvaluate's non-terminal branch, resolve the mode with EvalModeFor over ui_implementing.eval and general config.",
+        "When the mode is 'direct', set StateEvaluate and increment the batch eval round, matching the phase's convention that a loop counter increments on entry to that loop's evaluator state.",
+        "When the mode is 'report' or 'conversational', keep resetting the current item index to 0 and setting StateImplement.",
+        "Leave advanceUIFromQATest and advanceUIFromE2EVerify untouched — the QA and e2e loops iterate through UI_REFINE and E2E_REMEDIATE regardless of eval_mode."
+      ],
+      "files": [
+        "forgectl/state/advance.go",
+        "forgectl/state/advance_test.go"
+      ],
+      "specs": [
+        "forgectl/specs/ui-batch-implementation.md"
+      ],
+      "refs": [
+        "notes/commit-flow.md"
+      ],
+      "tests": [
+        {
+          "category": "functional",
+          "description": "Under ui eval_mode direct, a code-eval FAIL below max_rounds transitions EVALUATE to EVALUATE rather than to IMPLEMENT",
+          "passes": false
+        },
+        {
+          "category": "functional",
+          "description": "Under ui eval_mode report, a code-eval FAIL below max_rounds still transitions EVALUATE to IMPLEMENT",
+          "passes": false
+        },
+        {
+          "category": "functional",
+          "description": "QA_TEST below its budget still transitions to UI_REFINE, and E2E_VERIFY below its budget still transitions to E2E_REMEDIATE, under every eval_mode",
+          "passes": false
+        },
+        {
+          "category": "edge_case",
+          "description": "A direct-mode code-eval loop that FAILs every round reaches max_rounds, force-accepts, and proceeds into the QA loop rather than looping indefinitely",
+          "passes": false
+        }
+      ],
+      "passes": "pending"
+    },
+    {
+      "id": "cmd.preflight",
+      "name": "Add the preflight command",
+      "description": "Add a non-mutating preflight command that reports planning readiness for the domains in a plan queue, taking the queue from --from or, when omitted, from the active session's pending generate_planning_queue plan queue.",
+      "depends_on": [
+        "state.readiness-gate"
+      ],
+      "steps": [
+        "Register a preflight cobra command following the existing command pattern, with an optional --from flag and no positional arguments.",
+        "With --from, read and validate the plan queue with ValidatePlanQueue and evaluate readiness over its domains; an active session is not required.",
+        "Without --from, load the active session and use the plan queue path recorded in its generate_planning_queue state.",
+        "Print the READY output and exit 0 when ready; print the BLOCKED output and exit 1 when blocked.",
+        "Reject an unreadable or invalid --from file with an error naming the path and the parse or validation detail.",
+        "Reject a no --from invocation with no active session or no pending plan queue using the exact message 'No plan queue to check. Pass --from \u003cplan-queue.json\u003e or run from a session with a generated plan queue.'",
+        "Write normal output to the command's stdout writer and let RunE errors reach stderr with a non-zero exit.",
+        "Add preflight's error paths to the CLI-surface error-path coverage."
+      ],
+      "files": [
+        "forgectl/cmd/preflight.go",
+        "forgectl/cmd/preflight_test.go",
+        "forgectl/integration/cli_surface_test.go"
+      ],
+      "specs": [
+        "forgectl/specs/planning-readiness-gate.md"
+      ],
+      "refs": [
+        "notes/readiness-gate.md",
+        "notes/testing.md"
+      ],
+      "tests": [
+        {
+          "category": "functional",
+          "description": "preflight --from over a queue whose domains are all clean prints the READY output and exits 0",
+          "passes": false
+        },
+        {
+          "category": "functional",
+          "description": "preflight --from over a queue with a dirty domain prints the BLOCKED output listing that domain and exits non-zero",
+          "passes": false
+        },
+        {
+          "category": "functional",
+          "description": "preflight with no --from uses the plan queue recorded in the active session's generate_planning_queue state",
+          "passes": false
+        },
+        {
+          "category": "functional",
+          "description": "preflight --from succeeds in a project with no state file at all — it does not require an initialized session",
+          "passes": false
+        },
+        {
+          "category": "rejection",
+          "description": "preflight --from naming a nonexistent file errors with the path and exits non-zero",
+          "passes": false
+        },
+        {
+          "category": "rejection",
+          "description": "preflight --from naming a file that is not a valid plan queue errors with the validation detail and exits non-zero",
+          "passes": false
+        },
+        {
+          "category": "rejection",
+          "description": "preflight with no --from and no active session errors with the exact 'No plan queue to check' message and exits non-zero",
+          "passes": false
+        },
+        {
+          "category": "rejection",
+          "description": "preflight with no --from and an active session that has no pending plan queue (generate_planning_queue state absent, or its plan queue file path empty) errors with the exact 'No plan queue to check' message and exits non-zero",
+          "passes": false
+        },
+        {
+          "category": "rejection",
+          "description": "preflight error paths write to stderr rather than stdout, satisfying the CLI-surface error-path invariant",
+          "passes": false
+        },
+        {
+          "category": "edge_case",
+          "description": "Running preflight leaves the filesystem unchanged — no state file, no directories, and no deletions, on both the ready and blocked paths",
+          "passes": false
+        }
+      ],
+      "passes": "pending"
+    },
+    {
+      "id": "gate.enforce-init",
+      "name": "Enforce the readiness gate at init --phase planning",
+      "description": "Evaluate the readiness gate against the --from plan queue's domains during init --phase planning, before the state file is created. A dirty domain workspace fails init with no state written.",
+      "depends_on": [
+        "state.readiness-gate"
+      ],
+      "steps": [
+        "In the planning branch of init, after the plan queue parses and validates, evaluate readiness over its domains.",
+        "On a blocked verdict, print the dirty domains and the close-out remediation and return an error, aborting before the state file is written.",
+        "Place the check before any state mutation so a blocked init leaves no state file and no session artifacts.",
+        "Leave the specifying, implementing, ui_implementing, and reverse_engineering init branches ungated."
+      ],
+      "files": [
+        "forgectl/cmd/init.go",
+        "forgectl/cmd/commands_test.go"
+      ],
+      "specs": [
+        "forgectl/specs/session-init.md",
+        "forgectl/specs/planning-readiness-gate.md"
+      ],
+      "refs": [
+        "notes/readiness-gate.md"
+      ],
+      "tests": [
+        {
+          "category": "functional",
+          "description": "init --phase planning with all incoming domain workspaces clean proceeds and creates the state file as before",
+          "passes": false
+        },
+        {
+          "category": "rejection",
+          "description": "init --phase planning with a dirty incoming domain workspace fails with the dirty-domain list and close-out remediation, and exits non-zero",
+          "passes": false
+        },
+        {
+          "category": "rejection",
+          "description": "A blocked init --phase planning writes no state file — the state directory is unchanged afterward",
+          "passes": false
+        },
+        {
+          "category": "functional",
+          "description": "init --phase implementing and init --phase specifying are unaffected by a dirty domain workspace",
+          "passes": false
+        },
+        {
+          "category": "edge_case",
+          "description": "A plan queue naming several domains fails init when any one of them is dirty, and names every dirty domain rather than only the first",
+          "passes": false
+        }
+      ],
+      "passes": "pending"
+    },
+    {
+      "id": "gate.enforce-phase-shift",
+      "name": "Enforce the readiness gate at the cold-start phase shifts into planning",
+      "description": "Gate the two cold-start phase shifts that enter planning ORIENT — generate_planning_queue to planning, and the specifying to generate_planning_queue --from skip that lands directly in planning. Intra-session domain-boundary re-entries into planning ORIENT stay ungated.",
+      "depends_on": [
+        "state.readiness-gate"
+      ],
+      "steps": [
+        "In the generate_planning_queue to planning phase shift, evaluate readiness over the incoming plan queue's domains — from the --from override when supplied, otherwise from the recorded plan queue file — after validation and before the queue is populated.",
+        "In the specifying to generate_planning_queue phase shift, gate only the --from branch that skips generate_planning_queue and lands in planning.",
+        "On a blocked verdict, print the dirty domains and close-out remediation and return an error so the transition does not occur and the session stays at its pre-planning phase.",
+        "Perform the check before any state mutation so a blocked shift leaves phase, state, and queue untouched.",
+        "Do not gate the planning to planning domain boundary, nor the implementing to planning and ui_implementing to planning re-entries."
+      ],
+      "files": [
+        "forgectl/state/advance.go",
+        "forgectl/state/advance_test.go"
+      ],
+      "specs": [
+        "forgectl/specs/phase-transitions.md",
+        "forgectl/specs/planning-readiness-gate.md"
+      ],
+      "refs": [
+        "notes/readiness-gate.md"
+      ],
+      "tests": [
+        {
+          "category": "functional",
+          "description": "The generate_planning_queue to planning shift proceeds to planning ORIENT when every incoming domain workspace is clean",
+          "passes": false
+        },
+        {
+          "category": "rejection",
+          "description": "The generate_planning_queue to planning shift with a dirty incoming domain prints the dirty domains and remediation, does not transition, and exits non-zero",
+          "passes": false
+        },
+        {
+          "category": "rejection",
+          "description": "A blocked phase shift leaves the session at its pre-planning phase and state with the plan queue unpopulated",
+          "passes": false
+        },
+        {
+          "category": "rejection",
+          "description": "The specifying to generate_planning_queue shift with --from is blocked by a dirty incoming domain",
+          "passes": false
+        },
+        {
+          "category": "functional",
+          "description": "The planning to planning domain-boundary shift reaches planning ORIENT even though sibling domain workspaces now hold completed plan.json files",
+          "passes": false
+        },
+        {
+          "category": "functional",
+          "description": "The implementing to planning and ui_implementing to planning re-entries reach planning ORIENT with a non-empty workspace for the just-implemented domain",
+          "passes": false
+        },
+        {
+          "category": "edge_case",
+          "description": "A multi-domain interleaved session runs planning through implementing and back to planning for every domain without the gate blocking any domain boundary after the cold start",
+          "passes": false
+        },
+        {
+          "category": "edge_case",
+          "description": "Queue [a, b] was clean at cold start; while domain a is being planned, something outside the scaffold writes a file into b's workspace before the cycle reaches it; when the domain boundary advance to plan b runs, planning ORIENT for b is entered with no re-inspection and no error — distinct from the already-tested case of the just-planned domain (a) holding its own completed plan.json",
+          "passes": false
+        }
+      ],
+      "passes": "pending"
+    },
+    {
+      "id": "gate.logging",
+      "name": "Log the readiness gate verdict",
+      "description": "Wire the readiness gate's verdict into state.Logger at every cold-start planning-entry point: an INFO entry recording the inspected-domain count and verdict, an ERROR entry recording the dirty domains and their workspace paths when entry is blocked, and a DEBUG entry per domain recording its workspace path and clean/dirty result. Route all of it through the existing Logger/LogEntry mechanism rather than a new logging path, so a run with no session id stays a silent no-op.",
+      "depends_on": [
+        "state.readiness-gate",
+        "gate.enforce-init",
+        "gate.enforce-phase-shift"
+      ],
+      "steps": [
+        "At each cold-start planning-entry point (init --phase planning, the generate_planning_queue→planning phase shift, and the specifying→generate_planning_queue --from skip), after the verdict is assembled, emit an INFO LogEntry whose Detail carries the number of domains inspected and the verdict (ready/blocked), following the cmd/advance.go:86-124 pattern of constructing a state.NewLogger(cfg.Logs, phase, sessionID) and calling Write.",
+        "When the verdict is blocked, emit an ERROR LogEntry whose Detail carries the list of dirty domains and their workspace paths, in addition to the INFO entry.",
+        "For each inspected domain, emit a DEBUG-level LogEntry whose Detail carries that domain's workspace path and whether it was found clean or dirty.",
+        "Route every emission through the existing state.Logger/LogEntry mechanism — no new logging file, format, or sink is introduced.",
+        "Rely on NewLogger's existing no-op behavior when sessionID is empty (cmd/preflight.go has no session in the --from path, and no active session in the no --from path) so preflight run outside any session writes no log file and its verdict reaches only stdout.",
+        "Do not add logging to the intra-session domain-boundary re-entries, since the gate itself does not run there."
+      ],
+      "files": [
+        "forgectl/state/readiness.go",
+        "forgectl/cmd/preflight.go",
+        "forgectl/cmd/init.go",
+        "forgectl/state/advance.go",
+        "forgectl/state/readiness_test.go"
+      ],
+      "specs": [
+        "forgectl/specs/planning-readiness-gate.md"
+      ],
+      "refs": [
+        "notes/readiness-gate.md"
+      ],
+      "tests": [
+        {
+          "category": "functional",
+          "description": "A cold-start entry with an all-clean domain set records an INFO log entry with the inspected-domain count and a ready verdict",
+          "passes": false
+        },
+        {
+          "category": "functional",
+          "description": "A blocked cold-start entry records an ERROR log entry listing the dirty domains and their workspace paths, in addition to the INFO entry",
+          "passes": false
+        },
+        {
+          "category": "functional",
+          "description": "A cold-start entry inspecting three domains records a DEBUG log entry per domain, each carrying that domain's workspace path and its clean/dirty result",
+          "passes": false
+        },
+        {
+          "category": "edge_case",
+          "description": "Running preflight outside any session (no active session, --from supplied) writes no log file at all and emits the verdict to stdout only",
+          "passes": false
+        }
+      ],
+      "passes": "pending"
+    },
+    {
+      "id": "output.commit-flow",
+      "name": "Render the revised commit flow",
+      "description": "Update the advance output so it matches the new transitions: IMPLEMENT no longer presents --message as required, the COMMIT state renders only its commits-disabled form, and the terminal transition that commits inline reports that before landing on ORIENT or DONE.",
+      "depends_on": [
+        "impl.per-item-commit",
+        "ui.per-item-commit",
+        "impl.inline-terminal-commit",
+        "ui.inline-terminal-commit",
+        "impl.direct-mode-reentry",
+        "ui.direct-mode-reentry"
+      ],
+      "steps": [
+        "In the implementing and ui IMPLEMENT renderings, present --message as optional and appended to the synthesized message, and drop any first-round-only conditioning.",
+        "Keep the spec review reminder unconditional on every IMPLEMENT round and keep the refs reminder gated on refs being present.",
+        "In the implementing and ui COMMIT renderings, remove the enable_commits true arm — COMMIT is now only reachable when commits are disabled — and keep the commits-disabled guidance.",
+        "Report the inline batch commit on the terminal transition when enable_commits is true, so the operator sees the batch was committed before ORIENT or DONE is rendered.",
+        "Ensure the ORIENT rendering does not imply an outstanding commit when the batch was already committed inline.",
+        "Render the EVALUATE state on a direct-mode self-loop re-entry: the implementing and ui code-eval EVALUATE renderings must carry the incremented Round and a Note line recording the prior round's verdict and that corrections were made directly to the batch files — a code path that is unreachable today and becomes reachable with the direct-mode re-entry change."
+      ],
+      "files": [
+        "forgectl/state/output.go",
+        "forgectl/state/output_test.go"
+      ],
+      "specs": [
+        "forgectl/specs/batch-implementation.md",
+        "forgectl/specs/ui-batch-implementation.md"
+      ],
+      "refs": [
+        "notes/output-rendering.md"
+      ],
+      "tests": [
+        {
+          "category": "functional",
+          "description": "The IMPLEMENT action text presents --message as optional and never states it is required",
+          "passes": false
+        },
+        {
+          "category": "functional",
+          "description": "The COMMIT rendering shows only the commits-disabled guidance and no --message instruction",
+          "passes": false
+        },
+        {
+          "category": "functional",
+          "description": "With enable_commits true, the terminal transition output reports the inline batch commit before the ORIENT or DONE rendering",
+          "passes": false
+        },
+        {
+          "category": "functional",
+          "description": "The spec review reminder appears in the IMPLEMENT action on every round, and the refs reminder appears only when the item has refs",
+          "passes": false
+        },
+        {
+          "category": "functional",
+          "description": "Under eval_mode direct, re-entering EVALUATE after a FAIL renders the incremented round and a Note line reading that the prior round's FAIL was recorded and corrections were made directly to the batch files",
+          "passes": false
+        },
+        {
+          "category": "functional",
+          "description": "Under eval_mode direct, re-entering EVALUATE after a below-min-rounds PASS renders a Note line recording that PASS rather than a FAIL",
+          "passes": false
+        },
+        {
+          "category": "edge_case",
+          "description": "The first EVALUATE entry of a batch renders no Note line, since no prior round exists to report",
+          "passes": false
+        },
+        {
+          "category": "edge_case",
+          "description": "The ui code-eval EVALUATE rendering carries the same Note line on a direct-mode re-entry as the implementing phase does",
+          "passes": false
+        },
+        {
+          "category": "edge_case",
+          "description": "With enable_commits false, the COMMIT rendering is reached and reads as a hard stop for a manual commit, unchanged from before",
+          "passes": false
+        }
+      ],
+      "passes": "pending"
+    },
+    {
+      "id": "docs.sync",
+      "name": "Sync derived diagrams and schema docs",
+      "description": "Bring the derived documentation in line with the implemented behavior: the commit-flow branch at the terminal transition, the direct-mode evaluation self-loop, and the new preflight command and readiness gate.",
+      "depends_on": [
+        "output.commit-flow",
+        "cmd.preflight",
+        "gate.enforce-init",
+        "gate.enforce-phase-shift"
+      ],
+      "steps": [
+        "Update the implementing and ui_implementing phase diagrams so the terminal transition branches on enable_commits: inline commit to ORIENT or DONE, or COMMIT when commits are disabled.",
+        "Add the direct-mode EVALUATE self-loop to the implementing, ui_implementing, complete state machine, and evaluation loop diagrams.",
+        "Add preflight to the CLI commands diagram and the readiness gate as a cold-start precondition on entry into planning in the full lifecycle diagram.",
+        "Regenerate the rendered html counterparts of every changed diagram so the two forms stay paired.",
+        "Review docs/schemas/forge-state.md and update it only if this work changed the state file's structure; the gate itself is stateless.",
+        "Update the enable_commits and eval_mode entries in docs/configurations.md to describe the revised behavior; no new configuration keys are introduced.",
+        "Leave docs/auto-committing.md and docs/schemas/plan-queue.md alone — both already document the target behavior and serve as the reference."
+      ],
+      "files": [
+        "docs/diagrams/03-implementing-phase.txt",
+        "docs/diagrams/10-ui-implementing-phase.txt",
+        "docs/diagrams/06-state-machine-complete.txt",
+        "docs/diagrams/07-evaluation-loop.txt",
+        "docs/diagrams/04-cli-commands.txt",
+        "docs/diagrams/00-full-lifecycle.txt",
+        "docs/diagrams/html/implementing.html",
+        "docs/diagrams/html/implementing-schematic.html",
+        "docs/diagrams/html/ui-implementing.html",
+        "docs/diagrams/html/ui-implementing-schematic.html",
+        "docs/diagrams/html/cli-commands.html",
+        "docs/schemas/forge-state.md",
+        "docs/configurations.md"
+      ],
+      "specs": [
+        "forgectl/specs/batch-implementation.md",
+        "forgectl/specs/ui-batch-implementation.md",
+        "forgectl/specs/planning-readiness-gate.md",
+        "forgectl/specs/phase-transitions.md"
+      ],
+      "refs": [
+        "notes/docs-sync.md"
+      ],
+      "tests": [
+        {
+          "category": "functional",
+          "description": "The implementing and ui_implementing diagrams show the terminal transition branching on enable_commits, with COMMIT reachable only when commits are disabled",
+          "passes": false
+        },
+        {
+          "category": "functional",
+          "description": "The evaluation loop and state machine diagrams show the direct-mode EVALUATE self-loop",
+          "passes": false
+        },
+        {
+          "category": "functional",
+          "description": "The CLI commands diagram lists preflight with its --from flag",
+          "passes": false
+        },
+        {
+          "category": "edge_case",
+          "description": "Every changed diagram's rendered html counterpart matches its text form, and docs/default-config.toml still matches the template embedded in the binary",
+          "passes": false
+        }
+      ],
+      "passes": "pending"
+    }
+  ]
+}
