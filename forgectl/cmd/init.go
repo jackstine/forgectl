@@ -164,7 +164,14 @@ func runInit(cmd *cobra.Command, args []string) error {
 		// artifacts behind. Only the planning branch is gated: the specifying,
 		// implementing, ui_implementing, and reverse_engineering entries do not
 		// begin a planning cycle and have no incoming domain queue to inspect.
-		if verdict := state.EvaluateReadiness(projectRoot, cfg, state.QueueDomains(input)); !verdict.Ready {
+		verdict := state.EvaluateReadiness(projectRoot, cfg, state.QueueDomains(input))
+		// Logged whichever way the verdict goes: the ready case is what later
+		// explains why a cycle was allowed to start over these domains.
+		state.LogReadinessGate(
+			state.NewLogger(cfg.Logs, phase, sessionID),
+			"init", phase, string(state.StateOrient), verdict,
+		)
+		if !verdict.Ready {
 			fmt.Fprintln(out, verdict.Render())
 			names := make([]string, 0, len(verdict.DirtyDomains))
 			for _, d := range verdict.DirtyDomains {

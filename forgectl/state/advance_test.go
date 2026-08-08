@@ -4656,3 +4656,229 @@ func TestForeignWriteIntoUnplannedDomainDoesNotBlockBoundary(t *testing.T) {
 		t.Errorf("expected domain next, got %s", s.Planning.CurrentPlan.Domain)
 	}
 }
+
+// --- ui_implementing inline batch-terminal commit ----------------------------
+//
+// The ui phase decides item status later than implementing does: the code, QA,
+// and e2e loops each gate a different class of defect, and only after all three
+// have run is "did this batch pass" answerable. That marking used to live solely
+// in COMMIT. Now that the terminal E2E_VERIFY transition can skip COMMIT
+// entirely, the marking has to happen on whichever path runs — and on exactly
+// one of them, or a batch could be marked twice with different force-accept
+// state in between.
+
+// uiAtE2EVerify drives a fresh ui batch through the code and QA loops and parks
+// it at E2E_VERIFY, the transition that terminates the batch. codeVerdict
+// selects whether the code loop force-accepts on its way past (max_rounds is 1,
+// so a FAIL there force-accepts immediately).
+func uiAtE2EVerify(t *testing.T, dir string, enableCommits bool, codeVerdict string) *ForgeState {
+	t.Helper()
+	s := newUIImplementingState(dir, 1, 1)
+	s.Config.General.EnableCommits = enableCommits
+	s.Config.UIImplementing.Eval.EvalMode = "conversational"
+	s.Config.UIImplementing.QA.EvalMode = "conversational"
+	s.Config.UIImplementing.E2E.EvalMode = "conversational"
+	s.Config.UIImplementing.Eval.MaxRounds = 1
+
+	Advance(s, AdvanceInput{}, dir) // ORIENT → IMPLEMENT
+	for s.State == StateImplement {
+		if enableCommits {
+			touchUIDomainFile(t, dir, "item.tsx", "export default null")
+		}
+		if err := Advance(s, AdvanceInput{}, dir); err != nil {
+			t.Fatalf("setup: IMPLEMENT advance: %v", err)
+		}
+	}
+	if err := Advance(s, AdvanceInput{Verdict: codeVerdict}, dir); err != nil {
+		t.Fatalf("setup: code EVALUATE advance: %v", err)
+	}
+	if s.State != StateQATest {
+		t.Fatalf("setup: expected QA_TEST, got %s", s.State)
+	}
+	writeQAStepList(t, s, dir, s.UIImplementing.BatchNumber, 2)
+	if err := Advance(s, AdvanceInput{Verdict: "PASS"}, dir); err != nil {
+		t.Fatalf("setup: QA advance: %v", err)
+	}
+	if err := Advance(s, AdvanceInput{}, dir); err != nil { // E2E_AUTHOR → E2E_VERIFY
+		t.Fatalf("setup: E2E_AUTHOR advance: %v", err)
+	}
+	if s.State != StateE2EVerify {
+		t.Fatalf("setup: expected E2E_VERIFY, got %s", s.State)
+	}
+	return s
+}
+
+// uiItemStatus reads an item's passes field back off disk.
+func uiItemStatus(t *testing.T, s *ForgeState, dir, id string) string {
+	t.Helper()
+	plan, err := loadPlan(s, dir)
+	if err != nil {
+		t.Fatalf("loading plan: %v", err)
+	}
+	item := findItem(plan, id)
+	if item == nil {
+		t.Fatalf("item %q not in plan", id)
+	}
+	return item.Passes
+}
+
+// Functional: with commits enabled the terminal e2e PASS goes straight to
+// ORIENT/DONE — COMMIT never appears, so it can never demand a --message.
+func TestUITerminalE2EVerifyCommitsInlineAndSkipsCommitState(t *testing.T) {
+	dir := t.TempDir()
+	initTestGitRepo(t, dir)
+	s := uiAtE2EVerify(t, dir, true, "PASS")
+
+	before := gitCommitCount(t, dir)
+	touchUIDomainFile(t, dir, "e2e-fix.tsx", "export default null // corrected")
+
+	if err := Advance(s, AdvanceInput{Verdict: "PASS"}, dir); err != nil {
+		t.Fatalf("terminal E2E_VERIFY advance: %v", err)
+	}
+	if s.State == StateCommit {
+		t.Fatal("COMMIT must be skipped when commits are enabled")
+	}
+	// One batch of one item, one layer — the plan is finished.
+	if s.State != StateDone {
+		t.Errorf("expected DONE, got %s", s.State)
+	}
+	if got := gitCommitCount(t, dir); got != before+1 {
+		t.Errorf("inline batch commit did not happen: %d → %d commits", before, got)
+	}
+	if s.UIImplementing.CurrentBatch != nil {
+		t.Error("batch should be archived by the inline path")
+	}
+}
+
+// Functional: all three loops within budget marks the batch passed on the
+// inline path — the marking is not lost by skipping COMMIT.
+func TestUIInlineTerminalMarksItemsPassed(t *testing.T) {
+	dir := t.TempDir()
+	initTestGitRepo(t, dir)
+	s := uiAtE2EVerify(t, dir, true, "PASS")
+
+	if err := Advance(s, AdvanceInput{Verdict: "PASS"}, dir); err != nil {
+		t.Fatalf("terminal advance: %v", err)
+	}
+	if got := uiItemStatus(t, s, dir, "a"); got != "passed" {
+		t.Errorf("item passes = %q, want passed", got)
+	}
+}
+
+// Functional: an e2e force-accept marks the batch failed on the inline path.
+func TestUIInlineTerminalMarksItemsFailedOnForceAccept(t *testing.T) {
+	dir := t.TempDir()
+	initTestGitRepo(t, dir)
+	s := uiAtE2EVerify(t, dir, true, "PASS")
+	s.Config.UIImplementing.E2E.MaxRounds = 1 // a FAIL now force-accepts
+
+	// The batch is archived by the transition, so hold the pointer to confirm
+	// the force-accept actually fired rather than trusting the config alone.
+	batch := s.UIImplementing.CurrentBatch
+	if err := Advance(s, AdvanceInput{Verdict: "FAIL"}, dir); err != nil {
+		t.Fatalf("terminal FAIL advance: %v", err)
+	}
+	if !batch.E2EForceAccepted {
+		t.Fatal("setup: the e2e loop should have force-accepted")
+	}
+	if got := uiItemStatus(t, s, dir, "a"); got != "failed" {
+		t.Errorf("item passes = %q, want failed", got)
+	}
+}
+
+// Edge case: a code-eval force-accept alone is enough. QA and e2e both passing
+// says nothing about the defect the code loop gave up on, so the batch is still
+// failed — this is the combination most likely to be lost if the inline path
+// only consults E2EForceAccepted.
+func TestUIInlineTerminalCodeForceAcceptAloneMarksFailed(t *testing.T) {
+	dir := t.TempDir()
+	initTestGitRepo(t, dir)
+	s := uiAtE2EVerify(t, dir, true, "FAIL") // code loop force-accepts at max_rounds 1
+
+	batch := s.UIImplementing.CurrentBatch
+	if !batch.CodeForceAccepted || batch.QAForceAccepted || batch.E2EForceAccepted {
+		t.Fatalf("setup: want code force-accept only, got code=%v qa=%v e2e=%v",
+			batch.CodeForceAccepted, batch.QAForceAccepted, batch.E2EForceAccepted)
+	}
+
+	if err := Advance(s, AdvanceInput{Verdict: "PASS"}, dir); err != nil {
+		t.Fatalf("terminal advance: %v", err)
+	}
+	if got := uiItemStatus(t, s, dir, "a"); got != "failed" {
+		t.Errorf("item passes = %q, want failed — a code force-accept alone fails the batch", got)
+	}
+}
+
+// Edge case: when the per-item commits already captured everything, the inline
+// batch commit finds nothing staged. AutoCommit treats that as a silent skip, so
+// the transition must still complete rather than erroring on an empty commit.
+func TestUIInlineTerminalCommitSkippedWhenNothingStaged(t *testing.T) {
+	dir := t.TempDir()
+	initTestGitRepo(t, dir)
+	s := uiAtE2EVerify(t, dir, true, "PASS")
+
+	// The plan lives at ui/plan.json, outside the staged "portal/" scope, so
+	// marking the batch leaves nothing for the batch commit to pick up.
+	before := gitCommitCount(t, dir)
+
+	if err := Advance(s, AdvanceInput{Verdict: "PASS"}, dir); err != nil {
+		t.Fatalf("terminal advance must survive an empty commit: %v", err)
+	}
+	if got := gitCommitCount(t, dir); got != before {
+		t.Errorf("expected no new commit, got %d → %d", before, got)
+	}
+	if s.State != StateDone {
+		t.Errorf("the transition must still complete, got %s", s.State)
+	}
+	if got := uiItemStatus(t, s, dir, "a"); got != "passed" {
+		t.Errorf("item passes = %q, want passed", got)
+	}
+}
+
+// Functional: with commits disabled the old route is intact — E2E_VERIFY lands
+// in COMMIT, and COMMIT does the marking, since the inline path never ran.
+func TestUITerminalE2EVerifyReachesCommitWhenCommitsDisabled(t *testing.T) {
+	dir := t.TempDir()
+	s := uiAtE2EVerify(t, dir, false, "PASS")
+
+	if err := Advance(s, AdvanceInput{Verdict: "PASS"}, dir); err != nil {
+		t.Fatalf("terminal advance: %v", err)
+	}
+	if s.State != StateCommit {
+		t.Fatalf("expected COMMIT with commits disabled, got %s", s.State)
+	}
+	// "done" is what IMPLEMENT leaves behind; the terminal passed/failed
+	// marking has not run yet on this path, which is COMMIT's job below.
+	if got := uiItemStatus(t, s, dir, "a"); got == "passed" || got == "failed" {
+		t.Errorf("terminal marking must not have run before COMMIT, got %q", got)
+	}
+
+	if err := Advance(s, AdvanceInput{}, dir); err != nil {
+		t.Fatalf("COMMIT advance: %v", err)
+	}
+	if got := uiItemStatus(t, s, dir, "a"); got != "passed" {
+		t.Errorf("COMMIT must still mark the batch, got %q", got)
+	}
+	if s.State != StateDone {
+		t.Errorf("expected DONE after COMMIT, got %s", s.State)
+	}
+	if s.UIImplementing.CurrentBatch != nil {
+		t.Error("COMMIT should archive the batch")
+	}
+}
+
+// Rejection: no advance anywhere in the ui phase demands --message once commits
+// are enabled. The whole loop is driven here without one.
+func TestUIPhaseNeverRequiresMessageWithCommitsEnabled(t *testing.T) {
+	dir := t.TempDir()
+	initTestGitRepo(t, dir)
+	s := uiAtE2EVerify(t, dir, true, "PASS") // fails the test if any leg needed one
+
+	touchUIDomainFile(t, dir, "final.tsx", "export default null")
+	if err := Advance(s, AdvanceInput{Verdict: "PASS"}, dir); err != nil {
+		t.Fatalf("terminal E2E_VERIFY required a message: %v", err)
+	}
+	if s.State != StateDone {
+		t.Errorf("expected DONE, got %s", s.State)
+	}
+}

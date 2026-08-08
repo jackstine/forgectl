@@ -951,7 +951,7 @@ func advanceUIImplementing(s *ForgeState, in AdvanceInput, dir string) error {
 	case StateE2ERemediate:
 		return advanceUIFromE2ERemediate(s)
 	case StateCommit:
-		return advanceUIFromCommit(s, in, dir)
+		return advanceUIFromCommit(s, dir)
 	case StateDone:
 		return advanceUIFromDone(s)
 	default:
@@ -1185,11 +1185,87 @@ func advanceUIFromE2EVerify(s *ForgeState, in AdvanceInput, dir string) error {
 		if in.Verdict == "FAIL" {
 			batch.E2EForceAccepted = true
 		}
-		s.State = StateCommit
-		return nil
+		return terminateUIBatch(s, in, dir)
 	}
 	// Below min (PASS) or below max (FAIL) — remediate and re-verify.
 	s.State = StateE2ERemediate
+	return nil
+}
+
+// terminateUIBatch closes out a ui batch that has cleared all three loops.
+//
+// When enable_commits is true the batch is marked, committed inline as part of
+// this same advance, and the scaffold proceeds straight to ORIENT/DONE; COMMIT
+// never appears, so no separate advance and no --message is needed. When commits
+// are disabled the scaffold falls through to COMMIT, which does the marking
+// instead — so the terminal marking runs exactly once per batch either way.
+func terminateUIBatch(s *ForgeState, in AdvanceInput, dir string) error {
+	if !s.Config.General.EnableCommits {
+		s.State = StateCommit
+		return nil
+	}
+
+	ui := s.UIImplementing
+	batch := ui.CurrentBatch
+
+	plan, err := loadPlan(s, dir)
+	if err != nil {
+		return err
+	}
+	// Mark and save before committing so the commit captures plan.json in its
+	// terminal form rather than leaving the status change for the next commit.
+	markUIBatchTerminal(batch, plan)
+	if err := savePlan(s, dir, plan); err != nil {
+		return err
+	}
+
+	strategy := effectiveUIStrategy(s)
+	stageTargets := uiScopeTargets(ui, nil, strategy)
+	message := AppendSuppliedMessage(
+		BatchCommitMessage(plan, ui.BatchNumber, batch.Items),
+		in.Message,
+	)
+	// AutoCommit treats "nothing to commit" as a silent skip, so a batch whose
+	// per-item commits already captured every change passes through here without
+	// an empty commit or an error, and the transition still completes.
+	if _, err := AutoCommit(dir, strategy, stageTargets, message); err != nil {
+		return fmt.Errorf("Error: STOP there was a failure with auto committing in forgectl, please tell the user: %s", err)
+	}
+
+	return finishUIBatch(s, plan)
+}
+
+// markUIBatchTerminal records each batch item's terminal status in the plan.
+//
+// The ui phase can only decide this once all three loops have run: the batch
+// passed when every loop stayed within its round budget, and failed when any one
+// of them force-accepted at max_rounds. A force-accept in any single loop is
+// enough — code, QA, and e2e each gate a different kind of defect, so clearing
+// two of the three says nothing about the third.
+func markUIBatchTerminal(batch *UIBatchState, plan *PlanJSON) {
+	status := "passed"
+	if batch.CodeForceAccepted || batch.QAForceAccepted || batch.E2EForceAccepted {
+		status = "failed"
+	}
+	for _, id := range batch.Items {
+		setItemPasses(plan, id, status)
+	}
+}
+
+// finishUIBatch performs the post-commit work shared by the COMMIT state and the
+// inline batch-terminal commit: archive the batch to history, then decide whether
+// the session is finished or another batch remains.
+//
+// It takes the plan the caller already marked rather than reloading it, so the
+// completeness check sees this batch's terminal statuses.
+func finishUIBatch(s *ForgeState, plan *PlanJSON) error {
+	archiveUIBatch(s)
+
+	if allLayersComplete(plan) {
+		s.State = StateDone
+	} else {
+		s.State = StateOrient
+	}
 	return nil
 }
 
@@ -1200,50 +1276,23 @@ func advanceUIFromE2ERemediate(s *ForgeState) error {
 	return nil
 }
 
-func advanceUIFromCommit(s *ForgeState, in AdvanceInput, dir string) error {
-	if s.Config.General.EnableCommits && in.Message == "" {
-		return fmt.Errorf("--message is required in COMMIT state when enable_commits is true")
-	}
-
-	// Batch commit: stage per ui_implementing.commit_strategy and commit.
-	if s.Config.General.EnableCommits {
-		strategy := effectiveUIStrategy(s)
-		stageTargets := uiScopeTargets(s.UIImplementing, nil, strategy)
-		if _, err := AutoCommit(dir, strategy, stageTargets, in.Message); err != nil {
-			return fmt.Errorf("Error: STOP there was a failure with auto committing in forgectl, please tell the user: %s", err)
-		}
-	}
-
-	ui := s.UIImplementing
-	batch := ui.CurrentBatch
-
+// advanceUIFromCommit is only reachable when enable_commits is false: with
+// commits enabled the batch is marked and committed inline at the terminal
+// E2E_VERIFY transition, which then goes straight to ORIENT/DONE. So no git
+// operation happens here and there is no --message to demand — the marking is
+// the only work left, and it has not run yet on this path.
+func advanceUIFromCommit(s *ForgeState, dir string) error {
 	plan, err := loadPlan(s, dir)
 	if err != nil {
 		return err
 	}
 
-	// Items are marked terminal here, after all three loops have run: passed
-	// when every loop stayed within budget, failed when any loop force-accepted.
-	forced := batch.CodeForceAccepted || batch.QAForceAccepted || batch.E2EForceAccepted
-	status := "passed"
-	if forced {
-		status = "failed"
-	}
-	for _, id := range batch.Items {
-		setItemPasses(plan, id, status)
-	}
+	markUIBatchTerminal(s.UIImplementing.CurrentBatch, plan)
 	if err := savePlan(s, dir, plan); err != nil {
 		return err
 	}
 
-	archiveUIBatch(s)
-
-	if allLayersComplete(plan) {
-		s.State = StateDone
-	} else {
-		s.State = StateOrient
-	}
-	return nil
+	return finishUIBatch(s, plan)
 }
 
 func advanceUIFromDone(s *ForgeState) error {
@@ -1406,7 +1455,12 @@ func advancePhaseShift(s *ForgeState, in AdvanceInput, dir string) error {
 			// and therefore gated. Returning before the assignments below leaves
 			// phase, state, and queue untouched, so a blocked shift keeps the
 			// session at the specifying→generate_planning_queue shift.
-			if verdict := EvaluateReadiness(dir, s.Config, QueueDomains(input)); !verdict.Ready {
+			verdict := EvaluateReadiness(dir, s.Config, QueueDomains(input))
+			LogReadinessGate(
+				NewLogger(s.Config.Logs, s.StartedAtPhase, s.SessionID),
+				"advance", PhasePlanning, string(StateOrient), verdict,
+			)
+			if !verdict.Ready {
 				return &ReadinessError{Verdict: verdict}
 			}
 			s.Planning = NewPlanningState(input.Plans)
@@ -1457,7 +1511,12 @@ func advancePhaseShift(s *ForgeState, in AdvanceInput, dir string) error {
 		// have an empty workspace. The check sits after validation and before
 		// the queue is populated so a blocked shift mutates nothing and the
 		// session stays in generate_planning_queue.
-		if verdict := EvaluateReadiness(dir, s.Config, QueueDomains(input)); !verdict.Ready {
+		verdict := EvaluateReadiness(dir, s.Config, QueueDomains(input))
+		LogReadinessGate(
+			NewLogger(s.Config.Logs, s.StartedAtPhase, s.SessionID),
+			"advance", PhasePlanning, string(StateOrient), verdict,
+		)
+		if !verdict.Ready {
 			return &ReadinessError{Verdict: verdict}
 		}
 		s.Planning = NewPlanningState(input.Plans)

@@ -225,6 +225,78 @@ func (v ReadinessVerdict) Render() string {
 	return b.String()
 }
 
+// Log level names carried in a gate log entry's Detail. LogEntry has no level
+// field of its own — the activity log is one JSONL stream shared by every
+// command — so the level travels in Detail rather than in a second log file or
+// a changed record shape.
+const (
+	logLevelInfo  = "INFO"
+	logLevelError = "ERROR"
+	logLevelDebug = "DEBUG"
+)
+
+// LogReadinessGate records a gate evaluation to the activity log.
+//
+// Three levels, matching the spec's observability table: one INFO entry with the
+// inspected-domain count and the verdict, one ERROR entry naming the dirty
+// domains when entry is blocked, and one DEBUG entry per inspected domain with
+// its workspace path and result. The per-domain DEBUG entries are what make a
+// blocked run diagnosable after the fact — the INFO line says how many were
+// looked at, but only DEBUG says which paths those were.
+//
+// Callers pass the logger they already built for their entry point. A logger
+// constructed with an empty session id is a no-op (see NewLogger), which is what
+// keeps a session-less preflight from writing a log file without any special
+// case here.
+func LogReadinessGate(logger *Logger, cmd string, phase PhaseName, stateName string, v ReadinessVerdict) {
+	if logger == nil || !logger.Enabled() {
+		return
+	}
+
+	verdict := "ready"
+	if !v.Ready {
+		verdict = "blocked"
+	}
+	entry := func(level string, detail map[string]interface{}) LogEntry {
+		detail["level"] = level
+		detail["gate"] = "planning_readiness"
+		return LogEntry{
+			TS:     LogNow(),
+			Cmd:    cmd,
+			Phase:  string(phase),
+			State:  stateName,
+			Detail: detail,
+		}
+	}
+
+	logger.Write(entry(logLevelInfo, map[string]interface{}{
+		"domains_inspected": len(v.Statuses),
+		"verdict":           verdict,
+	}))
+
+	if !v.Ready {
+		dirty := make([]map[string]interface{}, 0, len(v.DirtyDomains))
+		for _, d := range v.DirtyDomains {
+			dirty = append(dirty, map[string]interface{}{
+				"domain":         d.Domain,
+				"workspace_path": d.WorkspacePath,
+			})
+		}
+		logger.Write(entry(logLevelError, map[string]interface{}{
+			"message":       "planning entry blocked by the readiness gate",
+			"dirty_domains": dirty,
+		}))
+	}
+
+	for _, st := range v.Statuses {
+		logger.Write(entry(logLevelDebug, map[string]interface{}{
+			"domain":         st.Domain,
+			"workspace_path": st.WorkspacePath,
+			"clean":          st.Clean,
+		}))
+	}
+}
+
 // ReadinessError is the failure a cold-start planning entry returns when the
 // gate blocks it.
 //

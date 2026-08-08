@@ -1,6 +1,7 @@
 package state
 
 import (
+	"encoding/json"
 	"fmt"
 	"io/fs"
 	"os"
@@ -490,5 +491,183 @@ func TestEvaluateReadinessIsStatelessAcrossCalls(t *testing.T) {
 	}
 	if len(first.DirtyDomains) != len(second.DirtyDomains) {
 		t.Errorf("dirty domain count changed: %d then %d", len(first.DirtyDomains), len(second.DirtyDomains))
+	}
+}
+
+// --- Gate logging ------------------------------------------------------------
+//
+// The gate's log entries are the only record of why a planning cycle was — or
+// was not — allowed to start. A blocked run leaves no state file and no
+// workspace change, so without these entries the refusal is invisible after the
+// terminal scrollback is gone.
+
+// readGateLog returns the entries a logger wrote, decoded.
+func readGateLog(t *testing.T, path string) []map[string]interface{} {
+	t.Helper()
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("reading log %s: %v", path, err)
+	}
+	var entries []map[string]interface{}
+	for _, line := range strings.Split(strings.TrimSpace(string(data)), "\n") {
+		if line == "" {
+			continue
+		}
+		var e map[string]interface{}
+		if err := json.Unmarshal([]byte(line), &e); err != nil {
+			t.Fatalf("invalid JSONL line %q: %v", line, err)
+		}
+		entries = append(entries, e)
+	}
+	return entries
+}
+
+// entriesAtLevel filters decoded entries by the level recorded in Detail.
+func entriesAtLevel(entries []map[string]interface{}, level string) []map[string]interface{} {
+	var out []map[string]interface{}
+	for _, e := range entries {
+		detail, _ := e["detail"].(map[string]interface{})
+		if detail != nil && detail["level"] == level {
+			out = append(out, e)
+		}
+	}
+	return out
+}
+
+func TestLogReadinessGateReadyRecordsInfoWithCount(t *testing.T) {
+	root := t.TempDir()
+	logPath := filepath.Join(t.TempDir(), "planning-abcd1234.jsonl")
+	logger := &Logger{enabled: true, path: logPath}
+
+	v := EvaluateReadiness(root, cfgWithWorkspaceDir(".forge_workspace"),
+		QueueDomains(queueOf("protocols", "launcher", "portal")))
+	LogReadinessGate(logger, "init", PhasePlanning, "ORIENT", v)
+
+	entries := readGateLog(t, logPath)
+	info := entriesAtLevel(entries, "INFO")
+	if len(info) != 1 {
+		t.Fatalf("expected exactly 1 INFO entry, got %d", len(info))
+	}
+	detail := info[0]["detail"].(map[string]interface{})
+	if got := detail["domains_inspected"]; got != float64(3) {
+		t.Errorf("domains_inspected = %v, want 3", got)
+	}
+	if got := detail["verdict"]; got != "ready" {
+		t.Errorf("verdict = %v, want ready", got)
+	}
+	// A ready verdict is not an error, so nothing should be logged as one.
+	if n := len(entriesAtLevel(entries, "ERROR")); n != 0 {
+		t.Errorf("a ready verdict must log no ERROR entry, got %d", n)
+	}
+}
+
+func TestLogReadinessGateBlockedRecordsErrorAlongsideInfo(t *testing.T) {
+	root := t.TempDir()
+	cfg := cfgWithWorkspaceDir(".forge_workspace")
+	mustWriteFile(t, filepath.Join(root, "protocols/.forge_workspace/plan.json"), "{}")
+	mustWriteFile(t, filepath.Join(root, "launcher/.forge_workspace/notes/n.md"), "notes")
+
+	logPath := filepath.Join(t.TempDir(), "planning-abcd1234.jsonl")
+	logger := &Logger{enabled: true, path: logPath}
+
+	v := EvaluateReadiness(root, cfg, QueueDomains(queueOf("protocols", "launcher", "portal")))
+	LogReadinessGate(logger, "advance", PhasePlanning, "ORIENT", v)
+
+	entries := readGateLog(t, logPath)
+	info := entriesAtLevel(entries, "INFO")
+	if len(info) != 1 {
+		t.Fatalf("the INFO entry must still be written when blocked, got %d", len(info))
+	}
+	if got := info[0]["detail"].(map[string]interface{})["verdict"]; got != "blocked" {
+		t.Errorf("verdict = %v, want blocked", got)
+	}
+
+	errs := entriesAtLevel(entries, "ERROR")
+	if len(errs) != 1 {
+		t.Fatalf("expected exactly 1 ERROR entry, got %d", len(errs))
+	}
+	dirty, ok := errs[0]["detail"].(map[string]interface{})["dirty_domains"].([]interface{})
+	if !ok {
+		t.Fatalf("ERROR detail has no dirty_domains list: %v", errs[0]["detail"])
+	}
+	if len(dirty) != 2 {
+		t.Fatalf("expected 2 dirty domains, got %d", len(dirty))
+	}
+	var names, paths []string
+	for _, d := range dirty {
+		m := d.(map[string]interface{})
+		names = append(names, m["domain"].(string))
+		paths = append(paths, m["workspace_path"].(string))
+	}
+	sort.Strings(names)
+	if strings.Join(names, ",") != "launcher,protocols" {
+		t.Errorf("dirty domains = %v, want launcher and protocols", names)
+	}
+	for _, p := range paths {
+		if !strings.Contains(p, ".forge_workspace") {
+			t.Errorf("dirty entry missing its workspace path: %q", p)
+		}
+	}
+}
+
+func TestLogReadinessGateRecordsOneDebugEntryPerDomain(t *testing.T) {
+	root := t.TempDir()
+	cfg := cfgWithWorkspaceDir(".forge_workspace")
+	mustWriteFile(t, filepath.Join(root, "launcher/.forge_workspace/plan.json"), "{}")
+
+	logPath := filepath.Join(t.TempDir(), "planning-abcd1234.jsonl")
+	logger := &Logger{enabled: true, path: logPath}
+
+	v := EvaluateReadiness(root, cfg, QueueDomains(queueOf("protocols", "launcher", "portal")))
+	LogReadinessGate(logger, "init", PhasePlanning, "ORIENT", v)
+
+	debug := entriesAtLevel(readGateLog(t, logPath), "DEBUG")
+	if len(debug) != 3 {
+		t.Fatalf("expected one DEBUG entry per inspected domain (3), got %d", len(debug))
+	}
+	// Every domain must appear with its path and its own result — the count in
+	// the INFO line is useless for diagnosis without these.
+	seen := map[string]bool{}
+	for _, e := range debug {
+		d := e["detail"].(map[string]interface{})
+		name := d["domain"].(string)
+		seen[name] = true
+		if path, _ := d["workspace_path"].(string); !strings.HasPrefix(path, name) {
+			t.Errorf("domain %q logged workspace_path %q", name, path)
+		}
+		wantClean := name != "launcher"
+		if got := d["clean"]; got != wantClean {
+			t.Errorf("domain %q clean = %v, want %v", name, got, wantClean)
+		}
+	}
+	for _, name := range []string{"protocols", "launcher", "portal"} {
+		if !seen[name] {
+			t.Errorf("no DEBUG entry for domain %q", name)
+		}
+	}
+}
+
+// Edge case: outside a session there is no session id, NewLogger returns a
+// disabled logger, and nothing is written. This is why the gate needs no
+// special case for preflight — the no-op falls out of the existing logger.
+func TestLogReadinessGateWritesNothingWithoutASession(t *testing.T) {
+	logDir := t.TempDir()
+	t.Setenv("HOME", logDir)
+
+	logger := NewLogger(LogsConfig{Enabled: true}, PhasePlanning, "")
+	if logger.Enabled() {
+		t.Fatal("a logger with no session id must be disabled")
+	}
+
+	v := EvaluateReadiness(t.TempDir(), cfgWithWorkspaceDir(".forge_workspace"),
+		QueueDomains(queueOf("protocols")))
+	LogReadinessGate(logger, "preflight", PhasePlanning, "ORIENT", v)
+
+	files, err := filepath.Glob(filepath.Join(logDir, ".forgectl", "logs", "*.jsonl"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(files) != 0 {
+		t.Errorf("no log file should exist outside a session, found %v", files)
 	}
 }

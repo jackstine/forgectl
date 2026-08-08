@@ -52,6 +52,12 @@ func runPreflight(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("invalid plan queue %s: %w", queuePath, err)
 	}
 
+	// No logging here, deliberately. The gate's activity-log entries belong to
+	// the three cold-start planning *entry* points, where the verdict decides
+	// whether a cycle starts. preflight only asks the question — it can be run
+	// any number of times, from outside any session, and filling the log with
+	// answers nobody acted on would bury the entries that did gate something.
+	// The verdict goes to stdout and nowhere else.
 	verdict := state.EvaluateReadiness(projectRoot, cfg, state.QueueDomains(queue))
 	if verdict.Ready {
 		fmt.Fprintln(cmd.OutOrStdout(), verdict.Render())
