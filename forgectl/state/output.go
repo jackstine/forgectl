@@ -39,6 +39,15 @@ func (s *ForgeState) CurrentEvalMode() string {
 
 // PrintAdvanceOutput prints the action description for the new state after advance.
 func PrintAdvanceOutput(w io.Writer, s *ForgeState, dir string) {
+	// A batch committed inline during this advance is reported before the state
+	// it landed on. The operator never sees a COMMIT state in that flow, so this
+	// line is the only place the commit is acknowledged — and it has to come
+	// first, or the ORIENT/DONE block reads as though the batch was left
+	// uncommitted.
+	if s.InlineBatchCommit != "" {
+		fmt.Fprintf(w, "%s\n\n", s.InlineBatchCommit)
+	}
+
 	switch s.Phase {
 	case PhaseSpecifying:
 		printSpecifyingOutput(w, s, dir)
@@ -158,6 +167,33 @@ func writeImplementReviewReminders(w io.Writer, indent string, hasSpecCommits, h
 	}
 }
 
+// writeDirectReentryNote renders the Note line on an EVALUATE entry that is a
+// re-entry rather than a batch's first evaluation.
+//
+// This only ever fires under eval_mode "direct", because that is the only mode
+// in which a non-terminal verdict returns to EVALUATE instead of IMPLEMENT.
+// Under "report" and "conversational" the batch goes back through IMPLEMENT,
+// which renders its own equivalent note, and this state is entered exactly once
+// per round with no prior verdict to report.
+//
+// The presence of a prior eval record is what distinguishes a re-entry from a
+// first entry, so an empty history correctly prints nothing.
+func writeDirectReentryNote(w io.Writer, evals []EvalRecord, minRounds int) {
+	if len(evals) == 0 {
+		return
+	}
+	last := evals[len(evals)-1]
+	note := fmt.Sprintf("%s recorded for round %d. Corrections were made directly to batch files.", last.Verdict, last.Round)
+	// A PASS that loops back did so only because the minimum round count was not
+	// met; without saying so the operator sees a PASS followed by another round
+	// and reads it as the scaffold ignoring the verdict.
+	if last.Verdict == "PASS" && last.Round < minRounds {
+		note = fmt.Sprintf("PASS recorded for round %d. Minimum rounds not yet met (%d/%d). Corrections were made directly to batch files.",
+			last.Round, last.Round, minRounds)
+	}
+	fmt.Fprintf(w, "Note:     %s\n", note)
+}
+
 // writeEvalTrailingSections renders the per-mode --- PREVIOUS EVALUATIONS ---
 // and --- REPORT OUTPUT --- sections shared by every eval-context output
 // function. It emits a single leading blank line before the first section it
@@ -210,8 +246,11 @@ func writeEvalTrailingSections(w io.Writer, mode string, evals []EvalRecord, rep
 
 func implEvalReportPath(s *ForgeState) string {
 	impl := s.Implementing
+	// EvalRound is pre-incremented on entry to EVALUATE (and again on a
+	// direct-mode self-loop re-entry), so it already names the round being
+	// evaluated and needs no offset — the same convention the ui phase follows.
 	return filepath.Join(currentPlanDir(s), "evals",
-		fmt.Sprintf("batch-%d-round-%d.md", impl.BatchNumber, impl.CurrentBatch.EvalRound+1))
+		fmt.Sprintf("batch-%d-round-%d.md", impl.BatchNumber, impl.CurrentBatch.EvalRound))
 }
 
 func planEvalReportPath(s *ForgeState) string {
@@ -1075,7 +1114,8 @@ func printImplementingOutput(w io.Writer, s *ForgeState, dir string) {
 		fmt.Fprintf(w, "Phase:    implementing\n")
 		fmt.Fprintf(w, "Layer:    %s %s\n", impl.CurrentLayer.ID, impl.CurrentLayer.Name)
 		fmt.Fprintf(w, "Batch:    %d/%d\n", impl.BatchNumber, totalBatches)
-		fmt.Fprintf(w, "Round:    %d/%d\n", batch.EvalRound+1, s.Config.Implementing.Eval.MaxRounds)
+		fmt.Fprintf(w, "Round:    %d/%d\n", batch.EvalRound, s.Config.Implementing.Eval.MaxRounds)
+		writeDirectReentryNote(w, batch.Evals, s.Config.Implementing.Eval.MinRounds)
 		fmt.Fprintf(w, "Items:\n")
 
 		if plan != nil {
@@ -1125,12 +1165,12 @@ func printImplementingOutput(w io.Writer, s *ForgeState, dir string) {
 			}
 		}
 
-		if s.Config.General.EnableCommits {
-			fmt.Fprintf(w, "Action:  Advance with --message \"your commit message\" to commit and continue.\n")
-		} else {
-			fmt.Fprintf(w, "Action:  Commit your changes before continuing.\n")
-			fmt.Fprintf(w, "         After completion of the above, advance to continue.\n")
-		}
+		// COMMIT is reachable only when enable_commits is false — with commits
+		// enabled the batch was committed inline at the terminal EVALUATE and the
+		// scaffold went straight to ORIENT/DONE. So there is one rendering, and
+		// it is the hard stop for a manual commit.
+		fmt.Fprintf(w, "Action:  Commit your changes before continuing.\n")
+		fmt.Fprintf(w, "         After completion of the above, advance to continue.\n")
 
 	case StateDone:
 		plan, _ := loadPlan(s, dir)
@@ -1410,6 +1450,7 @@ func printUIImplementingOutput(w io.Writer, s *ForgeState, dir string) {
 		fmt.Fprintf(w, "Layer:    %s %s\n", ui.CurrentLayer.ID, ui.CurrentLayer.Name)
 		fmt.Fprintf(w, "Batch:    %d/%d\n", ui.BatchNumber, totalBatches)
 		fmt.Fprintf(w, "Round:    %d/%d\n", batch.EvalRound, cfg.Eval.MaxRounds)
+		writeDirectReentryNote(w, batch.Evals, cfg.Eval.MinRounds)
 		fmt.Fprintf(w, "Loop:     code\n")
 		writeUIBatchItems(w, plan, batch.Items)
 		writeUIReviewLine(w, batch, "          ")
@@ -1616,11 +1657,11 @@ func printUIImplementingOutput(w io.Writer, s *ForgeState, dir string) {
 				}
 			}
 		}
-		if s.Config.General.EnableCommits {
-			fmt.Fprintf(w, "Action:  Advance with --message \"your commit message\" to commit and continue.\n")
-		} else {
-			fmt.Fprintf(w, "Action:  Advance to continue.\n")
-		}
+		// As in the implementing phase, COMMIT is reachable only when
+		// enable_commits is false; the inline path at terminal E2E_VERIFY
+		// bypasses this state entirely when commits are enabled. The
+		// commits-disabled guidance is unchanged.
+		fmt.Fprintf(w, "Action:  Advance to continue.\n")
 
 	case StateDone:
 		plan, _ := loadPlan(s, dir)
@@ -2442,7 +2483,7 @@ func printImplementingEval(w io.Writer, s *ForgeState, dir string) error {
 	impl := s.Implementing
 	batch := impl.CurrentBatch
 
-	evalRound := batch.EvalRound + 1
+	evalRound := batch.EvalRound // pre-incremented on entry to EVALUATE
 
 	fmt.Fprintf(w, "=== IMPLEMENTATION EVALUATION ROUND %d/%d ===\n", evalRound, s.Config.Implementing.Eval.MaxRounds)
 	fmt.Fprintf(w, "Layer: %s %s\n", impl.CurrentLayer.ID, impl.CurrentLayer.Name)

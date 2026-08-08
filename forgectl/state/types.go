@@ -748,6 +748,13 @@ type ForgeState struct {
 	Implementing          *ImplementingState          `json:"implementing"`
 	UIImplementing        *UIImplementingState        `json:"ui_implementing,omitempty"`
 	ReverseEngineering    *ReverseEngineeringState    `json:"reverse_engineering,omitempty"`
+
+	// InlineBatchCommit reports a batch commit performed during the advance that
+	// just ran, so the output can tell the operator the batch was committed
+	// before it renders whatever state the transition landed on. It is transient
+	// (json:"-"): it describes one advance, not session state, and persisting it
+	// would make the next command's output claim a commit that already happened.
+	InlineBatchCommit string `json:"-"`
 }
 
 // AdvanceInput carries flags from the advance command.

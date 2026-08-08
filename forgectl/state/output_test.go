@@ -2008,3 +2008,305 @@ func TestEvalOutputUIRejectsNonEvaluatorState(t *testing.T) {
 		t.Errorf("error should name the state and phase, got: %v", err)
 	}
 }
+
+// --- Revised commit flow rendering -------------------------------------------
+//
+// The output is the only thing the operator reads. Two of the transitions it
+// describes changed shape: COMMIT no longer has a commits-enabled form, and the
+// terminal EVALUATE can now commit and move on in one step. A third rendering —
+// EVALUATE re-entered from EVALUATE — was unreachable until direct mode started
+// looping there, so it had never been written at all.
+
+// TestOutputImplementNeverStatesMessageIsRequired pins that IMPLEMENT presents
+// --message as optional. Every round auto-commits with a synthesized message, so
+// there is nothing for the operator to supply and nothing to demand.
+func TestOutputImplementNeverStatesMessageIsRequired(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		commits bool
+	}{{"commits enabled", true}, {"commits disabled", false}} {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			s := newImplementingState(dir, 2, 2)
+			s.Config.General.EnableCommits = tc.commits
+			if err := Advance(s, AdvanceInput{}, dir); err != nil { // ORIENT → IMPLEMENT
+				t.Fatal(err)
+			}
+
+			out := outputOf(s, dir)
+			if strings.Contains(out, "--message is required") {
+				t.Errorf("IMPLEMENT must never state --message is required, got:\n%s", out)
+			}
+			if strings.Contains(out, `Advance with --message`) {
+				t.Errorf("IMPLEMENT must not instruct the operator to pass --message, got:\n%s", out)
+			}
+		})
+	}
+}
+
+// TestOutputImplementRoundTwoNeverStatesMessageIsRequired covers the round-2+
+// rendering, which used to be the one gated on "first round only".
+func TestOutputImplementRoundTwoNeverStatesMessageIsRequired(t *testing.T) {
+	dir := t.TempDir()
+	s := implReentryState(t, dir, "report")
+
+	out := outputOf(s, dir)
+	if strings.Contains(out, "--message") {
+		t.Errorf("round 2+ IMPLEMENT must not mention --message, got:\n%s", out)
+	}
+}
+
+// TestOutputUICommitOnlyRendersCommitsDisabledForm pins the ui COMMIT rendering
+// to its single surviving form. With commits enabled the state is unreachable,
+// so a --message instruction here could only ever mislead.
+func TestOutputUICommitOnlyRendersCommitsDisabledForm(t *testing.T) {
+	dir := t.TempDir()
+	s := uiAtE2EVerify(t, dir, false, "PASS")
+	if err := Advance(s, AdvanceInput{Verdict: "PASS"}, dir); err != nil {
+		t.Fatalf("terminal advance: %v", err)
+	}
+	if s.State != StateCommit {
+		t.Fatalf("expected COMMIT, got %s", s.State)
+	}
+
+	out := outputOf(s, dir)
+	if strings.Contains(out, "--message") {
+		t.Errorf("ui COMMIT must not mention --message, got:\n%s", out)
+	}
+	if !strings.Contains(out, "Advance to continue.") {
+		t.Errorf("ui COMMIT should keep its commits-disabled guidance, got:\n%s", out)
+	}
+}
+
+// Edge case: with commits disabled the implementing COMMIT is still reached and
+// still reads as a hard stop for a manual commit — unchanged from before.
+func TestOutputImplementingCommitStillHardStopsWhenCommitsDisabled(t *testing.T) {
+	dir := t.TempDir()
+	s := newImplementingState(dir, 1, 1)
+	s.Config.General.EnableCommits = false
+	advanceImplToCommit(t, s, dir)
+
+	out := outputOf(s, dir)
+	if !strings.Contains(out, "Commit your changes before continuing.") {
+		t.Errorf("COMMIT should still instruct a manual commit, got:\n%s", out)
+	}
+	if !strings.Contains(out, "advance to continue") {
+		t.Errorf("COMMIT should still tell the operator how to proceed, got:\n%s", out)
+	}
+	if strings.Contains(out, "Committed batch") {
+		t.Errorf("no inline commit happened, so none should be reported, got:\n%s", out)
+	}
+}
+
+// Functional: with commits enabled the terminal transition reports the inline
+// batch commit before rendering whatever state it landed on. Without this line
+// the commit is completely invisible — COMMIT never appears to acknowledge it.
+func TestOutputTerminalTransitionReportsInlineBatchCommit(t *testing.T) {
+	dir := t.TempDir()
+	initTestGitRepo(t, dir)
+	s := newImplementingState(dir, 1, 1)
+	s.Config.General.EnableCommits = true
+
+	Advance(s, AdvanceInput{}, dir) // ORIENT → IMPLEMENT
+	touchDomainFile(t, dir, "work.go", "package main")
+	Advance(s, AdvanceInput{}, dir) // IMPLEMENT → EVALUATE
+
+	// Leave a change the per-item commit did not capture so the batch commit
+	// has something to stage and produces a real hash.
+	touchDomainFile(t, dir, "evaluator-correction.go", "package main")
+	evalFile := filepath.Join(dir, "eval.md")
+	os.WriteFile(evalFile, []byte("eval"), 0644)
+	if err := Advance(s, AdvanceInput{Verdict: "PASS", EvalReport: evalFile}, dir); err != nil {
+		t.Fatalf("terminal EVALUATE advance: %v", err)
+	}
+	if s.State == StateCommit {
+		t.Fatal("COMMIT must be skipped with commits enabled")
+	}
+
+	out := outputOf(s, dir)
+	if !strings.Contains(out, "Committed batch 1") {
+		t.Errorf("terminal transition must report the inline commit, got:\n%s", out)
+	}
+	// It has to come first, or the landing state reads as an outstanding commit.
+	commitAt := strings.Index(out, "Committed batch 1")
+	stateAt := strings.Index(out, "State:")
+	if commitAt > stateAt {
+		t.Errorf("the commit notice must precede the state block, got:\n%s", out)
+	}
+}
+
+// The notice is transient: it describes the advance that just ran, so a later
+// command must not repeat it.
+func TestInlineBatchCommitNoticeIsNotPersisted(t *testing.T) {
+	dir := t.TempDir()
+	initTestGitRepo(t, dir)
+	s := newImplementingState(dir, 1, 1)
+	s.Config.General.EnableCommits = true
+	Advance(s, AdvanceInput{}, dir)
+	touchDomainFile(t, dir, "work.go", "package main")
+	Advance(s, AdvanceInput{}, dir)
+	evalFile := filepath.Join(dir, "eval.md")
+	os.WriteFile(evalFile, []byte("eval"), 0644)
+	Advance(s, AdvanceInput{Verdict: "PASS", EvalReport: evalFile}, dir)
+
+	if s.InlineBatchCommit == "" {
+		t.Fatal("setup: expected an inline commit notice")
+	}
+	stateDir := filepath.Join(dir, ".forgectl", "state")
+	os.MkdirAll(stateDir, 0755)
+	if err := Save(stateDir, s); err != nil {
+		t.Fatal(err)
+	}
+	reloaded, err := Load(stateDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if reloaded.InlineBatchCommit != "" {
+		t.Errorf("the notice must not survive a save/load round trip, got %q", reloaded.InlineBatchCommit)
+	}
+}
+
+// Functional: under direct mode a FAIL re-enters EVALUATE with the round
+// incremented and a Note recording the prior verdict. Without the Note the
+// operator sees the same screen twice with no indication a round elapsed.
+func TestOutputDirectModeEvaluateReentryRendersNoteAndRound(t *testing.T) {
+	dir := t.TempDir()
+	s := newImplementingState(dir, 1, 1)
+	s.Config.Implementing.Eval.EvalMode = "direct"
+	s.Config.Implementing.Eval.MaxRounds = 3
+
+	Advance(s, AdvanceInput{}, dir) // ORIENT → IMPLEMENT
+	Advance(s, AdvanceInput{}, dir) // IMPLEMENT → EVALUATE (round 1)
+
+	first := outputOf(s, dir)
+	if !strings.Contains(first, "Round:    1/3") {
+		t.Errorf("first EVALUATE should render round 1/3, got:\n%s", first)
+	}
+	if strings.Contains(first, "Note:") {
+		t.Errorf("the first EVALUATE entry has no prior round to report, got:\n%s", first)
+	}
+
+	if err := Advance(s, AdvanceInput{Verdict: "FAIL"}, dir); err != nil {
+		t.Fatalf("direct-mode FAIL: %v", err)
+	}
+	if s.State != StateEvaluate {
+		t.Fatalf("expected an EVALUATE self-loop, got %s", s.State)
+	}
+
+	out := outputOf(s, dir)
+	if !strings.Contains(out, "Round:    2/3") {
+		t.Errorf("re-entry should render the incremented round, got:\n%s", out)
+	}
+	want := "Note:     FAIL recorded for round 1. Corrections were made directly to batch files."
+	if !strings.Contains(out, want) {
+		t.Errorf("re-entry missing the Note line:\nwant %q\ngot:\n%s", want, out)
+	}
+}
+
+// Functional: a below-min-rounds PASS also loops back, and the Note must record
+// that PASS rather than a FAIL — reading "FAIL" after a PASS would be worse than
+// no note at all.
+func TestOutputDirectModeEvaluateReentryAfterPassRecordsPass(t *testing.T) {
+	dir := t.TempDir()
+	s := newImplementingState(dir, 1, 1)
+	s.Config.Implementing.Eval.EvalMode = "direct"
+	s.Config.Implementing.Eval.MinRounds = 2
+	s.Config.Implementing.Eval.MaxRounds = 3
+
+	Advance(s, AdvanceInput{}, dir) // ORIENT → IMPLEMENT
+	Advance(s, AdvanceInput{}, dir) // IMPLEMENT → EVALUATE (round 1)
+	if err := Advance(s, AdvanceInput{Verdict: "PASS"}, dir); err != nil {
+		t.Fatalf("below-min PASS: %v", err)
+	}
+	if s.State != StateEvaluate {
+		t.Fatalf("expected an EVALUATE self-loop, got %s", s.State)
+	}
+
+	out := outputOf(s, dir)
+	if !strings.Contains(out, "Note:     PASS recorded for round 1.") {
+		t.Errorf("the Note must record the PASS, got:\n%s", out)
+	}
+	if strings.Contains(out, "FAIL recorded") {
+		t.Errorf("the Note must not claim a FAIL, got:\n%s", out)
+	}
+	if !strings.Contains(out, "Minimum rounds not yet met (1/2)") {
+		t.Errorf("a looping PASS must say why it looped, got:\n%s", out)
+	}
+}
+
+// Edge case: the ui code-eval loop carries the identical Note on a direct-mode
+// re-entry. The two phases render from separate code, and have drifted before.
+func TestOutputUIDirectModeEvaluateReentryRendersNote(t *testing.T) {
+	dir := t.TempDir()
+	s := newUIImplementingState(dir, 1, 1)
+	s.Config.UIImplementing.Eval.EvalMode = "direct"
+	s.Config.UIImplementing.Eval.MaxRounds = 3
+
+	Advance(s, AdvanceInput{}, dir) // ORIENT → IMPLEMENT
+	Advance(s, AdvanceInput{}, dir) // IMPLEMENT → EVALUATE (round 1)
+
+	if strings.Contains(outputOf(s, dir), "Note:") {
+		t.Errorf("the ui first EVALUATE entry should carry no Note, got:\n%s", outputOf(s, dir))
+	}
+
+	if err := Advance(s, AdvanceInput{Verdict: "FAIL"}, dir); err != nil {
+		t.Fatalf("ui direct-mode FAIL: %v", err)
+	}
+	out := outputOf(s, dir)
+	if !strings.Contains(out, "Round:    2/3") {
+		t.Errorf("ui re-entry should render the incremented round, got:\n%s", out)
+	}
+	want := "Note:     FAIL recorded for round 1. Corrections were made directly to batch files."
+	if !strings.Contains(out, want) {
+		t.Errorf("ui re-entry missing the Note line:\nwant %q\ngot:\n%s", want, out)
+	}
+}
+
+// The report path names the round being evaluated. It shares EvalRound with the
+// Round: line, so an offset in either one desynchronises the path the operator
+// passes to --eval-report from the one the sub-agent wrote.
+func TestEvalReportPathMatchesRenderedRound(t *testing.T) {
+	dir := t.TempDir()
+	s := newImplementingState(dir, 1, 1)
+	s.Config.Implementing.Eval.EvalMode = "direct"
+	s.Config.Implementing.Eval.MaxRounds = 3
+
+	Advance(s, AdvanceInput{}, dir) // ORIENT → IMPLEMENT
+	Advance(s, AdvanceInput{}, dir) // IMPLEMENT → EVALUATE (round 1)
+
+	if got := implEvalReportPath(s); !strings.HasSuffix(got, "batch-1-round-1.md") {
+		t.Errorf("round 1 report path = %q, want it to name round 1", got)
+	}
+	if err := Advance(s, AdvanceInput{Verdict: "FAIL"}, dir); err != nil {
+		t.Fatal(err)
+	}
+	if got := implEvalReportPath(s); !strings.HasSuffix(got, "batch-1-round-2.md") {
+		t.Errorf("round 2 report path = %q, want it to name round 2", got)
+	}
+}
+
+// TestOutputOrientAfterInlineCommitDoesNotImplyOutstandingCommit pins step 5:
+// the batch was already committed, so ORIENT must not ask for one.
+func TestOutputOrientAfterInlineCommitDoesNotImplyOutstandingCommit(t *testing.T) {
+	dir := t.TempDir()
+	initTestGitRepo(t, dir)
+	s := newImplementingState(dir, 2, 1) // two items → a second batch remains
+	s.Config.General.EnableCommits = true
+
+	Advance(s, AdvanceInput{}, dir) // ORIENT → IMPLEMENT
+	touchDomainFile(t, dir, "work.go", "package main")
+	Advance(s, AdvanceInput{}, dir) // IMPLEMENT → EVALUATE
+	evalFile := filepath.Join(dir, "eval.md")
+	os.WriteFile(evalFile, []byte("eval"), 0644)
+	if err := Advance(s, AdvanceInput{Verdict: "PASS", EvalReport: evalFile}, dir); err != nil {
+		t.Fatalf("terminal advance: %v", err)
+	}
+	if s.State != StateOrient {
+		t.Fatalf("expected ORIENT, got %s", s.State)
+	}
+
+	out := outputOf(s, dir)
+	if strings.Contains(out, "Commit your changes before continuing.") {
+		t.Errorf("ORIENT must not ask for a commit that already happened, got:\n%s", out)
+	}
+}

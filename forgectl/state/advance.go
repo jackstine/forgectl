@@ -897,11 +897,30 @@ func terminateImplBatch(s *ForgeState, in AdvanceInput, dir string, plan *PlanJS
 	// AutoCommit already treats "nothing to commit" as a silent skip, so a
 	// batch whose items were all committed per-item — with no corrections left
 	// by the evaluator — passes through here without an empty commit or error.
-	if _, err := AutoCommit(dir, strategy, stageTargets, message); err != nil {
+	hash, err := AutoCommit(dir, strategy, stageTargets, message)
+	if err != nil {
 		return fmt.Errorf("Error: STOP there was a failure with auto committing in forgectl, please tell the user: %s", err)
 	}
+	s.InlineBatchCommit = inlineCommitNotice(hash, impl.BatchNumber)
 
 	return finishImplBatch(s, dir)
+}
+
+// inlineCommitNotice describes an inline batch commit for the advance output.
+//
+// AutoCommit returns an empty hash when there was nothing to stage — the normal
+// outcome once the per-item commits have already captured every change. That is
+// reported as a skip rather than suppressed: silence would leave the operator
+// unsure whether the batch commit ran at all.
+func inlineCommitNotice(hash string, batchNumber int) string {
+	if hash == "" {
+		return fmt.Sprintf("Batch %d: nothing left to commit — already captured by the per-item commits.", batchNumber)
+	}
+	short := hash
+	if len(short) > 7 {
+		short = short[:7]
+	}
+	return fmt.Sprintf("Committed batch %d (%s).", batchNumber, short)
 }
 
 // finishImplBatch performs the post-commit work shared by the COMMIT state and
@@ -1228,9 +1247,11 @@ func terminateUIBatch(s *ForgeState, in AdvanceInput, dir string) error {
 	// AutoCommit treats "nothing to commit" as a silent skip, so a batch whose
 	// per-item commits already captured every change passes through here without
 	// an empty commit or an error, and the transition still completes.
-	if _, err := AutoCommit(dir, strategy, stageTargets, message); err != nil {
+	hash, err := AutoCommit(dir, strategy, stageTargets, message)
+	if err != nil {
 		return fmt.Errorf("Error: STOP there was a failure with auto committing in forgectl, please tell the user: %s", err)
 	}
+	s.InlineBatchCommit = inlineCommitNotice(hash, ui.BatchNumber)
 
 	return finishUIBatch(s, plan)
 }
