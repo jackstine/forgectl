@@ -16,23 +16,10 @@ func outputOf(s *ForgeState, dir string) string {
 	return buf.String()
 }
 
-// TestOutputCommitEnableCommitsShowsMessage verifies that COMMIT with enable_commits=true
-// instructs the user to advance with --message.
-func TestOutputCommitEnableCommitsShowsMessage(t *testing.T) {
-	dir := t.TempDir()
-	initTestGitRepo(t, dir)
-	s := newImplementingState(dir, 1, 1)
-	s.Config.General.EnableCommits = true
-	advanceImplToCommit(t, s, dir)
-
-	out := outputOf(s, dir)
-	if !strings.Contains(out, "--message") {
-		t.Errorf("expected --message in COMMIT output with enable_commits=true, got:\n%s", out)
-	}
-	if strings.Contains(out, "Advance to continue.") {
-		t.Errorf("unexpected 'Advance to continue.' in COMMIT output with enable_commits=true, got:\n%s", out)
-	}
-}
+// COMMIT has no enable_commits=true form to render: with commits enabled the
+// batch is committed inline at the terminal EVALUATE and the state is never
+// entered. The commits-disabled form below is now the only one, which is why
+// the former TestOutputCommitEnableCommitsShowsMessage no longer exists.
 
 // TestOutputCommitNoCommitsShowsAdvance verifies that COMMIT with enable_commits=false
 // shows a simple "Advance to continue." action.

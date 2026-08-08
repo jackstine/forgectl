@@ -647,29 +647,11 @@ func advanceImplementing(s *ForgeState, in AdvanceInput, dir string) error {
 		return advanceImplFromEvaluate(s, in, dir)
 
 	case StateCommit:
-		if s.Config.General.EnableCommits && in.Message == "" {
-			return fmt.Errorf("--message is required in COMMIT state when enable_commits is true")
-		}
-		if s.Config.General.EnableCommits {
-			strategy := effectiveImplStrategy(s)
-			stageTargets := implScopeTargets(impl, nil, strategy)
-			if _, err := AutoCommit(dir, strategy, stageTargets, in.Message); err != nil {
-				return fmt.Errorf("Error: STOP there was a failure with auto committing in forgectl, please tell the user: %s", err)
-			}
-		}
-		// Archive batch to history.
-		archiveBatch(s)
-
-		// Check if all layers complete.
-		plan, err := loadPlan(s, dir)
-		if err != nil {
-			return err
-		}
-		if allLayersComplete(plan) {
-			s.State = StateDone
-		} else {
-			s.State = StateOrient
-		}
+		// COMMIT is only reachable when enable_commits is false: with commits
+		// enabled the batch is committed inline at the terminal EVALUATE
+		// transition, which then goes straight to ORIENT/DONE. So this is a
+		// pure no-op advance — no git operation, and no --message to demand.
+		return finishImplBatch(s, dir)
 
 	case StateDone:
 		// Check for remaining plans.
@@ -755,24 +737,26 @@ func advanceImplFromImplement(s *ForgeState, in AdvanceInput, dir string) error 
 		return err
 	}
 
-	// First round requires --message when enable_commits is true.
-	if batch.EvalRound == 0 && s.Config.General.EnableCommits && in.Message == "" {
-		return fmt.Errorf("--message is required for first-round implementation when enable_commits is true")
-	}
-
 	// Mark current item as done — saved after commit succeeds to keep
 	// plan.json and state consistent on commit failure.
 	itemID := batch.Items[batch.CurrentItemIndex]
 	setItemPasses(plan, itemID, "done")
 
-	// First-round auto-commit: one commit per item for crash safety.
-	// Save plan only after commit succeeds so plan.json stays consistent with
-	// the state file if the commit fails.
-	if batch.EvalRound == 0 && s.Config.General.EnableCommits {
+	// Per-item auto-commit on every round, not only the first: a corrections
+	// round rewrites the same files, and deferring those changes to the batch
+	// terminal would lose the per-item crash-safety boundary the first-round
+	// commit exists to provide.
+	//
+	// The message is synthesized from the item's description, so --message is
+	// optional here; when supplied it is appended as a second paragraph rather
+	// than substituted. Save the plan only after the commit succeeds so
+	// plan.json stays consistent with the state file if the commit fails.
+	if s.Config.General.EnableCommits {
 		strategy := effectiveImplStrategy(s)
 		item := findItem(plan, itemID)
 		stageTargets := implScopeTargets(impl, item, strategy)
-		if _, err := AutoCommit(dir, strategy, stageTargets, in.Message); err != nil {
+		message := AppendSuppliedMessage(ItemCommitMessage(plan, itemID), in.Message)
+		if _, err := AutoCommit(dir, strategy, stageTargets, message); err != nil {
 			return fmt.Errorf("Error: STOP there was a failure with auto committing in forgectl, please tell the user: %s", err)
 		}
 	}
@@ -845,12 +829,11 @@ func advanceImplFromEvaluate(s *ForgeState, in AdvanceInput, dir string) error {
 			if err := savePlan(s, dir, plan); err != nil {
 				return err
 			}
-			s.State = StateCommit
-		} else {
-			// Min rounds not met — re-implement.
-			batch.CurrentItemIndex = 0
-			s.State = StateImplement
+			return terminateImplBatch(s, in, dir, plan)
 		}
+		// Min rounds not met — re-implement.
+		batch.CurrentItemIndex = 0
+		s.State = StateImplement
 	} else {
 		if batch.EvalRound >= maxRounds {
 			// Force accept — mark items failed.
@@ -860,14 +843,62 @@ func advanceImplFromEvaluate(s *ForgeState, in AdvanceInput, dir string) error {
 			if err := savePlan(s, dir, plan); err != nil {
 				return err
 			}
-			s.State = StateCommit
-		} else {
-			// Re-implement.
-			batch.CurrentItemIndex = 0
-			s.State = StateImplement
+			return terminateImplBatch(s, in, dir, plan)
 		}
+		// Re-implement.
+		batch.CurrentItemIndex = 0
+		s.State = StateImplement
 	}
 
+	return nil
+}
+
+// terminateImplBatch closes out an implementing batch that has reached a
+// terminal verdict — PASS at or above min_rounds, or a force-accepted FAIL at
+// max_rounds. Items have already been marked and saved by the caller.
+//
+// When enable_commits is true the batch is committed inline as part of this
+// same advance and the scaffold proceeds straight to ORIENT/DONE; the COMMIT
+// state never appears, so no separate advance and no --message is needed. When
+// commits are disabled the scaffold falls through to COMMIT, unchanged.
+func terminateImplBatch(s *ForgeState, in AdvanceInput, dir string, plan *PlanJSON) error {
+	if !s.Config.General.EnableCommits {
+		s.State = StateCommit
+		return nil
+	}
+
+	impl := s.Implementing
+	strategy := effectiveImplStrategy(s)
+	stageTargets := implScopeTargets(impl, nil, strategy)
+	message := AppendSuppliedMessage(
+		BatchCommitMessage(plan, impl.BatchNumber, impl.CurrentBatch.Items),
+		in.Message,
+	)
+	// AutoCommit already treats "nothing to commit" as a silent skip, so a
+	// batch whose items were all committed per-item — with no corrections left
+	// by the evaluator — passes through here without an empty commit or error.
+	if _, err := AutoCommit(dir, strategy, stageTargets, message); err != nil {
+		return fmt.Errorf("Error: STOP there was a failure with auto committing in forgectl, please tell the user: %s", err)
+	}
+
+	return finishImplBatch(s, dir)
+}
+
+// finishImplBatch performs the post-commit work shared by the COMMIT state and
+// the inline batch-terminal commit: archive the batch to history, then decide
+// whether the session is finished or another batch remains.
+func finishImplBatch(s *ForgeState, dir string) error {
+	archiveBatch(s)
+
+	plan, err := loadPlan(s, dir)
+	if err != nil {
+		return err
+	}
+	if allLayersComplete(plan) {
+		s.State = StateDone
+	} else {
+		s.State = StateOrient
+	}
 	return nil
 }
 

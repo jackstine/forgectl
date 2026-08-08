@@ -3,7 +3,9 @@ package state
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -2023,16 +2025,24 @@ func TestImplementLastItemGoesToEvaluate(t *testing.T) {
 	}
 }
 
-func TestFirstRoundImplementRequiresMessageWhenEnableCommits(t *testing.T) {
+// The first round no longer requires --message: the commit message is
+// synthesized from the item's description. This replaces the former
+// TestFirstRoundImplementRequiresMessageWhenEnableCommits, which asserted the
+// opposite — and which, once the requirement was removed, only stayed green
+// because its fixture had no git repository and so failed inside AutoCommit
+// instead. Committing into a real repository is what makes the assertion mean
+// what its name says.
+func TestFirstRoundImplementDoesNotRequireMessageWhenEnableCommits(t *testing.T) {
 	dir := t.TempDir()
+	initTestGitRepo(t, dir)
 	s := newImplementingState(dir, 1, 1)
 	s.Config.General.EnableCommits = true
 
 	Advance(s, AdvanceInput{}, dir) // ORIENT → IMPLEMENT
+	touchDomainFile(t, dir, "first.go", "package main")
 
-	err := Advance(s, AdvanceInput{}, dir) // no --message
-	if err == nil {
-		t.Error("expected error for missing --message in first-round IMPLEMENT when enable_commits=true")
+	if err := Advance(s, AdvanceInput{}, dir); err != nil { // no --message
+		t.Errorf("first-round IMPLEMENT must not require --message: %v", err)
 	}
 }
 
@@ -2219,17 +2229,31 @@ func TestCommitNoMessageRequiredWithoutEnableCommits(t *testing.T) {
 	}
 }
 
-func TestCommitRequiresMessageWhenEnableCommits(t *testing.T) {
+// COMMIT no longer demands a --message, because with commits enabled it is
+// never reached at all: the terminal EVALUATE commits the batch inline and goes
+// straight to ORIENT/DONE. This test replaces the old
+// TestCommitRequiresMessageWhenEnableCommits, whose premise the spec removed.
+func TestTerminalEvaluateSkipsCommitStateWhenEnableCommits(t *testing.T) {
 	dir := t.TempDir()
 	initTestGitRepo(t, dir)
 	s := newImplementingState(dir, 1, 1)
 	s.Config.General.EnableCommits = true
 
-	advanceImplToCommit(t, s, dir)
+	advanceImplToEvaluate(t, s, dir)
 
-	err := Advance(s, AdvanceInput{}, dir) // no --message
-	if err == nil {
-		t.Error("expected error in COMMIT when enable_commits=true and no --message")
+	evalFile := filepath.Join(dir, "eval.md")
+	os.WriteFile(evalFile, []byte("eval"), 0644)
+
+	// No --message: the batch-terminal message is synthesized.
+	if err := Advance(s, AdvanceInput{Verdict: "PASS", EvalReport: evalFile}, dir); err != nil {
+		t.Fatalf("terminal EVALUATE advance failed: %v", err)
+	}
+	if s.State == StateCommit {
+		t.Fatal("COMMIT was entered with enable_commits=true; it must be skipped")
+	}
+	// Single item, single batch — the whole plan is complete.
+	if s.State != StateDone {
+		t.Errorf("expected DONE after inline terminal commit, got %s", s.State)
 	}
 }
 
@@ -3639,5 +3663,354 @@ func TestAdvancePhaseShiftDomainBoundaryRoutesByKind(t *testing.T) {
 				t.Errorf("code routing failed: %+v", s.Implementing)
 			}
 		})
+	}
+}
+
+// --- Commit flow: per-item commits and the inline batch-terminal commit ------
+//
+// These two behaviors are what make the implementing loop crash-safe without an
+// operator in the loop: every round leaves a commit behind, and the batch closes
+// itself out in the same advance that accepts it. The failure modes are quiet
+// ones — a round that silently skips its commit, or a COMMIT state that reappears
+// and blocks the loop waiting for a --message nobody passes — so each is pinned
+// directly rather than inferred from the final state.
+
+func gitCommitCount(t *testing.T, dir string) int {
+	t.Helper()
+	out, err := exec.Command("git", "-C", dir, "rev-list", "--count", "HEAD").Output()
+	if err != nil {
+		t.Fatalf("git rev-list failed: %v", err)
+	}
+	n := 0
+	fmt.Sscanf(strings.TrimSpace(string(out)), "%d", &n)
+	return n
+}
+
+func lastCommitMessage(t *testing.T, dir string) string {
+	t.Helper()
+	out, err := exec.Command("git", "-C", dir, "log", "-1", "--pretty=%B").Output()
+	if err != nil {
+		t.Fatalf("git log failed: %v", err)
+	}
+	return strings.TrimRight(string(out), "\n")
+}
+
+// touchDomainFile writes a distinct file into the domain dir so the scoped
+// `git add test/` has something new to stage.
+func touchDomainFile(t *testing.T, dir, name, content string) {
+	t.Helper()
+	if err := os.WriteFile(filepath.Join(dir, "test", name), []byte(content), 0644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestImplementCommitsOnEveryRoundNotJustTheFirst(t *testing.T) {
+	dir := t.TempDir()
+	initTestGitRepo(t, dir)
+	s := newImplementingState(dir, 1, 1)
+	s.Config.General.EnableCommits = true
+	s.Config.Implementing.Eval.MaxRounds = 3
+
+	Advance(s, AdvanceInput{}, dir) // ORIENT → IMPLEMENT
+
+	// Round 1.
+	before := gitCommitCount(t, dir)
+	touchDomainFile(t, dir, "round1.go", "package main")
+	if err := Advance(s, AdvanceInput{}, dir); err != nil { // no --message
+		t.Fatalf("round 1 advance failed: %v", err)
+	}
+	afterRound1 := gitCommitCount(t, dir)
+	if afterRound1 != before+1 {
+		t.Fatalf("round 1 did not commit: %d → %d commits", before, afterRound1)
+	}
+
+	// FAIL below max_rounds sends the batch back to IMPLEMENT for round 2.
+	evalFile := filepath.Join(dir, "eval.md")
+	os.WriteFile(evalFile, []byte("eval"), 0644)
+	if err := Advance(s, AdvanceInput{Verdict: "FAIL", EvalReport: evalFile}, dir); err != nil {
+		t.Fatalf("EVALUATE FAIL advance failed: %v", err)
+	}
+	if s.State != StateImplement {
+		t.Fatalf("expected IMPLEMENT for round 2, got %s", s.State)
+	}
+
+	// Round 2 — the first-round-only restriction is gone.
+	touchDomainFile(t, dir, "round2.go", "package main // corrected")
+	if err := Advance(s, AdvanceInput{}, dir); err != nil {
+		t.Fatalf("round 2 advance failed: %v", err)
+	}
+	if got := gitCommitCount(t, dir); got != afterRound1+1 {
+		t.Errorf("round 2 did not commit: %d → %d commits", afterRound1, got)
+	}
+}
+
+func TestImplementCommitMessageIsItemDescription(t *testing.T) {
+	dir := t.TempDir()
+	initTestGitRepo(t, dir)
+	s := newImplementingState(dir, 1, 1)
+	s.Config.General.EnableCommits = true
+
+	Advance(s, AdvanceInput{}, dir) // ORIENT → IMPLEMENT
+	touchDomainFile(t, dir, "work.go", "package main")
+
+	if err := Advance(s, AdvanceInput{}, dir); err != nil {
+		t.Fatalf("advance failed: %v", err)
+	}
+
+	// newImplementingState gives item "a" the description "desc a".
+	if got := lastCommitMessage(t, dir); got != "desc a" {
+		t.Errorf("commit message = %q, want %q", got, "desc a")
+	}
+}
+
+func TestImplementAppendsSuppliedMessageToItemDescription(t *testing.T) {
+	dir := t.TempDir()
+	initTestGitRepo(t, dir)
+	s := newImplementingState(dir, 1, 1)
+	s.Config.General.EnableCommits = true
+
+	Advance(s, AdvanceInput{}, dir) // ORIENT → IMPLEMENT
+	touchDomainFile(t, dir, "work.go", "package main")
+
+	if err := Advance(s, AdvanceInput{Message: "double-checked against staging"}, dir); err != nil {
+		t.Fatalf("advance failed: %v", err)
+	}
+
+	got := lastCommitMessage(t, dir)
+	want := "desc a\n\ndouble-checked against staging"
+	if got != want {
+		t.Errorf("commit message = %q, want %q — supplied text must be appended, not substituted", got, want)
+	}
+}
+
+func TestImplementDoesNotRequireMessageWithCommitsEnabled(t *testing.T) {
+	dir := t.TempDir()
+	initTestGitRepo(t, dir)
+	s := newImplementingState(dir, 2, 2)
+	s.Config.General.EnableCommits = true
+
+	Advance(s, AdvanceInput{}, dir) // ORIENT → IMPLEMENT
+
+	// Every IMPLEMENT advance, and the terminal EVALUATE advance, must succeed
+	// without --message anywhere in the sequence.
+	for i := 0; s.State == StateImplement; i++ {
+		touchDomainFile(t, dir, fmt.Sprintf("item%d.go", i), "package main")
+		if err := Advance(s, AdvanceInput{}, dir); err != nil {
+			t.Fatalf("IMPLEMENT advance %d required a message: %v", i, err)
+		}
+	}
+	evalFile := filepath.Join(dir, "eval.md")
+	os.WriteFile(evalFile, []byte("eval"), 0644)
+	if err := Advance(s, AdvanceInput{Verdict: "PASS", EvalReport: evalFile}, dir); err != nil {
+		t.Fatalf("terminal EVALUATE required a message: %v", err)
+	}
+}
+
+func TestImplementDoesNotCommitWhenCommitsDisabled(t *testing.T) {
+	dir := t.TempDir()
+	initTestGitRepo(t, dir)
+	s := newImplementingState(dir, 1, 1)
+	s.Config.General.EnableCommits = false
+	s.Config.Implementing.Eval.MaxRounds = 3
+
+	Advance(s, AdvanceInput{}, dir) // ORIENT → IMPLEMENT
+	before := gitCommitCount(t, dir)
+
+	touchDomainFile(t, dir, "round1.go", "package main")
+	if err := Advance(s, AdvanceInput{}, dir); err != nil {
+		t.Fatalf("round 1 advance failed: %v", err)
+	}
+
+	evalFile := filepath.Join(dir, "eval.md")
+	os.WriteFile(evalFile, []byte("eval"), 0644)
+	Advance(s, AdvanceInput{Verdict: "FAIL", EvalReport: evalFile}, dir) // → IMPLEMENT round 2
+	touchDomainFile(t, dir, "round2.go", "package main")
+	if err := Advance(s, AdvanceInput{}, dir); err != nil {
+		t.Fatalf("round 2 advance failed: %v", err)
+	}
+
+	if got := gitCommitCount(t, dir); got != before {
+		t.Errorf("commits were made with enable_commits=false: %d → %d", before, got)
+	}
+}
+
+func TestImplementCommitFailureLeavesPlanUnsaved(t *testing.T) {
+	dir := t.TempDir()
+	initTestGitRepo(t, dir)
+	s := newImplementingState(dir, 1, 1)
+	s.Config.General.EnableCommits = true
+	// An unknown strategy makes AutoCommit fail before touching git.
+	s.Config.Implementing.CommitStrategy = "bogus-strategy"
+
+	Advance(s, AdvanceInput{}, dir) // ORIENT → IMPLEMENT
+
+	err := Advance(s, AdvanceInput{}, dir)
+	if err == nil {
+		t.Fatal("expected the commit failure to surface as an error")
+	}
+
+	// plan.json must not record the item as done — otherwise a failed commit
+	// leaves plan.json ahead of both the state file and the repository.
+	data, readErr := os.ReadFile(filepath.Join(dir, "impl", "plan.json"))
+	if readErr != nil {
+		t.Fatal(readErr)
+	}
+	var plan PlanJSON
+	if err := json.Unmarshal(data, &plan); err != nil {
+		t.Fatal(err)
+	}
+	if got := plan.Items[0].Passes; got == "done" {
+		t.Errorf("plan.json was saved despite the commit failing: item passes = %q", got)
+	}
+}
+
+func TestTerminalEvaluateCommitsInlineAndGoesToOrient(t *testing.T) {
+	dir := t.TempDir()
+	initTestGitRepo(t, dir)
+	// Two items, one per batch — a batch remains after the first terminates.
+	s := newImplementingState(dir, 2, 1)
+	s.Config.General.EnableCommits = true
+
+	Advance(s, AdvanceInput{}, dir) // ORIENT → IMPLEMENT
+	touchDomainFile(t, dir, "a.go", "package main")
+	Advance(s, AdvanceInput{}, dir) // IMPLEMENT → EVALUATE (per-item commit)
+
+	// An evaluator correction left uncommitted — the inline batch commit picks it up.
+	touchDomainFile(t, dir, "a_fix.go", "package main // fix")
+	before := gitCommitCount(t, dir)
+
+	evalFile := filepath.Join(dir, "eval.md")
+	os.WriteFile(evalFile, []byte("eval"), 0644)
+	if err := Advance(s, AdvanceInput{Verdict: "PASS", EvalReport: evalFile}, dir); err != nil {
+		t.Fatalf("terminal EVALUATE advance failed: %v", err)
+	}
+
+	if s.State != StateOrient {
+		t.Errorf("expected ORIENT directly after the inline commit, got %s", s.State)
+	}
+	if got := gitCommitCount(t, dir); got != before+1 {
+		t.Errorf("inline batch commit did not happen: %d → %d commits", before, got)
+	}
+}
+
+func TestTerminalEvaluateInlineCommitMessageListsBatchItems(t *testing.T) {
+	dir := t.TempDir()
+	initTestGitRepo(t, dir)
+	s := newImplementingState(dir, 2, 2) // both items in one batch
+	s.Config.General.EnableCommits = true
+
+	Advance(s, AdvanceInput{}, dir) // ORIENT → IMPLEMENT
+	for i := 0; s.State == StateImplement; i++ {
+		touchDomainFile(t, dir, fmt.Sprintf("item%d.go", i), "package main")
+		Advance(s, AdvanceInput{}, dir)
+	}
+
+	// Leave a correction so the inline commit has something to stage.
+	touchDomainFile(t, dir, "fix.go", "package main // fix")
+
+	evalFile := filepath.Join(dir, "eval.md")
+	os.WriteFile(evalFile, []byte("eval"), 0644)
+	if err := Advance(s, AdvanceInput{Verdict: "PASS", EvalReport: evalFile}, dir); err != nil {
+		t.Fatalf("terminal EVALUATE advance failed: %v", err)
+	}
+
+	got := lastCommitMessage(t, dir)
+	want := "Batch 1: desc a; desc b"
+	if got != want {
+		t.Errorf("inline batch commit message = %q, want %q", got, want)
+	}
+}
+
+func TestTerminalEvaluateForceAcceptCommitsInlineAndMarksFailed(t *testing.T) {
+	dir := t.TempDir()
+	initTestGitRepo(t, dir)
+	s := newImplementingState(dir, 1, 1)
+	s.Config.General.EnableCommits = true
+	s.Config.Implementing.Eval.MaxRounds = 1 // first FAIL is terminal
+
+	Advance(s, AdvanceInput{}, dir) // ORIENT → IMPLEMENT
+	touchDomainFile(t, dir, "a.go", "package main")
+	Advance(s, AdvanceInput{}, dir) // → EVALUATE
+
+	touchDomainFile(t, dir, "a_fix.go", "package main // fix")
+	before := gitCommitCount(t, dir)
+
+	evalFile := filepath.Join(dir, "eval.md")
+	os.WriteFile(evalFile, []byte("eval"), 0644)
+	if err := Advance(s, AdvanceInput{Verdict: "FAIL", EvalReport: evalFile}, dir); err != nil {
+		t.Fatalf("force-accept advance failed: %v", err)
+	}
+
+	if s.State == StateCommit {
+		t.Fatal("force-accepted batch entered COMMIT; it must commit inline instead")
+	}
+	if s.State != StateDone {
+		t.Errorf("expected DONE, got %s", s.State)
+	}
+	if got := gitCommitCount(t, dir); got != before+1 {
+		t.Errorf("force-accepted batch was not committed inline: %d → %d", before, got)
+	}
+
+	data, _ := os.ReadFile(filepath.Join(dir, "impl", "plan.json"))
+	var plan PlanJSON
+	json.Unmarshal(data, &plan)
+	if plan.Items[0].Passes != "failed" {
+		t.Errorf("force-accepted item passes = %q, want %q", plan.Items[0].Passes, "failed")
+	}
+}
+
+func TestTerminalEvaluateInlineCommitSkippedWhenNothingStaged(t *testing.T) {
+	dir := t.TempDir()
+	initTestGitRepo(t, dir)
+	s := newImplementingState(dir, 1, 1)
+	s.Config.General.EnableCommits = true
+
+	Advance(s, AdvanceInput{}, dir) // ORIENT → IMPLEMENT
+	touchDomainFile(t, dir, "a.go", "package main")
+	Advance(s, AdvanceInput{}, dir) // per-item commit captures everything
+
+	before := gitCommitCount(t, dir)
+
+	evalFile := filepath.Join(dir, "eval.md")
+	os.WriteFile(evalFile, []byte("eval"), 0644)
+	if err := Advance(s, AdvanceInput{Verdict: "PASS", EvalReport: evalFile}, dir); err != nil {
+		t.Fatalf("terminal advance errored on an empty batch commit: %v", err)
+	}
+
+	if got := gitCommitCount(t, dir); got != before {
+		t.Errorf("an empty batch commit was created: %d → %d", before, got)
+	}
+	if s.State != StateDone {
+		t.Errorf("expected the transition to complete to DONE, got %s", s.State)
+	}
+}
+
+func TestTerminalEvaluateEntersCommitWhenCommitsDisabled(t *testing.T) {
+	dir := t.TempDir()
+	initTestGitRepo(t, dir)
+	s := newImplementingState(dir, 2, 1) // a second batch remains after this one
+	s.Config.General.EnableCommits = false
+
+	Advance(s, AdvanceInput{}, dir) // ORIENT → IMPLEMENT
+	Advance(s, AdvanceInput{}, dir) // → EVALUATE
+
+	evalFile := filepath.Join(dir, "eval.md")
+	os.WriteFile(evalFile, []byte("eval"), 0644)
+	if err := Advance(s, AdvanceInput{Verdict: "PASS", EvalReport: evalFile}, dir); err != nil {
+		t.Fatalf("terminal EVALUATE advance failed: %v", err)
+	}
+	if s.State != StateCommit {
+		t.Fatalf("expected COMMIT with enable_commits=false, got %s", s.State)
+	}
+
+	before := gitCommitCount(t, dir)
+	if err := Advance(s, AdvanceInput{}, dir); err != nil {
+		t.Fatalf("COMMIT advance failed: %v", err)
+	}
+	if s.State != StateOrient {
+		t.Errorf("expected ORIENT after COMMIT, got %s", s.State)
+	}
+	if got := gitCommitCount(t, dir); got != before {
+		t.Errorf("COMMIT performed a git operation with commits disabled: %d → %d", before, got)
 	}
 }

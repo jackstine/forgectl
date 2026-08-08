@@ -295,6 +295,32 @@ func (p *Project) GitLog() []string {
 	return splitNonEmpty(string(out))
 }
 
+// GitLogFull returns the full message (subject and body) of every commit,
+// newest first. Synthesized commit messages put the supplied --message text in
+// the body as a second paragraph, so subject-only GitLog cannot see it.
+func (p *Project) GitLogFull() []string {
+	p.t.Helper()
+	// %x1e emits a literal record separator, which cannot occur inside a commit
+	// message — a plain newline split would break multi-paragraph messages,
+	// which is exactly what these commits are.
+	const sep = "\x1e"
+	cmd := exec.Command("git", "log", "--pretty=format:%B%x1e")
+	cmd.Dir = p.Root
+	cmd.Env = p.env()
+	out, err := cmd.Output()
+	if err != nil {
+		// No commits yet → git exits non-zero; treat as empty history.
+		return nil
+	}
+	var msgs []string
+	for _, m := range strings.Split(string(out), sep) {
+		if m = strings.TrimSpace(m); m != "" {
+			msgs = append(msgs, m)
+		}
+	}
+	return msgs
+}
+
 // GitShowStat returns the --stat output for HEAD (the staged paths of the last
 // commit), for asserting commit_strategy staging.
 func (p *Project) GitShowStat() string {

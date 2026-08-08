@@ -391,18 +391,36 @@ max_rounds = 3
 	p.drivePipeline(res.Out(), pipelineOpts{commitMessage: "wip"})
 
 	// Three commits per code domain (6 total): planning ACCEPT, the per-item
-	// first-round commit, and the batch commit.
-	log := p.GitLog()
+	// commit, and the batch-terminal commit made inline at the terminal
+	// EVALUATE. No COMMIT-state commit exists — with enable_commits on, the
+	// implementing phase never enters COMMIT.
+	log := p.GitLogFull()
 	if len(log) != 6 {
 		t.Fatalf("git log has %d commits, want 6:\n%v", len(log), log)
 	}
+	if n := countContains(log, ":COMMIT"); n != 0 {
+		t.Errorf("found %d commit(s) produced from the COMMIT state; it must be skipped when enable_commits is true\nlog: %v", n, log)
+	}
 	for _, d := range []string{"core", "api"} {
-		accept := countContains(log, "wip:"+d+":ACCEPT")
-		impl := countContains(log, "wip:"+d+":IMPLEMENT")
-		commit := countContains(log, "wip:"+d+":COMMIT")
-		if accept != 1 || impl != 1 || commit != 1 {
-			t.Errorf("domain %s: ACCEPT=%d (want 1), IMPLEMENT=%d (want 1), COMMIT=%d (want 1)\nlog: %v",
-				d, accept, impl, commit, log)
+		// ACCEPT still takes the operator's message verbatim — planning is
+		// explicitly outside the message-synthesis rule.
+		if n := countContains(log, "wip:"+d+":ACCEPT"); n != 1 {
+			t.Errorf("domain %s: ACCEPT commits = %d, want 1\nlog: %v", d, n, log)
+		}
+		// The per-item commit's subject is the item's description; the supplied
+		// --message is appended as a second paragraph rather than substituted.
+		perItem := countMatching(log, func(m string) bool {
+			return strings.HasPrefix(m, "only item") && strings.Contains(m, "wip:"+d+":IMPLEMENT")
+		})
+		if perItem != 1 {
+			t.Errorf("domain %s: per-item commits with a synthesized subject and appended --message = %d, want 1\nlog: %v",
+				d, perItem, log)
+		}
+		// The inline batch-terminal commit's message is synthesized from the
+		// batch's item descriptions. The terminal EVALUATE advance supplies no
+		// --message, so there is nothing appended.
+		if n := countContains(log, "Batch 1: only item"); n != 2 {
+			t.Errorf("inline batch-terminal commits = %d, want 2 (one per domain)\nlog: %v", n, log)
 		}
 	}
 
@@ -562,9 +580,15 @@ func equalStrings(a, b []string) bool {
 }
 
 func countContains(haystack []string, sub string) int {
+	return countMatching(haystack, func(s string) bool { return strings.Contains(s, sub) })
+}
+
+// countMatching counts entries satisfying pred — used where a commit must match
+// on more than one property at once (synthesized subject *and* appended body).
+func countMatching(haystack []string, pred func(string) bool) int {
 	n := 0
 	for _, s := range haystack {
-		if strings.Contains(s, sub) {
+		if pred(s) {
 			n++
 		}
 	}
