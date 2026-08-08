@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"strings"
 
 	"forgectl/state"
 
@@ -152,6 +153,26 @@ func runInit(cmd *cobra.Command, args []string) error {
 		if err := json.Unmarshal(data, &input); err != nil {
 			return fmt.Errorf("parsing input: %w", err)
 		}
+
+		// Planning readiness gate. init --phase planning is a cold-start entry
+		// into planning, so every domain the cycle is about to plan must have an
+		// empty workspace; planning over a prior cycle's plan.json, evals, and
+		// logs silently mixes abandoned work into the new one.
+		//
+		// The check sits here — after the queue parses, before anything is
+		// written — so a blocked init leaves no state file and no session
+		// artifacts behind. Only the planning branch is gated: the specifying,
+		// implementing, ui_implementing, and reverse_engineering entries do not
+		// begin a planning cycle and have no incoming domain queue to inspect.
+		if verdict := state.EvaluateReadiness(projectRoot, cfg, state.QueueDomains(input)); !verdict.Ready {
+			fmt.Fprintln(out, verdict.Render())
+			names := make([]string, 0, len(verdict.DirtyDomains))
+			for _, d := range verdict.DirtyDomains {
+				names = append(names, d.Domain)
+			}
+			return fmt.Errorf("planning entry blocked: workspace not clean for %s", strings.Join(names, ", "))
+		}
+
 		s.Planning = state.NewPlanningState(input.Plans)
 		if len(s.Planning.Queue) > 0 {
 			entry := s.Planning.Queue[0]

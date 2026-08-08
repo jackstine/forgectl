@@ -2395,3 +2395,174 @@ func TestAdvanceEvalReportWarningPrintedExactlyOnce(t *testing.T) {
 			total, buf.String(), stderr)
 	}
 }
+
+// --- Planning readiness gate at init --phase planning ---
+//
+// init --phase planning is a cold-start entry into a planning cycle, so it is
+// the first place the gate has to hold. The tests below pin the two halves of
+// that guarantee: a clean queue is untouched by the gate, and a dirty one stops
+// init before it writes anything — a half-initialized session over stale
+// artifacts is worse than no session at all.
+
+// runInitCmd invokes init with the given flags and captures stdout separately
+// from the returned error, which Execute() routes to stderr with exit 1.
+func runInitCmd(t *testing.T, from, phase string) (string, error) {
+	t.Helper()
+	initFrom = from
+	initPhase = phase
+	t.Cleanup(func() { initFrom = ""; initPhase = "specifying" })
+
+	var out bytes.Buffer
+	initCmd.SetOut(&out)
+	t.Cleanup(func() { initCmd.SetOut(nil) })
+
+	err := runInit(initCmd, nil)
+	return out.String(), err
+}
+
+// Functional: a clean incoming queue passes the gate and init behaves exactly
+// as it did before the gate existed.
+func TestInitPlanningWithCleanWorkspacesProceeds(t *testing.T) {
+	dir := setupProjectDir(t)
+	queue := filepath.Join(dir, "plan-queue.json")
+	writePreflightQueue(t, queue, "core", "api")
+
+	out, err := runInitCmd(t, queue, "planning")
+	if err != nil {
+		t.Fatalf("init should proceed over clean workspaces: %v", err)
+	}
+	if strings.Contains(out, "Planning readiness") {
+		t.Errorf("a ready verdict must produce no gate output, got:\n%s", out)
+	}
+
+	s, err := state.Load(resolvedStateDir(dir))
+	if err != nil {
+		t.Fatalf("load state: %v", err)
+	}
+	if s.Phase != state.PhasePlanning || s.State != state.StateOrient {
+		t.Errorf("phase/state = %s/%s, want planning/ORIENT", s.Phase, s.State)
+	}
+	if s.Planning.CurrentPlan == nil || s.Planning.CurrentPlan.Domain != "core" {
+		t.Errorf("current plan should be the first queue entry, got %+v", s.Planning.CurrentPlan)
+	}
+}
+
+// Rejection: a dirty incoming domain blocks init and the operator is told which
+// domain and what to do about it — the remediation is the whole point of the
+// message, so it is asserted alongside the domain name.
+func TestInitPlanningBlockedByDirtyWorkspace(t *testing.T) {
+	dir := setupProjectDir(t)
+	queue := filepath.Join(dir, "plan-queue.json")
+	writePreflightQueue(t, queue, "core", "api")
+	writeWorkspaceFile(t, dir, "api", "implementation_plan/plan.json")
+
+	out, err := runInitCmd(t, queue, "planning")
+	if err == nil {
+		t.Fatal("a dirty incoming workspace must fail init (exit non-zero)")
+	}
+	if !strings.Contains(out, "Planning readiness: BLOCKED") {
+		t.Errorf("output missing BLOCKED verdict:\n%s", out)
+	}
+	if !strings.Contains(out, "api") || !strings.Contains(out, "api/.forge_workspace/") {
+		t.Errorf("output must name the dirty domain and its workspace path:\n%s", out)
+	}
+	if !strings.Contains(out, "Run the workspace close-out procedure") {
+		t.Errorf("output missing the close-out remediation:\n%s", out)
+	}
+	// The clean domain is not an operator problem, so it stays out of the list.
+	if strings.Contains(out, "- core") {
+		t.Errorf("clean domain core should not be listed as dirty:\n%s", out)
+	}
+}
+
+// Rejection: no partial entry. The gate runs before any mutation, so a blocked
+// init leaves the state directory exactly as it found it.
+func TestInitPlanningBlockedWritesNoStateFile(t *testing.T) {
+	dir := setupProjectDir(t)
+	queue := filepath.Join(dir, "plan-queue.json")
+	writePreflightQueue(t, queue, "core")
+	writeWorkspaceFile(t, dir, "core", ".gitkeep")
+
+	if _, err := runInitCmd(t, queue, "planning"); err == nil {
+		t.Fatal("expected a blocked init")
+	}
+
+	stateDir := resolvedStateDir(dir)
+	if state.Exists(stateDir) {
+		t.Error("a blocked init must not create a state file")
+	}
+	if entries, err := os.ReadDir(stateDir); err == nil && len(entries) > 0 {
+		t.Errorf("state dir should be unchanged, found %d entries", len(entries))
+	}
+}
+
+// Edge case: the gate reports the full set of offending domains in one pass.
+// Naming only the first would make close-out an iterative guessing game.
+func TestInitPlanningNamesEveryDirtyDomain(t *testing.T) {
+	dir := setupProjectDir(t)
+	queue := filepath.Join(dir, "plan-queue.json")
+	writePreflightQueue(t, queue, "core", "api", "web")
+	writeWorkspaceFile(t, dir, "core", "notes/study.md")
+	writeWorkspaceFile(t, dir, "web", "implementation/IMPLEMENTATION_LOG.md")
+
+	out, err := runInitCmd(t, queue, "planning")
+	if err == nil {
+		t.Fatal("expected a blocked init")
+	}
+	for _, want := range []string{"core/.forge_workspace/", "web/.forge_workspace/"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("output missing dirty domain path %q:\n%s", want, out)
+		}
+	}
+	if strings.Contains(out, "api/.forge_workspace/") {
+		t.Errorf("clean domain api should not be listed:\n%s", out)
+	}
+}
+
+// Functional: the gate guards the start of a planning cycle only. The other
+// init phases do not begin one and carry no incoming plan queue, so a dirty
+// workspace is none of their business.
+func TestInitNonPlanningPhasesAreUngated(t *testing.T) {
+	t.Run("implementing", func(t *testing.T) {
+		dir := setupProjectDir(t)
+		planPath := writeUIPlan(t, dir) // plan context domain is "ui"
+		writeWorkspaceFile(t, dir, "ui", "implementation_plan/plan.json")
+
+		if _, err := runInitCmd(t, planPath, "implementing"); err != nil {
+			t.Fatalf("init --phase implementing must be ungated: %v", err)
+		}
+		s, err := state.Load(resolvedStateDir(dir))
+		if err != nil {
+			t.Fatalf("load state: %v", err)
+		}
+		if s.Phase != state.PhaseImplementing {
+			t.Errorf("phase = %s, want implementing", s.Phase)
+		}
+	})
+
+	t.Run("specifying", func(t *testing.T) {
+		dir := setupProjectDir(t)
+		input := state.SpecQueueInput{
+			Specs: []state.SpecQueueEntry{
+				{Name: "Spec A", Domain: "core", Topic: "topic A", File: "specs/a.md", PlanningSources: []string{}, DependsOn: []string{}},
+			},
+		}
+		data, _ := json.Marshal(input)
+		queueFile := filepath.Join(dir, "specs-queue.json")
+		if err := os.WriteFile(queueFile, data, 0644); err != nil {
+			t.Fatal(err)
+		}
+		writeWorkspaceFile(t, dir, "core", "implementation_plan/plan.json")
+
+		if _, err := runInitCmd(t, queueFile, "specifying"); err != nil {
+			t.Fatalf("init --phase specifying must be ungated: %v", err)
+		}
+		s, err := state.Load(resolvedStateDir(dir))
+		if err != nil {
+			t.Fatalf("load state: %v", err)
+		}
+		if s.Phase != state.PhaseSpecifying {
+			t.Errorf("phase = %s, want specifying", s.Phase)
+		}
+	})
+}

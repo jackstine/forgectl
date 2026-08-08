@@ -3,6 +3,7 @@ package state
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -4159,5 +4160,499 @@ func TestDirectModeFailingBatchTerminatesAtMaxRounds(t *testing.T) {
 	json.Unmarshal(data, &plan)
 	if plan.Items[0].Passes != "failed" {
 		t.Errorf("force-accepted item passes = %q, want %q", plan.Items[0].Passes, "failed")
+	}
+}
+
+// --- ui_implementing commit parity ------------------------------------------
+//
+// The ui phase reuses the implementing spine for its code-eval loop, so its
+// per-item commit behavior has to match exactly. The tests are separate because
+// the code paths are — advanceUIFromImplement is a distinct function, and the
+// two have drifted before.
+
+// touchUIDomainFile writes into the ui fixture's domain dir ("portal") so the
+// scoped `git add portal/` has something to stage.
+func touchUIDomainFile(t *testing.T, dir, name, content string) {
+	t.Helper()
+	if err := os.MkdirAll(filepath.Join(dir, "portal"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "portal", name), []byte(content), 0644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestUIImplementCommitsOnEveryRound(t *testing.T) {
+	dir := t.TempDir()
+	initTestGitRepo(t, dir)
+	s := newUIImplementingState(dir, 1, 1)
+	s.Config.General.EnableCommits = true
+	s.Config.UIImplementing.Eval.EvalMode = "report"
+	s.Config.UIImplementing.Eval.MaxRounds = 3
+
+	Advance(s, AdvanceInput{}, dir) // ORIENT → IMPLEMENT
+
+	before := gitCommitCount(t, dir)
+	touchUIDomainFile(t, dir, "round1.tsx", "export default null")
+	if err := Advance(s, AdvanceInput{}, dir); err != nil { // no --message
+		t.Fatalf("round 1 advance failed: %v", err)
+	}
+	afterRound1 := gitCommitCount(t, dir)
+	if afterRound1 != before+1 {
+		t.Fatalf("ui round 1 did not commit: %d → %d", before, afterRound1)
+	}
+
+	// A code-eval FAIL below max_rounds returns the batch to IMPLEMENT.
+	evalFile := filepath.Join(dir, "eval.md")
+	os.WriteFile(evalFile, []byte("eval"), 0644)
+	if err := Advance(s, AdvanceInput{Verdict: "FAIL", EvalReport: evalFile}, dir); err != nil {
+		t.Fatalf("code EVALUATE FAIL failed: %v", err)
+	}
+	if s.State != StateImplement {
+		t.Fatalf("expected IMPLEMENT for round 2, got %s", s.State)
+	}
+
+	touchUIDomainFile(t, dir, "round2.tsx", "export default null // fixed")
+	if err := Advance(s, AdvanceInput{}, dir); err != nil {
+		t.Fatalf("round 2 advance failed: %v", err)
+	}
+	if got := gitCommitCount(t, dir); got != afterRound1+1 {
+		t.Errorf("ui round 2 did not commit: %d → %d", afterRound1, got)
+	}
+}
+
+func TestUIImplementCommitMessageIsItemDescription(t *testing.T) {
+	dir := t.TempDir()
+	initTestGitRepo(t, dir)
+	s := newUIImplementingState(dir, 1, 1)
+	s.Config.General.EnableCommits = true
+
+	Advance(s, AdvanceInput{}, dir) // ORIENT → IMPLEMENT
+	touchUIDomainFile(t, dir, "login.tsx", "export default null")
+
+	if err := Advance(s, AdvanceInput{}, dir); err != nil {
+		t.Fatalf("advance failed: %v", err)
+	}
+
+	if got := lastCommitMessage(t, dir); got != "desc a" {
+		t.Errorf("ui commit message = %q, want %q", got, "desc a")
+	}
+}
+
+func TestUIImplementDoesNotRequireMessage(t *testing.T) {
+	dir := t.TempDir()
+	initTestGitRepo(t, dir)
+	s := newUIImplementingState(dir, 2, 2)
+	s.Config.General.EnableCommits = true
+
+	Advance(s, AdvanceInput{}, dir) // ORIENT → IMPLEMENT
+
+	for i := 0; s.State == StateImplement; i++ {
+		touchUIDomainFile(t, dir, fmt.Sprintf("item%d.tsx", i), "export default null")
+		if err := Advance(s, AdvanceInput{}, dir); err != nil {
+			t.Fatalf("ui IMPLEMENT advance %d required a message: %v", i, err)
+		}
+	}
+	if s.State != StateEvaluate {
+		t.Errorf("expected EVALUATE after the last item, got %s", s.State)
+	}
+}
+
+// --- ui_implementing eval_mode "direct" -------------------------------------
+//
+// Only the code-eval loop changes. The QA and e2e loops have their own
+// iteration states (UI_REFINE, E2E_REMEDIATE) which exist regardless of
+// eval_mode, so applying the direct-mode rule to them would break the phase.
+
+func TestUIDirectModeCodeEvalFailReentersEvaluate(t *testing.T) {
+	dir := t.TempDir()
+	s := newUIImplementingState(dir, 1, 1)
+	s.Config.UIImplementing.Eval.EvalMode = "direct"
+	s.Config.UIImplementing.Eval.MaxRounds = 3
+
+	Advance(s, AdvanceInput{}, dir) // ORIENT → IMPLEMENT
+	Advance(s, AdvanceInput{}, dir) // IMPLEMENT → EVALUATE
+	roundBefore := s.UIImplementing.CurrentBatch.EvalRound
+
+	if err := Advance(s, AdvanceInput{Verdict: "FAIL"}, dir); err != nil {
+		t.Fatalf("direct-mode FAIL advance failed: %v", err)
+	}
+
+	if s.State != StateEvaluate {
+		t.Errorf("expected EVALUATE, got %s", s.State)
+	}
+	if got := s.UIImplementing.CurrentBatch.EvalRound; got != roundBefore+1 {
+		t.Errorf("eval round = %d, want %d", got, roundBefore+1)
+	}
+}
+
+func TestUIReportModeCodeEvalFailReentersImplement(t *testing.T) {
+	dir := t.TempDir()
+	s := newUIImplementingState(dir, 2, 2)
+	s.Config.UIImplementing.Eval.EvalMode = "report"
+	s.Config.UIImplementing.Eval.MaxRounds = 3
+
+	Advance(s, AdvanceInput{}, dir) // ORIENT → IMPLEMENT
+	for s.State == StateImplement {
+		Advance(s, AdvanceInput{}, dir)
+	}
+
+	report := filepath.Join(dir, "r.md")
+	os.WriteFile(report, []byte("r"), 0644)
+	if err := Advance(s, AdvanceInput{Verdict: "FAIL", EvalReport: report}, dir); err != nil {
+		t.Fatalf("report-mode FAIL advance failed: %v", err)
+	}
+
+	if s.State != StateImplement {
+		t.Errorf("expected IMPLEMENT, got %s", s.State)
+	}
+	if got := s.UIImplementing.CurrentBatch.CurrentItemIndex; got != 0 {
+		t.Errorf("item index = %d, want 0", got)
+	}
+}
+
+func TestUIQAAndE2ELoopsIterateUnderEveryEvalMode(t *testing.T) {
+	for _, mode := range []string{"direct", "report", "conversational"} {
+		t.Run(mode, func(t *testing.T) {
+			dir := t.TempDir()
+			// QA below budget must still reach UI_REFINE.
+			s := uiAtQATest(t, dir, 2, 3)
+			s.Config.UIImplementing.QA.EvalMode = mode
+			s.Config.UIImplementing.E2E.EvalMode = mode
+			in := AdvanceInput{Verdict: "PASS"}
+			if mode == "report" {
+				report := filepath.Join(dir, "qa.md")
+				os.WriteFile(report, []byte("r"), 0644)
+				in.EvalReport = report
+			}
+			if err := Advance(s, in, dir); err != nil {
+				t.Fatalf("QA_TEST advance failed: %v", err)
+			}
+			if s.State != StateUIRefine {
+				t.Errorf("QA below budget: expected UI_REFINE, got %s", s.State)
+			}
+
+			// e2e below budget must still reach E2E_REMEDIATE.
+			s.Config.UIImplementing.E2E.MinRounds = 2
+			s.Config.UIImplementing.E2E.MaxRounds = 3
+			s.State = StateE2EVerify
+			s.UIImplementing.CurrentBatch.E2ERound = 1
+			if err := Advance(s, in, dir); err != nil {
+				t.Fatalf("E2E_VERIFY advance failed: %v", err)
+			}
+			if s.State != StateE2ERemediate {
+				t.Errorf("e2e below budget: expected E2E_REMEDIATE, got %s", s.State)
+			}
+		})
+	}
+}
+
+func TestUIDirectModeCodeEvalTerminatesAndReachesQA(t *testing.T) {
+	dir := t.TempDir()
+	s := newUIImplementingState(dir, 1, 1)
+	s.Config.UIImplementing.Eval.EvalMode = "direct"
+	s.Config.UIImplementing.Eval.MaxRounds = 3
+
+	Advance(s, AdvanceInput{}, dir) // ORIENT → IMPLEMENT
+	Advance(s, AdvanceInput{}, dir) // IMPLEMENT → EVALUATE
+
+	const bound = 10
+	rounds := 0
+	for s.State == StateEvaluate && rounds < bound {
+		if err := Advance(s, AdvanceInput{Verdict: "FAIL"}, dir); err != nil {
+			t.Fatalf("FAIL advance failed: %v", err)
+		}
+		rounds++
+	}
+
+	if s.State == StateEvaluate {
+		t.Fatalf("direct-mode code loop did not terminate within %d rounds", bound)
+	}
+	if rounds != 3 {
+		t.Errorf("force-accepted after %d rounds, want 3 (max_rounds)", rounds)
+	}
+	// Force-acceptance hands off to the QA loop, not back to IMPLEMENT.
+	if s.State != StateQATest {
+		t.Errorf("expected QA_TEST after code force-acceptance, got %s", s.State)
+	}
+	if !s.UIImplementing.CurrentBatch.CodeForceAccepted {
+		t.Error("CodeForceAccepted was not recorded")
+	}
+}
+
+// --- Planning readiness gate at the cold-start phase shifts ---
+//
+// Two of the three cold-start entries into planning are phase shifts, and both
+// are gated against the queue that is about to drive planning. The harder half
+// of this contract is what is *not* gated: the intra-session domain boundaries
+// that re-enter planning ORIENT. Those run after the cold-start check has
+// already cleared the whole queue, and by then the scaffold's own output fills
+// the workspace of every domain it has finished — so gating them would block
+// exactly the multi-domain continuation the gate exists to permit. The
+// exemption tests below are the regression guard for that.
+
+// dirtyWorkspace plants a file in a domain's workspace, which is all it takes
+// for the gate to consider that domain dirty.
+func dirtyWorkspace(t *testing.T, dir, domain string) {
+	t.Helper()
+	p := filepath.Join(dir, domain, ".forge_workspace", "implementation_plan", "plan.json")
+	if err := os.MkdirAll(filepath.Dir(p), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(p, []byte(`{"items":[]}`), 0644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// Functional: the ordinary cold-start shift is unaffected when every incoming
+// workspace is clean.
+func TestPhaseShiftGenqueueToPlanningPassesGateWhenClean(t *testing.T) {
+	dir := t.TempDir()
+	s := newGenqueueState(dir)
+	Advance(s, AdvanceInput{}, dir) // → REFINE
+	writeValidPlanQueue(t, dir, s.GeneratePlanningQueue.PlanQueueFile)
+	Advance(s, AdvanceInput{}, dir) // → PHASE_SHIFT
+
+	if err := Advance(s, AdvanceInput{}, dir); err != nil {
+		t.Fatalf("clean workspaces must not block the shift: %v", err)
+	}
+	if s.Phase != PhasePlanning || s.State != StateOrient {
+		t.Errorf("expected planning/ORIENT, got %s/%s", s.Phase, s.State)
+	}
+}
+
+// Rejection: a dirty incoming domain blocks the shift, and the error carries the
+// same dirty-domain list and remediation preflight prints.
+func TestPhaseShiftGenqueueToPlanningBlockedByDirtyDomain(t *testing.T) {
+	dir := t.TempDir()
+	s := newGenqueueState(dir)
+	Advance(s, AdvanceInput{}, dir) // → REFINE
+	writeValidPlanQueue(t, dir, s.GeneratePlanningQueue.PlanQueueFile)
+	Advance(s, AdvanceInput{}, dir) // → PHASE_SHIFT
+	dirtyWorkspace(t, dir, "test") // the queue's only domain
+
+	err := Advance(s, AdvanceInput{}, dir)
+	if err == nil {
+		t.Fatal("a dirty incoming workspace must block the shift")
+	}
+	var re *ReadinessError
+	if !errors.As(err, &re) {
+		t.Fatalf("expected a *ReadinessError, got %T: %v", err, err)
+	}
+	msg := err.Error()
+	for _, want := range []string{
+		"Planning readiness: BLOCKED",
+		"test/.forge_workspace/",
+		"Run the workspace close-out procedure",
+	} {
+		if !strings.Contains(msg, want) {
+			t.Errorf("error message missing %q:\n%s", want, msg)
+		}
+	}
+}
+
+// Rejection: no partial transition. The gate runs before any mutation, so the
+// session is left exactly where it was — including an unpopulated plan queue.
+func TestPhaseShiftBlockedLeavesSessionUntouched(t *testing.T) {
+	dir := t.TempDir()
+	s := newGenqueueState(dir)
+	Advance(s, AdvanceInput{}, dir)
+	writeValidPlanQueue(t, dir, s.GeneratePlanningQueue.PlanQueueFile)
+	Advance(s, AdvanceInput{}, dir) // → PHASE_SHIFT
+	dirtyWorkspace(t, dir, "test")
+
+	if err := Advance(s, AdvanceInput{}, dir); err == nil {
+		t.Fatal("expected the shift to be blocked")
+	}
+	if s.Phase != PhaseGeneratePlanningQueue {
+		t.Errorf("phase should stay generate_planning_queue, got %s", s.Phase)
+	}
+	if s.State != StatePhaseShift {
+		t.Errorf("state should stay PHASE_SHIFT, got %s", s.State)
+	}
+	if s.PhaseShift == nil {
+		t.Error("PhaseShift info should survive a blocked shift so the operator can retry it")
+	}
+	if s.Planning != nil {
+		t.Errorf("planning queue must stay unpopulated on a blocked shift, got %+v", s.Planning)
+	}
+}
+
+// Rejection: the specifying→generate_planning_queue --from skip lands directly
+// in planning ORIENT, so it is a cold-start entry and gated like the others.
+func TestPhaseShiftSpecifyingFromSkipBlockedByDirtyDomain(t *testing.T) {
+	dir := t.TempDir()
+	s := newSpecifyingStateWithConfig(1, dir)
+	advanceToComplete(t, s)
+	Advance(s, AdvanceInput{}, dir) // COMPLETE → PHASE_SHIFT
+
+	queueFile := filepath.Join(dir, "plans-queue.json")
+	input := PlanQueueInput{
+		Plans: []PlanQueueEntry{
+			{Name: "Plan1", Domain: "alpha", File: "alpha/plan.json", Specs: []string{"spec.md"}, SpecCommits: []string{}, CodeSearchRoots: []string{"alpha/"}},
+		},
+	}
+	data, _ := json.Marshal(input)
+	os.WriteFile(queueFile, data, 0644)
+	dirtyWorkspace(t, dir, "alpha")
+
+	err := Advance(s, AdvanceInput{From: queueFile}, dir)
+	if err == nil {
+		t.Fatal("the --from skip into planning must be gated")
+	}
+	if !strings.Contains(err.Error(), "alpha/.forge_workspace/") {
+		t.Errorf("error should name the dirty domain:\n%s", err.Error())
+	}
+	if s.Phase != PhaseSpecifying || s.State != StatePhaseShift {
+		t.Errorf("session should stay at the specifying phase shift, got %s/%s", s.Phase, s.State)
+	}
+	if s.Planning != nil {
+		t.Error("a blocked skip must not populate the planning queue")
+	}
+}
+
+// Functional: the planning→planning domain boundary is exempt. By the time it
+// runs, the just-planned sibling domain holds a completed plan.json — the
+// expected result of the cycle, not stale cruft.
+func TestPhaseShiftPlanningToPlanningIsUngated(t *testing.T) {
+	dir := t.TempDir()
+	s := newPlanningStateWithTwoPlans(dir)
+	s.Config.Paths.WorkspaceDir = ".forge_workspace"
+	s.Config.Planning.PlanAllBeforeImplementing = true
+	advancePlanningToAccept(t, s, dir)
+	Advance(s, AdvanceInput{}, dir) // ACCEPT → PHASE_SHIFT(planning→planning)
+
+	// Both the completed domain and the one about to be planned now hold work.
+	dirtyWorkspace(t, dir, "test")
+	dirtyWorkspace(t, dir, "test2")
+
+	if err := Advance(s, AdvanceInput{}, dir); err != nil {
+		t.Fatalf("the domain boundary must not be gated: %v", err)
+	}
+	if s.Phase != PhasePlanning || s.State != StateOrient {
+		t.Errorf("expected planning/ORIENT, got %s/%s", s.Phase, s.State)
+	}
+}
+
+// Functional: the interleaved re-entries are exempt too — the domain that just
+// finished implementing necessarily has a full workspace.
+func TestPhaseShiftImplementingToPlanningIsUngated(t *testing.T) {
+	dir := t.TempDir()
+	s := newImplementingStateWithPlanningQueue(dir, 1, 1)
+	s.Config.Paths.WorkspaceDir = ".forge_workspace"
+	advanceImplementingToCommit(t, s, dir)
+	Advance(s, AdvanceInput{}, dir) // COMMIT → ORIENT
+	Advance(s, AdvanceInput{}, dir) // ORIENT → DONE → PHASE_SHIFT
+
+	dirtyWorkspace(t, dir, "test") // the just-implemented domain
+	dirtyWorkspace(t, dir, "next") // the domain about to be planned
+
+	if err := Advance(s, AdvanceInput{}, dir); err != nil {
+		t.Fatalf("implementing→planning must not be gated: %v", err)
+	}
+	if s.Phase != PhasePlanning || s.State != StateOrient {
+		t.Errorf("expected planning/ORIENT, got %s/%s", s.Phase, s.State)
+	}
+}
+
+func TestPhaseShiftUIImplementingToPlanningIsUngated(t *testing.T) {
+	dir := t.TempDir()
+	s := newUIImplementingState(dir, 1, 1)
+	s.Config.Paths.WorkspaceDir = ".forge_workspace"
+	Advance(s, AdvanceInput{}, dir) // ORIENT → IMPLEMENT
+	s.UIImplementing.CurrentLayer = &LayerRef{ID: "L0", Name: "Shell"}
+	s.State = StateCommit
+	if err := Advance(s, AdvanceInput{}, dir); err != nil {
+		t.Fatalf("COMMIT advance: %v", err)
+	}
+	s.Planning.Queue = []PlanQueueEntry{{Name: "next", Domain: "portal", File: "ui2/plan.json"}}
+	if err := Advance(s, AdvanceInput{}, dir); err != nil { // DONE → PHASE_SHIFT
+		t.Fatalf("DONE advance: %v", err)
+	}
+
+	dirtyWorkspace(t, dir, "portal")
+
+	if err := Advance(s, AdvanceInput{}, dir); err != nil {
+		t.Fatalf("ui_implementing→planning must not be gated: %v", err)
+	}
+	if s.Phase != PhasePlanning || s.State != StateOrient {
+		t.Errorf("expected planning/ORIENT, got %s/%s", s.Phase, s.State)
+	}
+}
+
+// Edge case: a full interleaved multi-domain run. The cold-start shift gates
+// once, then every subsequent domain boundary crosses without the gate firing,
+// even as each completed domain's workspace fills up behind it.
+func TestMultiDomainInterleavedRunGatesOnlyAtColdStart(t *testing.T) {
+	dir := t.TempDir()
+	s := newGenqueueState(dir)
+	Advance(s, AdvanceInput{}, dir) // ORIENT → REFINE
+
+	// A three-domain queue, all clean at cold start.
+	queuePath := filepath.Join(dir, s.GeneratePlanningQueue.PlanQueueFile)
+	os.MkdirAll(filepath.Dir(queuePath), 0755)
+	input := PlanQueueInput{
+		Plans: []PlanQueueEntry{
+			{Name: "Plan A", Domain: "a", File: "a/plan.json", Specs: []string{"s.md"}, CodeSearchRoots: []string{"a/"}},
+			{Name: "Plan B", Domain: "b", File: "b/plan.json", Specs: []string{"s.md"}, CodeSearchRoots: []string{"b/"}},
+			{Name: "Plan C", Domain: "c", File: "c/plan.json", Specs: []string{"s.md"}, CodeSearchRoots: []string{"c/"}},
+		},
+	}
+	data, _ := json.Marshal(input)
+	os.WriteFile(queuePath, data, 0644)
+	Advance(s, AdvanceInput{}, dir) // REFINE → PHASE_SHIFT
+
+	if err := Advance(s, AdvanceInput{}, dir); err != nil {
+		t.Fatalf("cold start over clean workspaces should pass: %v", err)
+	}
+	if s.Planning.CurrentPlan.Domain != "a" {
+		t.Fatalf("expected domain a first, got %s", s.Planning.CurrentPlan.Domain)
+	}
+
+	// Cross the two remaining domain boundaries, filling each finished domain's
+	// workspace on the way — exactly what a real cycle does.
+	for _, want := range []string{"b", "c"} {
+		dirtyWorkspace(t, dir, s.Planning.CurrentPlan.Domain)
+
+		s.State = StatePhaseShift
+		s.PhaseShift = &PhaseShiftInfo{From: PhaseImplementing, To: PhasePlanning}
+		if err := Advance(s, AdvanceInput{}, dir); err != nil {
+			t.Fatalf("domain boundary into %s must not be gated: %v", want, err)
+		}
+		if s.Planning.CurrentPlan.Domain != want {
+			t.Fatalf("expected domain %s, got %s", want, s.Planning.CurrentPlan.Domain)
+		}
+		if s.Phase != PhasePlanning || s.State != StateOrient {
+			t.Fatalf("expected planning/ORIENT at the %s boundary, got %s/%s", want, s.Phase, s.State)
+		}
+	}
+}
+
+// Edge case: the clean guarantee is scoped to cold start, not to the instant a
+// domain is planned. A foreign write into a not-yet-planned domain's workspace
+// is not re-inspected and does not block the boundary — distinct from the
+// just-planned domain holding its own output, which the tests above cover.
+func TestForeignWriteIntoUnplannedDomainDoesNotBlockBoundary(t *testing.T) {
+	dir := t.TempDir()
+	s := newImplementingStateWithPlanningQueue(dir, 1, 1)
+	s.Config.Paths.WorkspaceDir = ".forge_workspace"
+	advanceImplementingToCommit(t, s, dir)
+	Advance(s, AdvanceInput{}, dir) // COMMIT → ORIENT
+	Advance(s, AdvanceInput{}, dir) // ORIENT → DONE → PHASE_SHIFT
+
+	// "next" has not been planned yet and its workspace was clean at cold start;
+	// something outside the scaffold has since written into it.
+	p := filepath.Join(dir, "next", ".forge_workspace", "notes", "stray.md")
+	os.MkdirAll(filepath.Dir(p), 0755)
+	os.WriteFile(p, []byte("written by something else"), 0644)
+
+	if err := Advance(s, AdvanceInput{}, dir); err != nil {
+		t.Fatalf("a mid-cycle foreign write must not block the boundary: %v", err)
+	}
+	if s.Phase != PhasePlanning || s.State != StateOrient {
+		t.Errorf("expected planning/ORIENT for next, got %s/%s", s.Phase, s.State)
+	}
+	if s.Planning.CurrentPlan.Domain != "next" {
+		t.Errorf("expected domain next, got %s", s.Planning.CurrentPlan.Domain)
 	}
 }

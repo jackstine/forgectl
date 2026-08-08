@@ -286,4 +286,53 @@ max_rounds = 3
 
 	// Both failed advances must have left the state at EVALUATE.
 	p2.AssertAt(state.PhaseImplementing, state.StateEvaluate)
+
+	// Paths 5-7: preflight. It has no phase/state guard to assert under K3 —
+	// it is a read-only query — but its rejection paths belong to the same
+	// stderr/exit-code contract as every other command.
+	p3 := NewProject(t)
+
+	// Path 5: --from naming a file that does not exist.
+	res = p3.forge("preflight", "--from", "/nonexistent/plan-queue.json")
+	if res.Exit == 0 {
+		t.Error("preflight nonexistent --from: expected non-zero exit")
+	}
+	if strings.TrimSpace(res.Stderr) == "" {
+		t.Errorf("preflight nonexistent --from: expected error on stderr, got nothing\nstdout:\n%s", res.Stdout)
+	}
+
+	// Path 6: --from naming a file that is not a valid plan queue.
+	p3.WriteFile("not-a-queue.json", `{"specs": []}`)
+	res = p3.forge("preflight", "--from", "not-a-queue.json")
+	if res.Exit == 0 {
+		t.Error("preflight invalid --from: expected non-zero exit")
+	}
+	if strings.TrimSpace(res.Stderr) == "" {
+		t.Errorf("preflight invalid --from: expected error on stderr, got nothing\nstdout:\n%s", res.Stdout)
+	}
+
+	// Path 7: no --from and no session to resolve a pending plan queue from.
+	res = p3.forge("preflight")
+	if res.Exit == 0 {
+		t.Error("preflight with no --from and no session: expected non-zero exit")
+	}
+	if !strings.Contains(res.Stderr, "No plan queue to check.") {
+		t.Errorf("preflight with no queue: expected the no-plan-queue message on stderr, got:\nstdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
+	}
+
+	// A blocked verdict is also an error path: it must exit non-zero with the
+	// verdict on stderr, not a zero exit with the verdict on stdout.
+	p3.WriteFile("plan-queue.json", `{
+  "plans": [
+    {"name":"Core Plan","domain":"core","file":"core/plan.json","specs":[],"spec_commits":[],"code_search_roots":["core/"],"kind":"code"}
+  ]
+}`)
+	p3.WriteFile("core/.forge_workspace/implementation_plan/plan.json", `{}`)
+	res = p3.forge("preflight", "--from", "plan-queue.json")
+	if res.Exit == 0 {
+		t.Error("preflight blocked verdict: expected non-zero exit")
+	}
+	if !strings.Contains(res.Stderr, "Planning readiness: BLOCKED") {
+		t.Errorf("preflight blocked verdict: expected BLOCKED on stderr, got:\nstdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
+	}
 }

@@ -1017,21 +1017,19 @@ func advanceUIFromImplement(s *ForgeState, in AdvanceInput, dir string) error {
 		return err
 	}
 
-	// First round requires --message when enable_commits is true (EvalRound is
-	// still 0 until the batch's first code evaluation).
-	if batch.EvalRound == 0 && s.Config.General.EnableCommits && in.Message == "" {
-		return fmt.Errorf("--message is required for first-round implementation when enable_commits is true")
-	}
-
 	itemID := batch.Items[batch.CurrentItemIndex]
 	setItemPasses(plan, itemID, "done")
 
-	// First-round auto-commit: one commit per item for crash safety.
-	if batch.EvalRound == 0 && s.Config.General.EnableCommits {
+	// Per-item auto-commit on every round, matching the implementing phase: the
+	// message is synthesized from the item's description, so --message is
+	// optional and is appended rather than substituted. Commit before saving the
+	// plan so a failed commit leaves plan.json consistent with the state file.
+	if s.Config.General.EnableCommits {
 		strategy := effectiveUIStrategy(s)
 		item := findItem(plan, itemID)
 		stageTargets := uiScopeTargets(ui, item, strategy)
-		if _, err := AutoCommit(dir, strategy, stageTargets, in.Message); err != nil {
+		message := AppendSuppliedMessage(ItemCommitMessage(plan, itemID), in.Message)
+		if _, err := AutoCommit(dir, strategy, stageTargets, message); err != nil {
 			return fmt.Errorf("Error: STOP there was a failure with auto committing in forgectl, please tell the user: %s", err)
 		}
 	}
@@ -1084,7 +1082,21 @@ func advanceUIFromEvaluate(s *ForgeState, in AdvanceInput, dir string) error {
 		s.State = StateQATest
 		return nil
 	}
-	// Below min (PASS) or below max (FAIL) — re-implement the batch.
+	// Below min (PASS) or below max (FAIL) — another code-evaluation cycle.
+	//
+	// Under eval_mode "direct" the evaluator corrects the batch files itself, so
+	// the loop re-enters EVALUATE instead of IMPLEMENT. The EvalRound increment
+	// follows this phase's convention that each loop counter increments when the
+	// batch enters that loop's evaluator state — and without it the code loop
+	// would never reach max_rounds and never hand off to QA.
+	//
+	// Only the code-eval loop is affected. The QA and e2e loops iterate through
+	// their own UI_REFINE and E2E_REMEDIATE states regardless of eval_mode.
+	if EvalModeFor(cfg.Eval, s.Config.General) == "direct" {
+		batch.EvalRound++
+		s.State = StateEvaluate
+		return nil
+	}
 	batch.CurrentItemIndex = 0
 	s.State = StateImplement
 	return nil
@@ -1388,6 +1400,15 @@ func advancePhaseShift(s *ForgeState, in AdvanceInput, dir string) error {
 			if err := json.Unmarshal(data, &input); err != nil {
 				return fmt.Errorf("parsing plan queue: %w", err)
 			}
+			// Planning readiness gate. This --from branch skips
+			// generate_planning_queue entirely and lands directly in planning
+			// ORIENT, which makes it a cold-start entry into a planning cycle
+			// and therefore gated. Returning before the assignments below leaves
+			// phase, state, and queue untouched, so a blocked shift keeps the
+			// session at the specifying→generate_planning_queue shift.
+			if verdict := EvaluateReadiness(dir, s.Config, QueueDomains(input)); !verdict.Ready {
+				return &ReadinessError{Verdict: verdict}
+			}
 			s.Planning = NewPlanningState(input.Plans)
 			populatePlanningFromQueue(s)
 			s.Phase = PhasePlanning
@@ -1429,6 +1450,15 @@ func advancePhaseShift(s *ForgeState, in AdvanceInput, dir string) error {
 		}
 		if err := json.Unmarshal(data, &input); err != nil {
 			return fmt.Errorf("parsing plan queue: %w", err)
+		}
+		// Planning readiness gate. This is the ordinary cold-start entry into a
+		// planning cycle, so every domain in the queue that is about to drive
+		// planning — the generated one, or the --from override read above — must
+		// have an empty workspace. The check sits after validation and before
+		// the queue is populated so a blocked shift mutates nothing and the
+		// session stays in generate_planning_queue.
+		if verdict := EvaluateReadiness(dir, s.Config, QueueDomains(input)); !verdict.Ready {
+			return &ReadinessError{Verdict: verdict}
 		}
 		s.Planning = NewPlanningState(input.Plans)
 		populatePlanningFromQueue(s)

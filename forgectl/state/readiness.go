@@ -225,6 +225,20 @@ func (v ReadinessVerdict) Render() string {
 	return b.String()
 }
 
+// ReadinessError is the failure a cold-start planning entry returns when the
+// gate blocks it.
+//
+// Its message is the verdict's rendered text verbatim, so an operator sees the
+// identical dirty-domain list and close-out remediation whether they asked with
+// preflight or tripped the gate at init or a phase shift. Carrying the verdict
+// rather than a flattened string also lets a caller inspect which domains were
+// dirty without parsing the message back apart.
+type ReadinessError struct {
+	Verdict ReadinessVerdict
+}
+
+func (e *ReadinessError) Error() string { return e.Verdict.Render() }
+
 // pluralWorkspaces keeps the READY line grammatical for a single-domain queue,
 // which is the common case for a one-domain project.
 func pluralWorkspaces(n int) string {

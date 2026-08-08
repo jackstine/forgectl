@@ -503,7 +503,8 @@
           "passes": false
         }
       ],
-      "passes": "pending"
+      "passes": "passed",
+      "rounds": 1
     },
     {
       "id": "ui.inline-terminal-commit",
@@ -614,7 +615,8 @@
           "passes": false
         }
       ],
-      "passes": "pending"
+      "passes": "passed",
+      "rounds": 1
     },
     {
       "id": "cmd.preflight",
@@ -697,7 +699,8 @@
           "passes": false
         }
       ],
-      "passes": "pending"
+      "passes": "passed",
+      "rounds": 1
     },
     {
       "id": "gate.enforce-init",
@@ -750,7 +753,8 @@
           "passes": false
         }
       ],
-      "passes": "pending"
+      "passes": "passed",
+      "rounds": 1
     },
     {
       "id": "gate.enforce-phase-shift",
@@ -819,7 +823,8 @@
           "passes": false
         }
       ],
-      "passes": "pending"
+      "passes": "passed",
+      "rounds": 1
     },
     {
       "id": "gate.logging",
