@@ -1124,9 +1124,13 @@ func TestRefineActionReportMode(t *testing.T) {
 
 // TestRefineActionDirectMode verifies the direct-mode guidance across REFINE and
 // the implementing re-entry: "Review unstaged changes from the evaluator (git diff)."
+// Note: there is no implementing-phase assertion here, unlike the report and
+// conversational cases below. Under eval_mode "direct" the implementing phase
+// re-enters EVALUATE rather than IMPLEMENT, so the IMPLEMENT re-entry output
+// this test used to check is unreachable — see batch-implementation.md, "there
+// is no IMPLEMENT round-2+ example for eval_mode: direct because that state
+// transition does not occur".
 func TestRefineActionDirectMode(t *testing.T) {
-	dir := t.TempDir()
-
 	spec := outputOf(specRefineState("direct"), ".")
 	if !strings.Contains(spec, "Review unstaged changes from the evaluator (git diff).") {
 		t.Errorf("specifying direct refine missing review line, got:\n%s", spec)
@@ -1144,11 +1148,6 @@ func TestRefineActionDirectMode(t *testing.T) {
 	plan := outputOf(planRefineState("direct", "FAIL"), ".")
 	if !strings.Contains(plan, "Review unstaged changes from the evaluator (git diff).") {
 		t.Errorf("planning direct refine missing review line, got:\n%s", plan)
-	}
-
-	impl := outputOf(implReentryState(t, dir, "direct"), dir)
-	if !strings.Contains(impl, "Review unstaged changes from the evaluator (git diff).") {
-		t.Errorf("implementing direct re-entry missing review line, got:\n%s", impl)
 	}
 }
 

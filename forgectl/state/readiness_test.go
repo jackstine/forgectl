@@ -295,3 +295,200 @@ func snapshotTree(t *testing.T, root string) []string {
 	sort.Strings(entries)
 	return entries
 }
+
+// --- Readiness verdict and its rendering -------------------------------------
+//
+// The verdict is what three separate cold-start entry points and the preflight
+// command all consult, so the rendering is pinned exactly: an operator who hits
+// the gate at init and again at a phase shift must see the same message, and
+// that message is the only place the close-out remediation is stated.
+
+func queueOf(domains ...string) PlanQueueInput {
+	q := PlanQueueInput{}
+	for i, d := range domains {
+		q.Plans = append(q.Plans, PlanQueueEntry{
+			Name:   fmt.Sprintf("Plan %d", i+1),
+			Domain: d,
+			File:   d + "/plan.json",
+		})
+	}
+	return q
+}
+
+func TestEvaluateReadinessAllCleanIsReady(t *testing.T) {
+	root := t.TempDir()
+	cfg := cfgWithWorkspaceDir(".forge_workspace")
+
+	v := EvaluateReadiness(root, cfg, QueueDomains(queueOf("protocols", "launcher", "portal")))
+
+	if !v.Ready {
+		t.Fatalf("expected READY, got dirty domains: %+v", v.DirtyDomains)
+	}
+	if len(v.DirtyDomains) != 0 {
+		t.Errorf("ready verdict listed %d dirty domains", len(v.DirtyDomains))
+	}
+	if len(v.Statuses) != 3 {
+		t.Errorf("inspected %d domains, want 3", len(v.Statuses))
+	}
+
+	want := "Planning readiness: READY\nInspected 3 domain workspaces — all clean."
+	if got := v.Render(); got != want {
+		t.Errorf("READY output =\n%s\nwant:\n%s", got, want)
+	}
+}
+
+func TestEvaluateReadinessTwoDirtyDomainsBlockWithRemediation(t *testing.T) {
+	root := t.TempDir()
+	cfg := cfgWithWorkspaceDir(".forge_workspace")
+	mustWriteFile(t, filepath.Join(root, "protocols/.forge_workspace/plan.json"), "{}")
+	mustWriteFile(t, filepath.Join(root, "launcher/.forge_workspace/notes/a.md"), "note")
+
+	v := EvaluateReadiness(root, cfg, QueueDomains(queueOf("protocols", "launcher")))
+
+	if v.Ready {
+		t.Fatal("expected BLOCKED with two dirty workspaces")
+	}
+	if len(v.DirtyDomains) != 2 {
+		t.Fatalf("dirty domains = %d, want 2", len(v.DirtyDomains))
+	}
+
+	got := v.Render()
+	want := "Planning readiness: BLOCKED\n" +
+		"The following domain workspaces contain prior-cycle artifacts:\n" +
+		"  - protocols   protocols/.forge_workspace/\n" +
+		"  - launcher    launcher/.forge_workspace/\n" +
+		"Run the workspace close-out procedure for each domain to archive and clear it,\n" +
+		"then re-run preflight."
+	if got != want {
+		t.Errorf("BLOCKED output =\n%s\n\nwant:\n%s", got, want)
+	}
+}
+
+func TestEvaluateReadinessBlockedOutputOmitsCleanDomains(t *testing.T) {
+	root := t.TempDir()
+	cfg := cfgWithWorkspaceDir(".forge_workspace")
+	// Only the middle domain is dirty.
+	mustWriteFile(t, filepath.Join(root, "launcher/.forge_workspace/plan.json"), "{}")
+
+	v := EvaluateReadiness(root, cfg, QueueDomains(queueOf("protocols", "launcher", "portal")))
+
+	if v.Ready {
+		t.Fatal("one dirty domain among clean ones must block the verdict")
+	}
+	if len(v.DirtyDomains) != 1 || v.DirtyDomains[0].Domain != "launcher" {
+		t.Fatalf("dirty domains = %+v, want only launcher", v.DirtyDomains)
+	}
+
+	got := v.Render()
+	if !strings.Contains(got, "launcher") {
+		t.Errorf("BLOCKED output does not name the dirty domain:\n%s", got)
+	}
+	for _, clean := range []string{"protocols", "portal"} {
+		if strings.Contains(got, clean) {
+			t.Errorf("BLOCKED output names clean domain %q:\n%s", clean, got)
+		}
+	}
+}
+
+func TestQueueDomainsDeduplicatesPreservingOrder(t *testing.T) {
+	root := t.TempDir()
+	cfg := cfgWithWorkspaceDir(".forge_workspace")
+	mustWriteFile(t, filepath.Join(root, "protocols/.forge_workspace/plan.json"), "{}")
+
+	// Three entries, two of which name the same domain.
+	domains := QueueDomains(queueOf("protocols", "launcher", "protocols"))
+	want := []string{"protocols", "launcher"}
+	if len(domains) != len(want) {
+		t.Fatalf("domains = %v, want %v", domains, want)
+	}
+	for i := range want {
+		if domains[i] != want[i] {
+			t.Fatalf("domains = %v, want %v (queue order preserved)", domains, want)
+		}
+	}
+
+	v := EvaluateReadiness(root, cfg, domains)
+	if len(v.Statuses) != 2 {
+		t.Errorf("inspected %d workspaces, want 2 — a repeated domain is inspected once", len(v.Statuses))
+	}
+	if n := strings.Count(v.Render(), "- protocols"); n != 1 {
+		t.Errorf("dirty domain listed %d times, want 1", n)
+	}
+}
+
+func TestEvaluateReadinessUntraversableDomainReportsErrorDetail(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("directory permission bits are not enforced the same way on Windows")
+	}
+	if os.Geteuid() == 0 {
+		t.Skip("running as root bypasses directory permission bits")
+	}
+
+	root := t.TempDir()
+	cfg := cfgWithWorkspaceDir(".forge_workspace")
+	locked := filepath.Join(root, "protocols/.forge_workspace/locked")
+	mustWriteFile(t, filepath.Join(locked, "plan.json"), "{}")
+	if err := os.Chmod(locked, 0o000); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(locked, 0o755) })
+
+	v := EvaluateReadiness(root, cfg, []string{"protocols"})
+
+	if v.Ready {
+		t.Fatal("an uninspectable workspace must block rather than pass")
+	}
+	got := v.Render()
+	if !strings.Contains(got, "could not inspect:") {
+		t.Errorf("BLOCKED output lost the traversal-failure detail:\n%s", got)
+	}
+	if !strings.Contains(got, "protocols") {
+		t.Errorf("BLOCKED output does not name the domain:\n%s", got)
+	}
+}
+
+func TestEvaluateReadinessIgnoresDomainsOutsideTheQueue(t *testing.T) {
+	root := t.TempDir()
+	cfg := cfgWithWorkspaceDir(".forge_workspace")
+
+	// Domain "a" is filthy, but the queue names only "b".
+	mustWriteFile(t, filepath.Join(root, "a/.forge_workspace/plan.json"), "{}")
+	mustWriteFile(t, filepath.Join(root, "a/.forge_workspace/notes/x.md"), "x")
+
+	v := EvaluateReadiness(root, cfg, QueueDomains(queueOf("b")))
+
+	if !v.Ready {
+		t.Fatalf("a dirty workspace outside the incoming queue must not block: %+v", v.DirtyDomains)
+	}
+	for _, s := range v.Statuses {
+		if s.Domain == "a" {
+			t.Errorf("domain %q was inspected despite not being in the queue", s.Domain)
+		}
+	}
+	if got, want := v.Render(), "Planning readiness: READY\nInspected 1 domain workspace — all clean."; got != want {
+		t.Errorf("READY output =\n%s\nwant:\n%s", got, want)
+	}
+}
+
+func TestEvaluateReadinessIsStatelessAcrossCalls(t *testing.T) {
+	root := t.TempDir()
+	cfg := cfgWithWorkspaceDir(".forge_workspace")
+	mustWriteFile(t, filepath.Join(root, "launcher/.forge_workspace/plan.json"), "{}")
+
+	domains := QueueDomains(queueOf("protocols", "launcher"))
+
+	first := EvaluateReadiness(root, cfg, domains)
+	second := EvaluateReadiness(root, cfg, domains)
+
+	// No marker file, no memo, no "already checked" shortcut: the same tree
+	// must produce the same verdict every time it is asked.
+	if first.Ready != second.Ready {
+		t.Errorf("verdict changed between calls: %v then %v", first.Ready, second.Ready)
+	}
+	if first.Render() != second.Render() {
+		t.Errorf("rendering changed between calls:\n%s\n\nthen:\n%s", first.Render(), second.Render())
+	}
+	if len(first.DirtyDomains) != len(second.DirtyDomains) {
+		t.Errorf("dirty domain count changed: %d then %d", len(first.DirtyDomains), len(second.DirtyDomains))
+	}
+}

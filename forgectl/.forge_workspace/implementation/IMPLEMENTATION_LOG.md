@@ -19,3 +19,10 @@ Domain: `forgectl`. Plan: `forgectl/.forge_workspace/implementation_plan/plan.js
 - **Batch:** 2/5
 - **Eval Rounds:** 1
 - **Notes:** IMPLEMENT now commits on every round with a synthesized message (`--message` optional, appended); the terminal EVALUATE commits the batch inline via `terminateImplBatch` and goes straight to ORIENT/DONE; COMMIT is now a pure no-op reachable only with `enable_commits: false`. Three stale tests that encoded the removed `--message` requirement were replaced (one of which had been passing only because its fixture lacked a git repo). `TestSkillContractSubcommands/preflight` still fails — the `preflight` command is item `cmd.preflight` in L2, not yet implemented.
+
+### 2026-08-08 — L1: impl.direct-mode-reentry + state.readiness-gate
+- **Errors:** None
+- **All Tests Pass:** Yes (`preflight` integration gap still open, see Notes)
+- **Batch:** 3/5
+- **Eval Rounds:** 1
+- **Notes:** `reenterImplEvaluationLoop` routes non-terminal verdicts by eval mode — `direct` re-enters EVALUATE and carries the round increment (the missing increment is what would make the loop spin forever), `report`/`conversational` keep the IMPLEMENT re-entry. `state/readiness.go` gained `ReadinessVerdict`, `QueueDomains`, `EvaluateReadiness`, and `Render()` producing the spec's exact READY/BLOCKED text. `TestRefineActionDirectMode` lost its implementing-phase assertion — that IMPLEMENT re-entry no longer exists under direct mode.

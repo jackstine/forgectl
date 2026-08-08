@@ -4014,3 +4014,150 @@ func TestTerminalEvaluateEntersCommitWhenCommitsDisabled(t *testing.T) {
 		t.Errorf("COMMIT performed a git operation with commits disabled: %d → %d", before, got)
 	}
 }
+
+// --- eval_mode "direct": the evaluation loop re-enters itself ----------------
+//
+// Under "direct" the evaluator edits the batch files itself, so IMPLEMENT has
+// nothing to do on a retry and the batch re-enters EVALUATE. The round counter
+// is what makes that safe: the increment normally applied by IMPLEMENT→EVALUATE
+// has to be applied at the self-transition instead, or a batch that keeps
+// failing never reaches max_rounds and the loop never terminates.
+
+func TestDirectModeFailReentersEvaluate(t *testing.T) {
+	dir := t.TempDir()
+	s := newImplementingState(dir, 1, 1)
+	s.Config.Implementing.Eval.EvalMode = "direct"
+	s.Config.Implementing.Eval.MaxRounds = 3
+
+	advanceImplToEvaluate(t, s, dir)
+	roundBefore := s.Implementing.CurrentBatch.EvalRound
+
+	if err := Advance(s, AdvanceInput{Verdict: "FAIL"}, dir); err != nil {
+		t.Fatalf("direct-mode FAIL advance failed: %v", err)
+	}
+
+	if s.State != StateEvaluate {
+		t.Errorf("expected EVALUATE, got %s — direct mode must not re-enter IMPLEMENT", s.State)
+	}
+	if got := s.Implementing.CurrentBatch.EvalRound; got != roundBefore+1 {
+		t.Errorf("eval round = %d, want %d — the self-transition must carry the increment", got, roundBefore+1)
+	}
+}
+
+func TestDirectModePassBelowMinRoundsReentersEvaluate(t *testing.T) {
+	dir := t.TempDir()
+	s := newImplementingState(dir, 1, 1)
+	s.Config.Implementing.Eval.EvalMode = "direct"
+	s.Config.Implementing.Eval.MinRounds = 2
+	s.Config.Implementing.Eval.MaxRounds = 3
+
+	advanceImplToEvaluate(t, s, dir)
+	roundBefore := s.Implementing.CurrentBatch.EvalRound
+
+	if err := Advance(s, AdvanceInput{Verdict: "PASS"}, dir); err != nil {
+		t.Fatalf("direct-mode PASS advance failed: %v", err)
+	}
+
+	if s.State != StateEvaluate {
+		t.Errorf("expected EVALUATE, got %s", s.State)
+	}
+	if got := s.Implementing.CurrentBatch.EvalRound; got != roundBefore+1 {
+		t.Errorf("eval round = %d, want %d", got, roundBefore+1)
+	}
+}
+
+func TestReportAndConversationalModesReenterImplement(t *testing.T) {
+	for _, mode := range []string{"report", "conversational"} {
+		t.Run(mode, func(t *testing.T) {
+			dir := t.TempDir()
+			s := newImplementingState(dir, 2, 2)
+			s.Config.Implementing.Eval.EvalMode = mode
+			s.Config.Implementing.Eval.MaxRounds = 3
+
+			advanceImplToEvaluate(t, s, dir)
+
+			in := AdvanceInput{Verdict: "FAIL"}
+			if mode == "report" {
+				evalFile := filepath.Join(dir, "eval.md")
+				os.WriteFile(evalFile, []byte("eval"), 0644)
+				in.EvalReport = evalFile
+			}
+			if err := Advance(s, in, dir); err != nil {
+				t.Fatalf("%s FAIL advance failed: %v", mode, err)
+			}
+
+			if s.State != StateImplement {
+				t.Errorf("expected IMPLEMENT, got %s", s.State)
+			}
+			if got := s.Implementing.CurrentBatch.CurrentItemIndex; got != 0 {
+				t.Errorf("item index = %d, want 0 — the batch re-presents from its first item", got)
+			}
+		})
+	}
+}
+
+func TestDirectModeEntersImplementExactlyOncePerBatch(t *testing.T) {
+	dir := t.TempDir()
+	s := newImplementingState(dir, 2, 2)
+	s.Config.Implementing.Eval.EvalMode = "direct"
+	s.Config.Implementing.Eval.MinRounds = 1
+	s.Config.Implementing.Eval.MaxRounds = 3
+
+	implementVisits := 0
+	Advance(s, AdvanceInput{}, dir) // ORIENT → IMPLEMENT
+	for i := 0; i < 20 && s.State != StateCommit && s.State != StateDone && s.State != StateOrient; i++ {
+		if s.State == StateImplement {
+			implementVisits++
+			if err := Advance(s, AdvanceInput{}, dir); err != nil {
+				t.Fatalf("IMPLEMENT advance failed: %v", err)
+			}
+			continue
+		}
+		// Fail every round so the loop runs to force-acceptance.
+		if err := Advance(s, AdvanceInput{Verdict: "FAIL"}, dir); err != nil {
+			t.Fatalf("EVALUATE advance failed: %v", err)
+		}
+	}
+
+	// Two items in the batch, each presented once — and never re-presented.
+	if implementVisits != 2 {
+		t.Errorf("IMPLEMENT was entered %d times, want 2 (once per item, once per batch)", implementVisits)
+	}
+}
+
+func TestDirectModeFailingBatchTerminatesAtMaxRounds(t *testing.T) {
+	dir := t.TempDir()
+	s := newImplementingState(dir, 1, 1)
+	s.Config.Implementing.Eval.EvalMode = "direct"
+	s.Config.Implementing.Eval.MaxRounds = 3
+
+	advanceImplToEvaluate(t, s, dir)
+
+	// A missing round increment would spin here forever; the bound turns that
+	// into a clear failure instead of a hung test.
+	const bound = 10
+	rounds := 0
+	for s.State == StateEvaluate && rounds < bound {
+		if err := Advance(s, AdvanceInput{Verdict: "FAIL"}, dir); err != nil {
+			t.Fatalf("FAIL advance failed: %v", err)
+		}
+		rounds++
+	}
+
+	if s.State == StateEvaluate {
+		t.Fatalf("direct-mode loop did not terminate within %d rounds — round counter is not advancing", bound)
+	}
+	if rounds != 3 {
+		t.Errorf("force-accepted after %d rounds, want 3 (max_rounds)", rounds)
+	}
+	if s.State != StateCommit {
+		t.Errorf("expected COMMIT after force-acceptance with commits disabled, got %s", s.State)
+	}
+
+	data, _ := os.ReadFile(filepath.Join(dir, "impl", "plan.json"))
+	var plan PlanJSON
+	json.Unmarshal(data, &plan)
+	if plan.Items[0].Passes != "failed" {
+		t.Errorf("force-accepted item passes = %q, want %q", plan.Items[0].Passes, "failed")
+	}
+}

@@ -831,9 +831,8 @@ func advanceImplFromEvaluate(s *ForgeState, in AdvanceInput, dir string) error {
 			}
 			return terminateImplBatch(s, in, dir, plan)
 		}
-		// Min rounds not met — re-implement.
-		batch.CurrentItemIndex = 0
-		s.State = StateImplement
+		// Min rounds not met — another evaluation cycle.
+		reenterImplEvaluationLoop(s, batch)
 	} else {
 		if batch.EvalRound >= maxRounds {
 			// Force accept — mark items failed.
@@ -845,12 +844,33 @@ func advanceImplFromEvaluate(s *ForgeState, in AdvanceInput, dir string) error {
 			}
 			return terminateImplBatch(s, in, dir, plan)
 		}
-		// Re-implement.
-		batch.CurrentItemIndex = 0
-		s.State = StateImplement
+		// Below max rounds — another evaluation cycle.
+		reenterImplEvaluationLoop(s, batch)
 	}
 
 	return nil
+}
+
+// reenterImplEvaluationLoop routes a non-terminal verdict — a FAIL below
+// max_rounds, or a PASS below min_rounds — back into the evaluation loop.
+//
+// Under eval_mode "direct" the evaluator edits the batch files itself, so an
+// IMPLEMENT round would have nothing to do: the batch re-enters EVALUATE
+// directly and IMPLEMENT runs exactly once per batch. That re-entry must carry
+// the round increment the IMPLEMENT→EVALUATE transition would otherwise have
+// applied — without it the round never climbs toward max_rounds and a
+// repeatedly-failing batch loops forever instead of force-accepting.
+//
+// "report" and "conversational" are unaffected: they re-enter IMPLEMENT with
+// the batch re-presented from its first item.
+func reenterImplEvaluationLoop(s *ForgeState, batch *BatchState) {
+	if EvalModeFor(s.Config.Implementing.Eval, s.Config.General) == "direct" {
+		batch.EvalRound++
+		s.State = StateEvaluate
+		return
+	}
+	batch.CurrentItemIndex = 0
+	s.State = StateImplement
 }
 
 // terminateImplBatch closes out an implementing batch that has reached a

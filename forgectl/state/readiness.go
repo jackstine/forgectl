@@ -1,9 +1,11 @@
 package state
 
 import (
+	"fmt"
 	"io/fs"
 	"os"
 	"path/filepath"
+	"strings"
 )
 
 // DomainWorkspaceStatus is the per-domain result of a workspace inspection.
@@ -132,4 +134,102 @@ func InspectDomainWorkspace(projectRoot string, cfg ForgeConfig, domain string) 
 	}
 
 	return status
+}
+
+// ReadinessVerdict is the aggregate result of a readiness evaluation across an
+// incoming plan queue's domain set.
+//
+// The verdict is stateless: it is derived entirely from the filesystem and the
+// supplied domain list. It consults no marker file and records nothing, so
+// evaluating twice over an unchanged tree gives an identical answer. The
+// consequence is deliberate — the gate guarantees a workspace is clean, not
+// that its prior contents were ever archived. Archival discipline belongs to
+// the close-out procedure, which the gate can direct an operator to but cannot
+// verify.
+type ReadinessVerdict struct {
+	// Ready is true iff every inspected workspace is clean.
+	Ready bool `json:"ready"`
+	// Statuses is every domain inspected, in queue order. Retained in full so
+	// callers can log a per-domain result, not only the failures.
+	Statuses []DomainWorkspaceStatus `json:"statuses"`
+	// DirtyDomains is the subset with Clean false; empty when Ready.
+	DirtyDomains []DomainWorkspaceStatus `json:"dirty_domains"`
+}
+
+// QueueDomains returns the distinct domains named by a plan queue, in queue
+// order. A domain named by several entries is inspected — and reported — once.
+func QueueDomains(queue PlanQueueInput) []string {
+	var domains []string
+	seen := make(map[string]bool, len(queue.Plans))
+	for _, p := range queue.Plans {
+		if p.Domain == "" || seen[p.Domain] {
+			continue
+		}
+		seen[p.Domain] = true
+		domains = append(domains, p.Domain)
+	}
+	return domains
+}
+
+// EvaluateReadiness inspects each domain's workspace and assembles the verdict.
+// Only the domains passed in are inspected — a dirty workspace belonging to a
+// domain outside the incoming queue is never looked at and never blocks.
+func EvaluateReadiness(projectRoot string, cfg ForgeConfig, domains []string) ReadinessVerdict {
+	verdict := ReadinessVerdict{Ready: true}
+	for _, d := range domains {
+		status := InspectDomainWorkspace(projectRoot, cfg, d)
+		verdict.Statuses = append(verdict.Statuses, status)
+		if !status.Clean {
+			verdict.Ready = false
+			verdict.DirtyDomains = append(verdict.DirtyDomains, status)
+		}
+	}
+	return verdict
+}
+
+// Render returns the operator-facing verdict text, without a trailing newline.
+//
+// The same blocked rendering is used by preflight and by all three cold-start
+// enforcement points, so an operator sees one message wherever the gate fires.
+func (v ReadinessVerdict) Render() string {
+	if v.Ready {
+		return "Planning readiness: READY\n" +
+			fmt.Sprintf("Inspected %d %s — all clean.", len(v.Statuses), pluralWorkspaces(len(v.Statuses)))
+	}
+
+	var b strings.Builder
+	b.WriteString("Planning readiness: BLOCKED\n")
+	b.WriteString("The following domain workspaces contain prior-cycle artifacts:\n")
+
+	// Pad the domain column so the paths line up and the list stays scannable
+	// when domain names differ in length.
+	width := 0
+	for _, d := range v.DirtyDomains {
+		if len(d.Domain) > width {
+			width = len(d.Domain)
+		}
+	}
+	for _, d := range v.DirtyDomains {
+		b.WriteString(fmt.Sprintf("  - %-*s   %s", width, d.Domain, d.WorkspacePath))
+		if d.Error != "" {
+			// A workspace that could not be traversed is dirty for a different
+			// reason than one holding files; without the detail the operator
+			// has no way to tell those apart or to fix the second kind.
+			b.WriteString(fmt.Sprintf("   (could not inspect: %s)", d.Error))
+		}
+		b.WriteString("\n")
+	}
+
+	b.WriteString("Run the workspace close-out procedure for each domain to archive and clear it,\n")
+	b.WriteString("then re-run preflight.")
+	return b.String()
+}
+
+// pluralWorkspaces keeps the READY line grammatical for a single-domain queue,
+// which is the common case for a one-domain project.
+func pluralWorkspaces(n int) string {
+	if n == 1 {
+		return "domain workspace"
+	}
+	return "domain workspaces"
 }
