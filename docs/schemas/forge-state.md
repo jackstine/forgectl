@@ -22,6 +22,11 @@
 | `implementing` | ImplementingState | no | Non-null when phase = `"implementing"` |
 | `ui_implementing` | UIImplementingState | no | Non-null when phase = `"ui_implementing"` |
 
+Two things deliberately absent from this schema:
+
+- **The inline batch-commit notice.** `ForgeState.InlineBatchCommit` exists in Go but is tagged `json:"-"` and never serialized. It describes the single `advance` that just ran, so the output can report the commit before rendering the state it landed on; persisting it would make the next command's output claim a commit that already happened.
+- **Planning readiness.** The gate is stateless — its verdict is a pure function of the incoming plan queue's domains and the current filesystem. It records no marker, no "already planned" flag, and no verdict history, so nothing about it appears in the state file.
+
 ---
 
 ## State Values by Phase
@@ -38,12 +43,18 @@
 *SELF_REVIEW only entered when `planning.self_review: true`.
 
 ### Implementing
-`ORIENT` → `IMPLEMENT` → `EVALUATE` ⇄ `IMPLEMENT` → `COMMIT` → `ORIENT` | `DONE`
+`ORIENT` → `IMPLEMENT` → `EVALUATE` ⇄ `IMPLEMENT` → [`COMMIT`] → `ORIENT` | `DONE`
+
+`COMMIT` appears only when `general.enable_commits` is `false`, and performs no git operation. When commits are enabled, the terminal `EVALUATE` advance commits the batch inline and lands directly on `ORIENT` | `DONE`.
+
+Under `implementing.eval.eval_mode: "direct"` the ⇄ back-edge targets `EVALUATE`, not `IMPLEMENT`: the evaluator corrects the files itself, so `IMPLEMENT` runs once per batch and every non-terminal verdict re-enters `EVALUATE` (carrying the round increment).
 
 ### UI Implementing
-Each batch passes through three sequential verification loops — code-eval, QA, then e2e — before COMMIT:
+Each batch passes through three sequential verification loops — code-eval, QA, then e2e — before the batch-terminal commit:
 
-`ORIENT` → `IMPLEMENT` → `EVALUATE` ⇄ `IMPLEMENT` → `QA_TEST` ⇄ `UI_REFINE` → `E2E_AUTHOR` → `E2E_VERIFY` ⇄ `E2E_REMEDIATE` → `COMMIT` → `ORIENT` | `DONE`
+`ORIENT` → `IMPLEMENT` → `EVALUATE` ⇄ `IMPLEMENT` → `QA_TEST` ⇄ `UI_REFINE` → `E2E_AUTHOR` → `E2E_VERIFY` ⇄ `E2E_REMEDIATE` → [`COMMIT`] → `ORIENT` | `DONE`
+
+`COMMIT` again appears only when `general.enable_commits` is `false`; with commits enabled the terminal `E2E_VERIFY` advance commits the batch inline. The code-eval loop's `direct`-mode back-edge targets `EVALUATE` exactly as in the implementing phase; the QA and e2e loops keep `UI_REFINE` and `E2E_REMEDIATE` in every `eval_mode`.
 
 - `EVALUATE` ⇄ `IMPLEMENT`: the code-eval loop (shared with the implementing phase), bounded by `ui_implementing.eval.{min,max}_rounds`.
 - `QA_TEST` ⇄ `UI_REFINE`: the QA placement loop, bounded by `ui_implementing.qa.{min,max}_rounds`. A PASS (rounds ≥ min) advances to `E2E_AUTHOR`; a FAIL routes to `UI_REFINE` and back.
@@ -203,7 +214,7 @@ Extends AgentConfig with additional evaluation fields:
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `enable_commits` | bool | If true, --message required at ACCEPT/COMMIT states; auto git commit if enabled. If false, --message optional. |
+| `enable_commits` | bool | If true, the scaffold stages and commits automatically. `--message` is required only at specifying's COMPLETE and planning's ACCEPT; the implementing / ui_implementing per-item and batch commits synthesize their own message and treat `--message` as optional extra context. If false, no git operation occurs anywhere and `--message` is ignored with a warning. |
 | `user_guided` | bool | Runtime user_guided override |
 
 ---
@@ -403,7 +414,7 @@ Tracks the current UI batch across the code-eval, QA, and e2e loops. The three l
 | `qa_force_accepted` | bool | Set when the QA loop exhausts `qa.max_rounds` on a FAIL (optional) |
 | `e2e_force_accepted` | bool | Set when the e2e loop exhausts `e2e.max_rounds` on a FAIL (optional) |
 
-At COMMIT, items are marked failed iff any of the three force-accept flags is set; otherwise they pass.
+At the batch-terminal boundary — the `COMMIT` state when `enable_commits: false`, or the inline auto-commit on the terminal `E2E_VERIFY` advance when `enable_commits: true` — items are marked failed iff any of the three force-accept flags is set; otherwise they pass.
 
 ### UILayerHistory
 

@@ -24,6 +24,11 @@
   │   │    embedded template) when missing. Reuses an ancestor .forgectl/
   │   │    if found; never overwrites an existing config.
   │   │
+  │   │  Planning readiness gate (--phase planning only):
+  │   │    Every domain in the --from plan queue must have an empty
+  │   │    <domain>/<workspace_dir>/. A dirty workspace fails init with
+  │   │    exit 1 and writes NO state file. Query it first with preflight.
+  │   │
   │   │  Configuration:
   │   │    All config (batch, eval.min_rounds, eval.max_rounds) read from
   │   │    .forgectl/config (TOML). Phase-scoped:
@@ -51,35 +56,44 @@
   │   │
   │   │  Context-dependent flags:
   │   │
-  │   │  ┌─────────────────┬─────────────────────────────────────────────┐
-  │   │  │ Current State    │ Valid Flags                                 │
-  │   │  ├─────────────────┼─────────────────────────────────────────────┤
+  │   │  ┌──────────────────┬────────────────────────────────────────────┐
+  │   │  │ Current State    │ Valid Flags                                │
+  │   │  ├──────────────────┼────────────────────────────────────────────┤
   │   │  │ ORIENT           │ (none required)                            │
   │   │  │ SELECT           │ (none required)                            │
   │   │  │ DRAFT            │ --file <path>  (override output, spec only)│
   │   │  │ EVALUATE         │ --verdict PASS|FAIL                        │
   │   │  │                  │ --eval-report <path>  (if report mode)     │
+  │   │  │                  │ --message optional — appended to the       │
+  │   │  │                  │ synthesized batch message when the verdict │
+  │   │  │                  │ is terminal and enable_commits: true (the  │
+  │   │  │                  │ batch commits inline on this advance)      │
   │   │  │ REFINE           │ (none required)                            │
   │   │  │ ACCEPT           │ --message (planning, if enable_commits)    │
-  │   │  │ IMPLEMENT        │ --message (first round, if enable_commits) │
-  │   │  │ COMMIT           │ --message (if enable_commits)              │
+  │   │  │ IMPLEMENT        │ --message optional, EVERY round — appended │
+  │   │  │                  │ to the synthesized item-description msg    │
+  │   │  │ COMMIT           │ (none — reached only when commits are off, │
+  │   │  │                  │ no git operation occurs)                   │
   │   │  │ QA_TEST          │ --verdict PASS|FAIL  (ui_implementing)     │
   │   │  │   (UI)           │ --eval-report <path>  (if qa report mode)  │
   │   │  │ UI_REFINE  (UI)  │ (none required)                            │
   │   │  │ E2E_AUTHOR (UI)  │ (none required)                            │
   │   │  │ E2E_VERIFY       │ --verdict PASS|FAIL  (ui_implementing)     │
   │   │  │   (UI)           │ --eval-report <path>  (if e2e report mode) │
+  │   │  │                  │ --message optional — same inline batch     │
+  │   │  │                  │ commit on the terminal verdict             │
   │   │  │ E2E_REMEDIATE(UI)│ (none required)                            │
   │   │  │ RECONCILE        │ (none required)                            │
   │   │  │ RECONCILE_EVAL   │ --verdict PASS|FAIL  --eval-report <path>  │
   │   │  │ RECONCILE_REVIEW │ (none required)                            │
   │   │  │ COMPLETE         │ --message (specifying, if enable_commits)  │
   │   │  │ PHASE_SHIFT      │ --from <path>  (specifying or gen_plan_q)  │
+  │   │  │                  │ gated into planning by the readiness gate  │
   │   │  │ SELF_REVIEW      │ (none required)                            │
   │   │  │ STUDY_*          │ (none required)                            │
   │   │  │ REVIEW           │ (none required)                            │
   │   │  │ VALIDATE         │ (none required)                            │
-  │   │  └─────────────────┴─────────────────────────────────────────────┘
+  │   │  └──────────────────┴────────────────────────────────────────────┘
   │   │
   │   │  Mode toggles (any state):
   │   │    --guided / --no-guided
@@ -92,6 +106,33 @@
   │   │  No additional flags (inherits --dir from root)
   │   │
   │   └─── Output: Human-readable status, next action, overview
+  │
+  │
+  ├── preflight ───────── Report planning readiness for a plan queue's domains
+  │   │
+  │   │  Optional flags:
+  │   │    --from <path>  Plan queue JSON to check. When omitted, the active
+  │   │                   session's pending plan queue (written by
+  │   │                   generate_planning_queue) is used instead.
+  │   │
+  │   │  Inspects <domain-path>/<workspace_dir>/ for every domain in the
+  │   │  queue. A domain is clean when that directory is absent, empty, or
+  │   │  holds only empty subdirectories; ANY regular file at any depth —
+  │   │  including a lone .gitkeep — makes it dirty, as does a directory
+  │   │  that cannot be traversed.
+  │   │
+  │   │  Read-only: creates no directory, writes no state file, deletes
+  │   │  nothing, and logs nothing. Valid in any state, and outside a
+  │   │  session entirely (run it before init to learn whether init would
+  │   │  be refused). Stateless — the verdict is a pure function of the
+  │   │  queue's domains and the current filesystem.
+  │   │
+  │   │  Errors (exit 1): unreadable or invalid --from queue; no --from and
+  │   │  no session with a pending plan queue.
+  │   │
+  │   └─── Output: "Planning readiness: READY"   (exit 0)
+  │                "Planning readiness: BLOCKED" + the dirty domains and the
+  │                workspace close-out remediation   (exit 1)
   │
   │
   ├── eval ────────────── Output evaluation context for sub-agent
@@ -184,7 +225,7 @@
   TWO-ACTOR MODEL
   ═══════════════════════════════════════════════════════════════════════════
 
-  ┌─────────────────────────┐         ┌─────────────────────────┐
+  ┌──────────────────────────┐         ┌──────────────────────────┐
   │    ENGINEER              │         │    SUB-AGENT (AI)        │
   │    (Primary Agent)       │         │    (Evaluator)           │
   │                          │         │                          │
@@ -192,12 +233,13 @@
   │    forgectl init         │         │    forgectl eval         │
   │    forgectl advance      │         │    forgectl handoff      │
   │    forgectl status       │         │      (ui_implementing)   │
-  │    forgectl add-queue-   │         │                          │
-  │             item         │         │  Reads:                  │
-  │    forgectl set-roots    │         │    - Spec files          │
-  │                          │         │    - Implementation      │
-  │  Writes:                 │         │    - Notes/refs          │
-  │    - Specs               │         │    - Evaluator prompt    │
+  │    forgectl preflight    │         │                          │
+  │    forgectl add-queue-   │         │  Reads:                  │
+  │             item         │         │    - Spec files          │
+  │    forgectl set-roots    │         │    - Implementation      │
+  │                          │         │    - Notes/refs          │
+  │  Writes:                 │         │    - Evaluator prompt    │
+  │    - Specs               │         │                          │
   │    - Plans               │         │                          │
   │    - Code                │         │  Writes:                 │
   │    - Notes               │         │    - Eval reports        │

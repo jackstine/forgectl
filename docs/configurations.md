@@ -654,6 +654,11 @@ Controls how the eval sub-agent records its findings and how they are applied:
 
 `--eval-report` is accepted only in `"report"` mode; otherwise it is ignored with a warning.
 
+The mode also decides **where a non-terminal verdict lands** — a FAIL below `max_rounds`, or a PASS below `min_rounds`:
+
+- `"report"` / `"conversational"` — the batch re-enters IMPLEMENT for round 2+, re-presented from its first item, and the engineer applies the findings.
+- `"direct"` — the evaluator has already corrected the files, so an IMPLEMENT round would have nothing to do. The batch re-enters **EVALUATE** directly and IMPLEMENT runs exactly once per batch. That self-loop increments the round counter itself — the increment the IMPLEMENT→EVALUATE transition would otherwise have applied — so a repeatedly failing batch still reaches `max_rounds` and force-accepts instead of looping forever.
+
 #### `implementing.eval.enable_eval_output`
 
 - **Type:** boolean
@@ -668,7 +673,7 @@ Back-compat for sessions predating `eval_mode`. Consulted only when `eval_mode` 
 - **Default:** `"scoped"`
 - **Valid values:** `strict`, `all-specs`, `scoped`, `tracked`, `all`
 
-Controls which files are staged when the scaffold auto-commits during the implementing phase. A per-item commit is made at IMPLEMENT (first round only) and a per-batch commit is made at COMMIT. See `docs/auto-committing.md` for full behavior details.
+Controls which files are staged when the scaffold auto-commits during the implementing phase. A per-item commit is made at IMPLEMENT on **every** round, and the per-batch commit is made inline on the terminal EVALUATE `advance` (COMMIT is skipped when `enable_commits: true`). See `docs/auto-committing.md` for full behavior details.
 
 ### UI Implementing Phase
 
@@ -688,7 +693,7 @@ Maximum unblocked plan items per UI-implementation batch, selected in dependency
 - **Default:** `"scoped"`
 - **Valid values:** `strict`, `all-specs`, `scoped`, `tracked`, `all`
 
-Git staging strategy for `ui_implementing` commits — same semantics as `implementing.commit_strategy`.
+Git staging strategy for `ui_implementing` commits — same semantics as `implementing.commit_strategy`, including the per-item commit on every IMPLEMENT round. The batch commit is made inline on the terminal E2E_VERIFY `advance` (after all three loops terminate), not at COMMIT.
 
 #### `ui_implementing.app.launch_command`
 
@@ -750,6 +755,8 @@ Directory where session state files are stored. Resolution:
 
 Directory name for domain artifacts (plans, notes, manifests). Created inside each domain directory as `<domain>/<workspace_dir>/`.
 
+This is also the directory the planning readiness gate inspects, so a project that renames it is gated at the location it actually uses. See the `preflight` command.
+
 ### General
 
 #### `general.user_guided`
@@ -769,10 +776,21 @@ Controls whether the scaffold requires and executes git commits.
 
 When `false` (default): COMMIT states remain as pause points but `--message` (`-m`) is not required or prompted. No git operations are performed. The engineer commits manually.
 
-When `true`: `--message` / `-m` is required and validated at the following commit points:
-- **Specifying:** single commit at COMPLETE
-- **Planning:** per-plan commit at ACCEPT
-- **Implementing:** per-item commit at IMPLEMENT (first round only) + per-batch commit at COMMIT
+When `true`, the scaffold stages and commits at these points:
+
+| Phase | Commit point | Message |
+|-------|-------------|---------|
+| Specifying | COMPLETE | `--message` **required** |
+| Planning | ACCEPT (per plan) | `--message` **required** |
+| Implementing / `ui_implementing` | IMPLEMENT, **every round** (per item) | Synthesized from the item's `description`; `--message` optional and appended |
+| Implementing / `ui_implementing` | Terminal EVALUATE (implementing) or terminal E2E_VERIFY (`ui_implementing`) — the batch commit, made **inline on that same `advance`** | Synthesized from the batch's item descriptions; `--message` optional and appended |
+
+Two consequences for the implementation phases when `enable_commits: true`:
+
+- **COMMIT is skipped.** The batch-terminal commit happens inline as part of the terminal EVALUATE / E2E_VERIFY transition, and the scaffold proceeds straight to ORIENT or DONE. The COMMIT state never appears in the transition path. When `enable_commits: false`, COMMIT still appears as a distinct state but performs no git operation.
+- **`--message` is never required.** Both implementation commit points always have a synthesized message available. `--message` remains required only at specifying's COMPLETE and planning's ACCEPT, which have none.
+
+If nothing is staged at the inline batch commit — the normal outcome once the per-item commits captured every change — the commit is skipped silently rather than failing.
 
 See `docs/auto-committing.md` for full auto-commit behavior details.
 
@@ -876,6 +894,20 @@ After `init`, the effective configuration is stored in the state file's `config`
 
 All other configuration is read from `.forgectl/config`.
 
+`init --phase planning` is a cold-start entry into a planning cycle and is subject to the planning readiness gate: every domain in the `--from` plan queue must have an empty `<domain-path>/<paths.workspace_dir>/`. A dirty workspace fails init with exit 1 and **no state file is written**.
+
+### `preflight` command
+
+| Flag | Required | Description |
+|------|----------|-------------|
+| `--from <path>` | no | Plan queue JSON to check. When omitted, the active session's pending plan queue (written by `generate_planning_queue`) is used. |
+
+Reports whether every domain a planning cycle is about to plan has an empty workspace — the same evaluation the readiness gate runs at the three cold-start planning entries (`init --phase planning`, the `generate_planning_queue`→`planning` shift, and the `specifying`→`generate_planning_queue` `--from` skip). A domain is clean when `<domain-path>/<paths.workspace_dir>/` is absent, empty, or holds only empty subdirectories; any regular file at any depth makes it dirty, as does a directory that cannot be traversed.
+
+`preflight` is read-only and stateless: it creates no directory, writes no state file, deletes nothing, and writes no log entry. It is valid in any state and outside a session entirely — run it before `init` to learn whether `init` would be refused. Exit 0 on READY, exit 1 on BLOCKED (which prints the dirty domains and the workspace close-out remediation) or on an unresolvable / invalid plan queue.
+
+The gate introduces no new configuration keys; it reads `paths.workspace_dir` and the `[[domains]]` path mapping.
+
 ### `advance` command
 
 | Flag | Context | Description |
@@ -883,8 +915,8 @@ All other configuration is read from `.forgectl/config`.
 | `--guided` / `--no-guided` | any state | Toggle guided mode (updates `config.general.user_guided` in state) |
 | `--verdict PASS\|FAIL` | EVALUATE, RECONCILE_EVAL, CROSS_REFERENCE_EVAL; plus QA_TEST and E2E_VERIFY (ui_implementing) | Evaluation verdict |
 | `--eval-report <path>` | EVALUATE, RECONCILE_EVAL, CROSS_REFERENCE_EVAL; plus QA_TEST and E2E_VERIFY (ui_implementing) | Path to evaluation report (per loop, in `report` mode) |
-| `--message <text>`, `-m <text>` | COMPLETE (specifying), ACCEPT (planning), IMPLEMENT first round + COMMIT (implementing and ui_implementing) — when `enable_commits: true` | Commit message |
-| `--from <path>` | PHASE_SHIFT (specifying→generate_planning_queue, generate_planning_queue→planning) | Plan queue input file |
+| `--message <text>`, `-m <text>` | COMPLETE (specifying), ACCEPT (planning) — **required** when `enable_commits: true`. IMPLEMENT (every round) and the terminal EVALUATE / E2E_VERIFY batch commit — **optional**, appended to the synthesized message | Commit message |
+| `--from <path>` | PHASE_SHIFT (specifying→generate_planning_queue, generate_planning_queue→planning) | Plan queue input file. Both shifts into planning are cold-start entries and are refused when any incoming domain's workspace is non-empty (see `preflight`) |
 
 The `ui_implementing` phase also uses two sub-agent commands shared with the evaluator states: `eval` (outputs evaluation context) and `handoff <file>…` (registers the sub-agent's generated artifacts for review). Both are valid only in EVALUATE, QA_TEST, and E2E_VERIFY.
 

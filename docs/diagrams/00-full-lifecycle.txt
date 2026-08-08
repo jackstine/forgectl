@@ -9,8 +9,8 @@
   selected per plan by its "kind" field.
 
                          ┌──────────────────────┐
-                         │    Planning Docs /    │
-                         │    User Input         │
+                         │    Planning Docs /   │
+                         │    User Input        │
                          └──────────┬───────────┘
                                     │
                                     ▼
@@ -22,31 +22,33 @@
   │   Input:  spec-queue.json                                               │
   │   Output: specs/*.md (permanent contracts)                              │
   │                                                                         │
-  │   ┌───────┐  ┌────────┐  ┌───────┐  ┌──────────┐  ┌────────┐          │
-  │   │ORIENT ├─►│ SELECT ├─►│ DRAFT ├─►│ EVALUATE ├─►│ ACCEPT │          │
-  │   └───────┘  └────────┘  └───────┘  └────┬─────┘  └───┬────┘          │
+  │   ┌───────┐  ┌────────┐  ┌───────┐  ┌──────────┐  ┌────────┐            │
+  │   │ORIENT ├─►│ SELECT ├─►│ DRAFT ├─►│ EVALUATE ├─►│ ACCEPT │            │
+  │   └───────┘  └────────┘  └───────┘  └────┬─────┘  └───┬────┘            │
   │                                           │            │                │
   │                                      FAIL │            │ more specs     │
   │                                           ▼            │                │
-  │                                      ┌────────┐       │                │
-  │                                      │ REFINE ├───┘   │                │
-  │                                      └────────┘       │                │
+  │                                      ┌────────┐       │                 │
+  │                                      │ REFINE ├───┘   │                 │
+  │                                      └────────┘       │                 │
   │                                                        ▼                │
-  │   ┌──────┐  ┌───────────┐  ┌──────────────┐  ┌─────────────┐          │
-  │   │ DONE ├─►│ RECONCILE ├─►│ RECONCILE    ├─►│ RECONCILE   │          │
-  │   └──────┘  └───────────┘  │ EVAL         │  │ REVIEW      │          │
-  │                             └──────────────┘  └──────┬──────┘          │
+  │   ┌──────┐  ┌───────────┐  ┌──────────────┐  ┌─────────────┐            │
+  │   │ DONE ├─►│ RECONCILE ├─►│ RECONCILE    ├─►│ RECONCILE   │            │
+  │   └──────┘  └───────────┘  │ EVAL         │  │ REVIEW      │            │
+  │                             └──────────────┘  └──────┬──────┘           │
   │                                                      │                  │
   │                                                      ▼                  │
-  │                                                ┌──────────┐            │
-  │                                                │ COMPLETE │            │
-  │                                                └────┬─────┘            │
+  │                                                ┌──────────┐             │
+  │                                                │ COMPLETE │             │
+  │                                                └────┬─────┘             │
   └─────────────────────────────────────────────────────┼───────────────────┘
                                                         │
                      ┌──────────────────────────────────┘
                      │  PHASE_SHIFT → generate_planning_queue
                      │  (or forgectl advance --from plan-queue.json
-                     │   to skip generation and go directly to planning)
+                     │   to skip generation and go directly to planning —
+                     │   that skip is a cold-start planning entry and is
+                     │   therefore subject to the PLANNING READINESS GATE)
                      ▼
   ┌─────────────────────────────────────────────────────────────────────────┐
   │                                                                         │
@@ -55,16 +57,49 @@
   │   Auto-generates plan-queue.json from completed specs.                  │
   │   Architect reviews, reorders, and edits before planning begins.        │
   │                                                                         │
-  │   ┌───────┐  ┌────────┐  ┌────────────┐                                │
-  │   │ORIENT ├─►│ REFINE ├─►│ PHASE_SHIFT│                                │
-  │   │(gen)  │  │(review)│  │            │                                │
-  │   └───────┘  └────────┘  └─────┬──────┘                                │
+  │   ┌───────┐  ┌────────┐  ┌────────────┐                                 │
+  │   │ORIENT ├─►│ REFINE ├─►│ PHASE_SHIFT│                                 │
+  │   │(gen)  │  │(review)│  │            │                                 │
+  │   └───────┘  └────────┘  └─────┬──────┘                                 │
   │                                 │                                       │
   └─────────────────────────────────┼───────────────────────────────────────┘
                                     │
                      ┌──────────────┘
                      │  PHASE_SHIFT → planning
                      │  (or forgectl advance --from <path> to override file)
+                     │
+                     │  ╔══════════════════════════════════════════════════╗
+                     │  ║  PLANNING READINESS GATE — cold-start entry only ║
+                     │  ║                                                  ║
+                     │  ║  Every domain in the plan queue about to drive   ║
+                     │  ║  planning must have an EMPTY workspace at        ║
+                     │  ║  <domain-path>/<workspace_dir>/ (default         ║
+                     │  ║  .forge_workspace). Absent, empty, or holding    ║
+                     │  ║  only empty subdirectories = clean; any regular  ║
+                     │  ║  file at any depth — a leftover plan.json, an    ║
+                     │  ║  eval report, even a lone .gitkeep — = dirty.    ║
+                     │  ║                                                  ║
+                     │  ║  BLOCKED → the entry is refused, the dirty       ║
+                     │  ║  domains and their paths are printed with the    ║
+                     │  ║  workspace close-out remediation, exit 1.        ║
+                     │  ║  Nothing is mutated: init writes no state file,  ║
+                     │  ║  a phase shift performs no transition.           ║
+                     │  ║                                                  ║
+                     │  ║  Gated (the three cold-start entries):           ║
+                     │  ║    · init --phase planning --from <queue>        ║
+                     │  ║    · generate_planning_queue → planning shift    ║
+                     │  ║    · specifying → gen_plan_queue --from skip     ║
+                     │  ║  NOT gated (intra-session domain boundaries):    ║
+                     │  ║    · planning → planning                         ║
+                     │  ║    · implementing / ui_implementing → planning   ║
+                     │  ║  Those were already covered by the cold-start    ║
+                     │  ║  check; re-gating would false-block the          ║
+                     │  ║  multi-domain continuation, whose earlier        ║
+                     │  ║  domains now legitimately hold a full workspace. ║
+                     │  ║                                                  ║
+                     │  ║  Query it at any time, mutating nothing:         ║
+                     │  ║    forgectl preflight [--from <plan-queue.json>] ║
+                     │  ╚══════════════════════════════════════════════════╝
                      ▼
   ┌─────────────────────────────────────────────────────────────────────────┐
   │                                                                         │
@@ -86,17 +121,17 @@
   │     DONE → PHASE_SHIFT → implementation; domain boundaries re-route     │
   │     by kind, so code and ui domains interleave                          │
   │                                                                         │
-  │   ┌───────┐  ┌───────────┐  ┌───────────┐  ┌──────────────┐           │
-  │   │ORIENT ├─►│STUDY_SPECS├─►│STUDY_CODE ├─►│STUDY_PACKAGES│           │
-  │   └───────┘  └───────────┘  └───────────┘  └──────┬───────┘           │
+  │   ┌───────┐  ┌───────────┐  ┌───────────┐  ┌──────────────┐             │
+  │   │ORIENT ├─►│STUDY_SPECS├─►│STUDY_CODE ├─►│STUDY_PACKAGES│             │
+  │   └───────┘  └───────────┘  └───────────┘  └──────┬───────┘             │
   │                                                     │                   │
   │                   ┌────────┐  ┌───────┐             │                   │
   │                   │ REVIEW │◄─┘       │◄────────────┘                   │
   │                   └───┬────┘          │                                 │
   │                       ▼               │                                 │
-  │               ┌─────────────┐  ┌──────────┐                            │
+  │               ┌─────────────┐  ┌──────────┐                             │
   │               │    DRAFT    ├─►│ VALIDATE │ (if plan invalid)           │
-  │               └──────┬──────┘  └────┬─────┘                            │
+  │               └──────┬──────┘  └────┬─────┘                             │
   │                      │              │                                   │
   │                      ▼              │                                   │
   │               ┌─────────────┐◄──────┘                                   │
@@ -109,7 +144,7 @@
   │                       │                                                 │
   │              FAIL     │     PASS                                        │
   │            ┌──────────┼──────────┐                                      │
-  │            ▼                     ▼                                       │
+  │            ▼                     ▼                                      │
   │       ┌────────┐           ┌────────┐  ──► DONE (plan_all: true,        │
   │       │ REFINE ├──┘        │ ACCEPT │        queue empty)               │
   │       └────────┘           └───┬────┘                                   │
@@ -132,52 +167,61 @@
                      ▼
   ┌─────────────────────────────────────────────────────────────────────────┐
   │                                                                         │
-  │   PHASE 4a: IMPLEMENTING            (plan kind: code — the default)      │
+  │   PHASE 4a: IMPLEMENTING            (plan kind: code — the default)     │
   │   Role: Senior Software Engineer                                        │
   │                                                                         │
   │   Input:  plan.json (with passes/rounds)                                │
   │   Output: Production code + eval reports                                │
   │                                                                         │
-  │   ┌───────┐  ┌───────────┐  ┌───────────┐  ┌──────────┐  ┌────────┐  │
-  │   │ORIENT ├─►│IMPLEMENT  ├─►│IMPLEMENT  ├─►│ EVALUATE ├─►│ COMMIT │  │
-  │   └───────┘  │ (item 1)  │  │ (item N)  │  └────┬─────┘  └───┬────┘  │
-  │              └───────────┘  └───────────┘       │             │        │
-  │                                            FAIL │             │        │
-  │                                                 ▼             │        │
-  │                                           ┌───────────┐      │        │
-  │                                           │IMPLEMENT  │      │        │
-  │                                           │(round 2+) ├──┘   │        │
-  │                                           └───────────┘      │        │
-  │                                                               │        │
-  │                                    more batches ◄─────────────┘        │
-  │                                         │                              │
-  │                                         ▼                              │
-  │                                    ┌────────┐                          │
-  │                                    │  DONE  │──► PHASE_SHIFT           │
-  │                                    └────────┘    (if plans remain)     │
+  │   ┌───────┐  ┌───────────┐  ┌───────────┐  ┌──────────┐                 │
+  │   │ORIENT ├─►│IMPLEMENT  ├─►│IMPLEMENT  ├─►│ EVALUATE │                 │
+  │   └───────┘  │ (item 1)  │  │ (item N)  │  └────┬─────┘                 │
+  │              └───────────┘  └───────────┘       │                       │
+  │              every round auto-commits      FAIL │ (or PASS < min)       │
+  │              its item (enable_commits: true)    ▼                       │
+  │                                     report / conversational:            │
+  │                                       IMPLEMENT (round 2+) ─► EVALUATE  │
+  │                                     direct:                             │
+  │                                       EVALUATE ─► EVALUATE (self-loop)  │
+  │                                                                         │
+  │   TERMINAL verdict (PASS >= min, or FAIL >= max force-accept):          │
+  │     enable_commits: true  ─► batch auto-commits INLINE on that same     │
+  │                              advance ─► ORIENT / DONE (COMMIT skipped)  │
+  │     enable_commits: false ─► COMMIT (no git op) ─► ORIENT / DONE        │
+  │                                                                         │
+  │                                    more batches ─► ORIENT               │
+  │                                         │                               │
+  │                                         ▼                               │
+  │                                    ┌────────┐                           │
+  │                                    │  DONE  │──► PHASE_SHIFT            │
+  │                                    └────────┘    (if plans remain)      │
   │                                                                         │
   └─────────────────────────────────────────────────────────────────────────┘
 
   ┌─────────────────────────────────────────────────────────────────────────┐
   │                                                                         │
-  │   PHASE 4b: UI_IMPLEMENTING         (plan kind: ui)                      │
-  │   Role: Senior Software Engineer (UI)    See: 10-ui-implementing-phase   │
+  │   PHASE 4b: UI_IMPLEMENTING         (plan kind: ui)                     │
+  │   Role: Senior Software Engineer (UI)    See: 10-ui-implementing-phase  │
   │                                                                         │
   │   Input:  plan.json (with passes/rounds)                                │
-  │   Output: UI code + QA reports + authored e2e tests + eval reports       │
+  │   Output: UI code + QA reports + authored e2e tests + eval reports      │
   │                                                                         │
-  │   Reuses the implementing spine, then inserts TWO verification loops     │
-  │   between code EVALUATE and COMMIT — three sequential gates per batch:   │
+  │   Reuses the implementing spine, then inserts TWO verification loops    │
+  │   between code EVALUATE and the batch-terminal commit — three           │
+  │   sequential gates per batch:                                           │
   │                                                                         │
-  │   ORIENT ─► IMPLEMENT(1..n) ─► [ CODE EVAL ] ─► [ QA ] ─► [ E2E ] ─►     │
-  │                                  impl-eval      ui-qa      ui-e2e        │
-  │                                  verdict        QA_TEST ⟲  E2E_VERIFY ⟲  │
-  │                                                 UI_REFINE  E2E_REMEDIATE │
-  │                                                    │           │         │
-  │                                              (Playwright   (Playwright   │
-  │                                               MCP)          test runner) │
+  │   ORIENT ─► IMPLEMENT(1..n) ─► [ CODE EVAL ] ─► [ QA ] ─► [ E2E ] ─►    │
+  │                                  impl-eval      ui-qa      ui-e2e       │
+  │                                  verdict        QA_TEST ⟲  E2E_VERIFY ⟲ │
+  │                                                 UI_REFINE  E2E_REMEDIATE│
+  │                                                    │           │        │
+  │                                              (Playwright   (Playwright  │
+  │                                               MCP)          test runner)│
   │                                                                         │
-  │   ─► COMMIT ─► ... ─► DONE ──► PHASE_SHIFT (if plans remain)            │
+  │   ─► batch-terminal commit ─► ... ─► DONE ──► PHASE_SHIFT (if plans     │
+  │      remain).  enable_commits: true auto-commits the batch inline on    │
+  │      the terminal E2E_VERIFY advance and skips COMMIT; false enters     │
+  │      COMMIT as a no-git-operation state.                                │
   │   Item passed only if all three loops PASS within budget; else failed.  │
   │                                                                         │
   └─────────────────────────────────────────────────────────────────────────┘
@@ -195,12 +239,25 @@
                  engineer refreshes context before proceeding
   EVALUATE       AI sub-agent reviews work against evaluation dimensions
   REFINE         Fix deficiencies found in evaluation
-  COMMIT         Hard stop; must commit (or advance) before continuing
+  COMMIT         Bookkeeping pause reached only when enable_commits: false;
+                 no git operation occurs there. With commits enabled the
+                 batch-terminal commit runs inline on the terminal EVALUATE
+                 (implementing) or E2E_VERIFY (ui_implementing) advance and
+                 COMMIT never appears
   GUIDED         Optional pause for human discussion (--guided flag)
+  READINESS GATE Cold-start precondition on entering planning: every incoming
+                 domain's workspace must be empty. Query with
+                 forgectl preflight; remediate with workspace close-out
 
   Round Enforcement (from .forgectl/config [phase].eval):
     eval.min_rounds   PASS below minimum forces another REFINE cycle
     eval.max_rounds   FAIL at maximum forces acceptance (prevents infinite loops)
+    eval_mode         Where a non-terminal verdict lands. report and
+                      conversational hand work back (REFINE, or IMPLEMENT
+                      round 2+); direct loops the implementation phases'
+                      EVALUATE back onto itself — the evaluator already made
+                      the corrections, so IMPLEMENT runs once per batch and
+                      the self-loop carries the round increment
 
   Mode Control (general config):
     plan_all_before_implementing: false (default)

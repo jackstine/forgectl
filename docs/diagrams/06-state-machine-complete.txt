@@ -58,15 +58,24 @@
   GENERATE PLANNING QUEUE PHASE
   ═══════════════════════════════════════════════════════════════════════════
 
-  ORIENT ──────► REFINE ──────► PHASE_SHIFT
-  (generates                    (generate_planning_queue → planning)
-   plan-queue.json)
+  ORIENT ──────► REFINE ──────► PHASE_SHIFT ──[ readiness gate ]──► planning ORIENT
+  (generates                    (generate_planning_queue → planning)      │
+   plan-queue.json)                                                  BLOCKED: stay
+                                                                     in generate_
+                                                                     planning_queue
 
   Notes:
   - ORIENT: auto-generates <state_dir>/plan-queue.json from completed specs
   - REFINE: architect reviews, reorders, edits the file; validates on advance
   - PHASE_SHIFT: consumes plan queue, transitions to planning ORIENT
   - Can be skipped entirely: forgectl advance --from <file> at specifying PHASE_SHIFT
+  - PLANNING READINESS GATE: both routes into planning are cold-start entries and
+    are gated. Every domain in the incoming plan queue must have an empty
+    <domain>/<workspace_dir>/ or the shift is refused, names the dirty domains,
+    and mutates nothing. Same check runs at init --phase planning and on demand
+    via forgectl preflight. Intra-session domain-boundary re-entries into
+    planning ORIENT (planning→planning, implementing/ui_implementing→planning)
+    are NOT gated — see 00-full-lifecycle.
 
 
   PLANNING PHASE
@@ -118,20 +127,33 @@
 
   ORIENT ──────► IMPLEMENT ──────► IMPLEMENT ──────► EVALUATE
     ▲             (item 1)          (item N)            │
-    │                                            ┌──────┴──────┐
-    │                                            │             │
-    │                                      PASS>=min      FAIL<max
-    │                                      or FAIL>=max   or PASS<min
-    │                                            │             │
-    │                                            ▼             ▼
-    │                                         COMMIT       IMPLEMENT
-    │                                            │         (round 2+)
-    │                                            │             │
-    │                                     ┌──────┴──────┐     │
-    │                                     │             │     └──► EVALUATE
+    │        (each item auto-commits every              │
+    │         round when enable_commits: true)          │
+    │                                           ┌───────┴──────────┐
+    │                                           │                  │
+    │                                       PASS>=min          FAIL<max
+    │                                     or FAIL>=max        or PASS<min
+    │                                           │                  │
+    │                                           ▼                  ▼
+    │                                    ┌──────────────┐  ┌───────────────┐
+    │                                    │BATCH TERMINAL│  │ NON-TERMINAL  │
+    │                                    │  branches on │  │  branches on  │
+    │                                    │enable_commits│  │   eval_mode   │
+    │                                    └──────┬───────┘  └───────┬───────┘
+    │                                           │                  │
+    │        true:  inline auto-commit as       │   report / conversational:
+    │               part of THIS same advance;  │     IMPLEMENT (round 2+) ──► EVALUATE
+    │               COMMIT is SKIPPED entirely  │
+    │        false: COMMIT — a state, but       │   direct:
+    │               no git operation            │     EVALUATE ──► EVALUATE (self-loop;
+    │                                           │     no re-implement, and the round
+    │                                           │     counter still climbs to max)
+    │                                           │
+    │                                    ┌──────┴──────┐
+    │                                    │             │
     │                                more batches   all done
-    │                                     │             │
-    └─────────────────────────────────────┘             ▼
+    │                                    │             │
+    └────────────────────────────────────┘             ▼
                                                       DONE
                                                         │
                               ┌─────────────────────────┴─────────────────────────┐
@@ -152,22 +174,40 @@
   Note: a plan with kind: ui enters UI_IMPLEMENTING below instead of IMPLEMENTING.
         Both share this DONE → PHASE_SHIFT exit behaviour.
 
+  Note: COMMIT is reachable ONLY when enable_commits: false. When commits are
+        enabled the batch-terminal commit happens inline on the terminal EVALUATE
+        advance (message synthesized from the batch's item descriptions) and the
+        scaffold lands directly on ORIENT or DONE — COMMIT never appears in the
+        transition path, and no --message is ever required to reach it.
+
+  Note: under eval_mode: direct the evaluator corrects the batch files itself, so
+        IMPLEMENT runs exactly once per batch and every non-terminal verdict
+        re-enters EVALUATE. That self-loop carries the round increment the
+        IMPLEMENT→EVALUATE transition would otherwise have applied, so a
+        repeatedly-failing batch still climbs to max_rounds and force-accepts.
+
 
   UI_IMPLEMENTING PHASE        (entered when the plan's kind is "ui")
   ═══════════════════════════════════════════════════════════════════════════
 
-  Reuses the implementing spine (ORIENT, IMPLEMENT, code EVALUATE, COMMIT) and
-  inserts a QA loop then an e2e loop between EVALUATE and COMMIT. Three loops,
-  three independent round budgets (eval / qa / e2e), each with its own
-  force-accept at max_rounds.
+  Reuses the implementing spine (ORIENT, IMPLEMENT, code EVALUATE, and the same
+  batch-terminal commit branch) and inserts a QA loop then an e2e loop between
+  EVALUATE and that boundary. Three loops, three independent round budgets
+  (eval / qa / e2e), each with its own force-accept at max_rounds.
 
   ORIENT ──► IMPLEMENT ──► IMPLEMENT ──► EVALUATE          ◄── LOOP 1: code
     ▲         (item 1)      (item N)        │
-    │                                ┌──────┴──────┐
-    │                          PASS>=min      FAIL<max / PASS<min
-    │                          or FAIL>=max         │
-    │                                │              └──► IMPLEMENT (round 2+)
-    │                                ▼
+    │      (each item auto-commits     ┌─────┴───────┐
+    │       every round when           │             │
+    │       enable_commits: true)  PASS>=min    FAIL<max / PASS<min
+    │                              or FAIL>=max      │
+    │                                  │      report / conversational:
+    │                                  │        IMPLEMENT (round 2+) ──► EVALUATE
+    │                                  │      direct:
+    │                                  │        EVALUATE ──► EVALUATE (self-loop —
+    │                                  │        no re-implement. QA and e2e keep
+    │                                  │        UI_REFINE and E2E_REMEDIATE in
+    │                                  ▼        every eval_mode)
     │                            QA_TEST ◄───────────┐    ◄── LOOP 2: qa
     │                                │               │        (Playwright MCP)
     │                         ┌──────┴──────┐        │
@@ -187,9 +227,13 @@
     │                  │              ▼           │
     │                  │          E2E_REMEDIATE ──┘
     │                  ▼          (fix tests or UI, re-run)
-    │               COMMIT
-    │       (items: passed if all 3 loops passed;
-    │        failed if any loop force-accepted)
+    │                  │
+    │            BATCH TERMINAL — item status decided HERE: passed if all
+    │            three loops passed, failed if any force-accepted
+    │                  │
+    │            true:  inline auto-commit as part of the terminal
+    │                   E2E_VERIFY advance; COMMIT is SKIPPED entirely
+    │            false: COMMIT — a state, but no git operation
     │                  │
     │           ┌──────┴──────┐
     └─ more ────┘             │ all done
@@ -229,9 +273,9 @@
 
   Phase availability:
 
-  ┌──────────────────┬──────────────────────────────────────────────────────────┐
+  ┌──────────────────┬───────────────────────────────────────────────────────────┐
   │ State             │ Spec   GenPQ   Plan   Impl   UI-Impl                     │
-  ├──────────────────┼──────────────────────────────────────────────────────────┤
+  ├──────────────────┼───────────────────────────────────────────────────────────┤
   │ ORIENT            │  x       x      x      x        x                        │
   │ SELECT            │  x                                                       │
   │ DRAFT             │  x              x                                        │
@@ -250,15 +294,19 @@
   │ REVIEW            │                 x                                        │
   │ VALIDATE          │                 x                                        │
   │ IMPLEMENT         │                        x        x                        │
-  │ COMMIT            │                        x        x                        │
+  │ COMMIT            │                        x        x   ◄ enable_commits:    │
+  │                   │                                       false only         │
   │ QA_TEST           │                                 x   ◄ UI-only            │
   │ UI_REFINE         │                                 x   ◄ UI-only            │
   │ E2E_AUTHOR        │                                 x   ◄ UI-only            │
   │ E2E_VERIFY        │                                 x   ◄ UI-only            │
   │ E2E_REMEDIATE     │                                 x   ◄ UI-only            │
-  └──────────────────┴──────────────────────────────────────────────────────────┘
+  └──────────────────┴───────────────────────────────────────────────────────────┘
 
   * Planning DONE only reachable when plan_all_before_implementing: true
+  COMMIT is reachable only when enable_commits: false; with commits enabled the
+  batch-terminal commit runs inline on the terminal EVALUATE (implementing) or
+  E2E_VERIFY (ui_implementing) advance and the state is never entered.
   Impl = implementing (kind: code).  UI-Impl = ui_implementing (kind: ui).
   Both implementation variants share ORIENT, IMPLEMENT, EVALUATE, COMMIT, DONE,
   PHASE_SHIFT; ui_implementing adds the five UI-only states.

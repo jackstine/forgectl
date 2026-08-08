@@ -182,19 +182,19 @@
   ║                               │                                       ║
   ║                               ▼                                       ║
   ║  ┌────────────────────────────────────────────────────────────────┐   ║
-  ║  │  COMMIT / INLINE AUTO-COMMIT (terminal status decided HERE)     │   ║
+  ║  │  COMMIT / INLINE AUTO-COMMIT (terminal status decided HERE)    │   ║
   ║  │                                                                │   ║
   ║  │  Items ──► passed   when code, qa AND e2e all PASSed in budget │   ║
   ║  │  Items ──► failed   when ANY loop force-accepted at its max    │   ║
   ║  │                                                                │   ║
   ║  │  enable_commits: true                                          │   ║
-  ║  │    COMMIT is SKIPPED. The terminal E2E_VERIFY advance itself    │   ║
-  ║  │    auto-commits the batch inline (message synthesized from      │   ║
+  ║  │    COMMIT is SKIPPED. The terminal E2E_VERIFY advance itself   │   ║
+  ║  │    auto-commits the batch inline (message synthesized from     │   ║
   ║  │    the batch's item descriptions; skipped silently if nothing  │   ║
   ║  │    is staged), then proceeds straight to ORIENT/DONE.          │   ║
   ║  │                                                                │   ║
   ║  │  enable_commits: false                                         │   ║
-  ║  │    COMMIT appears as its own state (no git operation):          │   ║
+  ║  │    COMMIT appears as its own state (no git operation):         │   ║
   ║  │      forgectl advance                                          │   ║
   ║  └────────────────────────────┬───────────────────────────────────┘   ║
   ║                               │                                       ║

@@ -254,6 +254,7 @@
       <span class="chip"><b>init</b></span>
       <span class="chip"><b>advance</b></span>
       <span class="chip"><b>status</b></span>
+      <span class="chip"><b>preflight</b></span>
       <span class="chip"><b>eval</b></span>
       <span class="chip"><b>handoff</b></span>
       <span class="chip"><b>add-queue-item</b></span>
@@ -308,6 +309,11 @@
             <span class="pk">ui_implementing</span>
             <span class="pv">plan.json <span class="note">(+ requires ui_implementing.app.* and ui_implementing.e2e.* config, non-empty)</span></span>
           </div>
+        </div>
+
+        <div class="reveal">
+          <div class="flag-group-label">Planning readiness gate (<code>--phase planning</code> only)</div>
+          <p class="desc"><code>init --phase planning</code> is a cold-start entry into a planning cycle, so every domain in the <code>--from</code> plan queue must have an empty <code>&lt;domain-path&gt;/&lt;workspace_dir&gt;/</code>. A dirty workspace fails init with exit 1, names each dirty domain with its path and the workspace close-out remediation, and writes <strong>no state file</strong>. Ask first with <code>forgectl preflight --from &lt;queue&gt;</code>.</p>
         </div>
 
         <div class="reveal">
@@ -373,7 +379,7 @@
               </tr>
               <tr>
                 <td>EVALUATE</td>
-                <td><code>--verdict PASS|FAIL</code> &nbsp; <code>--eval-report &lt;path&gt;</code> (if report mode)</td>
+                <td><code>--verdict PASS|FAIL</code> &nbsp; <code>--eval-report &lt;path&gt;</code> (if report mode) &nbsp; <code>--message</code> optional — appended to the synthesized batch message when the verdict is terminal and <code>enable_commits: true</code> (the batch commits inline on this advance)</td>
               </tr>
               <tr>
                 <td>REFINE</td>
@@ -385,11 +391,11 @@
               </tr>
               <tr>
                 <td>IMPLEMENT</td>
-                <td><code>--message</code> (first round, if enable_commits)</td>
+                <td><code>--message</code> optional on <strong>every</strong> round — appended to the message synthesized from the item's <code>description</code></td>
               </tr>
               <tr>
                 <td>COMMIT</td>
-                <td><code>--message</code> (if enable_commits)</td>
+                <td>(none — reached only when <code>enable_commits: false</code>; no git operation occurs)</td>
               </tr>
               <tr>
                 <td>QA_TEST <span class="phase-tag">(ui)</span></td>
@@ -405,7 +411,7 @@
               </tr>
               <tr>
                 <td>E2E_VERIFY <span class="phase-tag">(ui)</span></td>
-                <td><code>--verdict PASS|FAIL</code> &nbsp; <code>--eval-report &lt;path&gt;</code> (if e2e report mode)</td>
+                <td><code>--verdict PASS|FAIL</code> &nbsp; <code>--eval-report &lt;path&gt;</code> (if e2e report mode) &nbsp; <code>--message</code> optional — same inline batch commit on the terminal verdict</td>
               </tr>
               <tr>
                 <td>E2E_REMEDIATE <span class="phase-tag">(ui)</span></td>
@@ -429,7 +435,7 @@
               </tr>
               <tr>
                 <td>PHASE_SHIFT</td>
-                <td><code>--from &lt;path&gt;</code> (specifying or gen_plan_q)</td>
+                <td><code>--from &lt;path&gt;</code> (specifying or gen_plan_q) — both shifts into planning are cold-start entries and are refused by the readiness gate when any incoming domain's workspace is non-empty; the session stays where it is</td>
               </tr>
               <tr>
                 <td>SELF_REVIEW</td>
@@ -503,7 +509,7 @@
 <span class="prompt">$ </span><span class="cmd">forgectl advance</span> <span class="flag">--verdict</span> <span class="val">FAIL</span> <span class="flag">--eval-report</span> <span class="val">report.md</span>  <span class="comment"># from EVALUATE with report</span>
 <span class="prompt">$ </span><span class="cmd">forgectl advance</span> <span class="flag">--verdict</span> <span class="val">PASS</span>                           <span class="comment"># from QA_TEST or E2E_VERIFY</span>
 <span class="prompt">$ </span><span class="cmd">forgectl advance</span> <span class="flag">--from</span> <span class="val">plan-queue.json</span>                  <span class="comment"># from PHASE_SHIFT</span>
-<span class="prompt">$ </span><span class="cmd">forgectl advance</span> <span class="flag">--message</span> <span class="val">"feat: add auth module"</span>         <span class="comment"># from COMMIT (enable_commits)</span>
+<span class="prompt">$ </span><span class="cmd">forgectl advance</span> <span class="flag">--message</span> <span class="val">"also drops the legacy shim"</span>    <span class="comment"># from IMPLEMENT — appended to the synthesized message</span>
 <span class="prompt">$ </span><span class="cmd">forgectl advance</span> <span class="flag">--guided</span>                                  <span class="comment"># toggle guided mode on</span></div>
         </div>
 
@@ -538,6 +544,48 @@
         <div class="output-note reveal">
           <span class="out-tag">output</span>
           <span>Human-readable status, next action, overview</span>
+        </div>
+      </div>
+
+      <!-- preflight -->
+      <div class="panel accent" data-reveal>
+        <div class="panel-title">
+          <span class="n">forgectl preflight</span>
+          Report planning readiness for a plan queue's domains
+        </div>
+        <div class="reveal">
+          <p class="desc">Asks the question the <strong>planning readiness gate</strong> answers at every cold-start entry into planning: does every domain this cycle is about to plan have an empty workspace? A domain is <em>clean</em> when <code>&lt;domain-path&gt;/&lt;workspace_dir&gt;/</code> is absent, empty, or holds only empty subdirectories. <strong>Any</strong> regular file at any depth makes it dirty — a leftover <code>plan.json</code>, an eval report, even a lone <code>.gitkeep</code> — as does a directory that cannot be traversed.</p>
+          <p class="desc">Read-only and stateless: it creates no directory, writes no state file, deletes nothing, and writes no log entry. Valid in any state <em>and outside a session entirely</em> — run it before <code>init</code> to learn whether <code>init</code> would be refused. Its verdict is a pure function of the queue's domains and the current filesystem, so it never consults a marker or an "already planned" record.</p>
+
+          <div class="flag-group-label">Optional flags</div>
+          <div class="flag-grid">
+            <span class="flag-name optional">--from &lt;path&gt;</span>
+            <span class="flag-desc">Plan queue JSON to check. Omitted → the active session's pending plan queue (written by <code>generate_planning_queue</code>)</span>
+          </div>
+
+          <div class="flag-group-label">Same evaluation enforced at</div>
+          <div class="flag-grid">
+            <span class="flag-name">init</span>
+            <span class="flag-desc"><code>init --phase planning --from &lt;queue&gt;</code> — blocked means exit 1 and <strong>no state file</strong></span>
+            <span class="flag-name">phase shift</span>
+            <span class="flag-desc"><code>generate_planning_queue</code> → <code>planning</code> — blocked means no transition; the session stays put</span>
+            <span class="flag-name">--from skip</span>
+            <span class="flag-desc"><code>specifying</code> → <code>generate_planning_queue</code> with <code>--from</code>, which lands directly in planning ORIENT</span>
+            <span class="flag-name optional">not gated</span>
+            <span class="flag-desc">Intra-session domain boundaries (<code>planning</code>→<code>planning</code>, <code>implementing</code>/<code>ui_implementing</code>→<code>planning</code>). Cold start already cleared them; re-gating would false-block the multi-domain continuation</span>
+          </div>
+        </div>
+
+        <div class="reveal">
+          <div class="flag-group-label">Example invocations</div>
+          <div class="code-block">
+<span class="prompt">$ </span><span class="cmd">forgectl preflight</span> <span class="flag">--from</span> <span class="val">plan-queue.json</span>
+<span class="prompt">$ </span><span class="cmd">forgectl preflight</span>                              <span class="comment"># uses the session's pending queue</span></div>
+        </div>
+
+        <div class="output-note reveal">
+          <span class="out-tag">output</span>
+          <span><code>Planning readiness: READY</code> + inspected count (exit 0), or <code>Planning readiness: BLOCKED</code> + the dirty domains, their workspace paths, and the workspace close-out remediation (exit 1). An unreadable or invalid <code>--from</code> queue, or no queue to resolve, also exits 1.</span>
         </div>
       </div>
 
@@ -805,6 +853,7 @@
             <li><code>forgectl init</code></li>
             <li><code>forgectl advance</code></li>
             <li><code>forgectl status</code></li>
+            <li><code>forgectl preflight</code></li>
             <li><code>forgectl add-queue-item</code></li>
             <li><code>forgectl set-roots</code></li>
             <li><code>forgectl set-commit-hashes</code></li>

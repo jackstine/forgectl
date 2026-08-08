@@ -53,18 +53,38 @@
                      └──────── REFINE ──────────────────────────┘
                           (fix deficiencies)
 
+  REFINE here is the generic "go fix it" step. Which concrete state that is
+  depends on the phase and, in the implementation phases, on eval_mode:
+
+    specifying / planning          REFINE
+    implementing                   IMPLEMENT (round 2+)   report, conversational
+                                   EVALUATE  (self-loop)  direct
+    ui_implementing  code loop     IMPLEMENT (round 2+)   report, conversational
+                                   EVALUATE  (self-loop)  direct
+    ui_implementing  qa loop       UI_REFINE              every eval_mode
+    ui_implementing  e2e loop      E2E_REMEDIATE          every eval_mode
+
+  Under eval_mode: direct the evaluator has already corrected the files, so
+  there is nothing for an IMPLEMENT round to do — the batch re-enters EVALUATE
+  directly and IMPLEMENT runs exactly once per batch. The self-loop carries the
+  round increment the IMPLEMENT→EVALUATE transition would otherwise have
+  applied, so the counter still climbs toward max_rounds and a repeatedly
+  failing batch force-accepts rather than looping forever. The QA and e2e loops
+  keep their own refine states in every mode: their evaluators drive a browser
+  and a test suite, so there is always non-evaluator work to hand back.
+
 
   ═══════════════════════════════════════════════════════════════════════════
   DECISION MATRIX
   ═══════════════════════════════════════════════════════════════════════════
 
   ┌───────────┬────────────────────────┬────────────────────────────────────┐
-  │ Verdict   │ Round Condition         │ Outcome                           │
+  │ Verdict   │ Round Condition        │ Outcome                            │
   ├───────────┼────────────────────────┼────────────────────────────────────┤
-  │ PASS      │ rounds >= eval.min     │ ACCEPT  (quality satisfied)       │
-  │ PASS      │ rounds <  eval.min     │ REFINE  (need more eval cycles)   │
-  │ FAIL      │ rounds <  eval.max     │ REFINE  (fix and retry)           │
-  │ FAIL      │ rounds >= eval.max     │ ACCEPT  (forced — cap reached)    │
+  │ PASS      │ rounds >= eval.min     │ ACCEPT  (quality satisfied)        │
+  │ PASS      │ rounds <  eval.min     │ REFINE  (need more eval cycles)    │
+  │ FAIL      │ rounds <  eval.max     │ REFINE  (fix and retry)            │
+  │ FAIL      │ rounds >= eval.max     │ ACCEPT  (forced — cap reached)     │
   └───────────┴────────────────────────┴────────────────────────────────────┘
 
 
@@ -104,19 +124,19 @@
   ═══════════════════════════════════════════════════════════════════════════
 
   ┌────┬──────────────────────┬────────────────────────────────────────────┐
-  │  # │ Dimension             │ What the evaluator checks                 │
+  │  # │ Dimension            │ What the evaluator checks                  │
   ├────┼──────────────────────┼────────────────────────────────────────────┤
-  │  1 │ Behavior              │ All spec behaviors covered by plan items  │
-  │  2 │ Error Handling        │ Failure modes mapped to tests             │
-  │  3 │ Rejection             │ Invalid inputs tested                     │
-  │  4 │ Interface             │ Outputs match spec contracts              │
-  │  5 │ Configuration         │ Configurable params covered               │
-  │  6 │ Observability         │ Logging requirements addressed            │
-  │  7 │ Integration Points    │ Cross-spec dependencies mapped            │
-  │  8 │ Invariants            │ Always-true properties enforced           │
-  │  9 │ Edge Cases            │ Boundary conditions tested                │
-  │ 10 │ Testing Criteria      │ All tests mapped to plan items            │
-  │ 11 │ Dependencies & Format │ DAG valid, schema compliant               │
+  │  1 │ Behavior             │ All spec behaviors covered by plan items   │
+  │  2 │ Error Handling       │ Failure modes mapped to tests              │
+  │  3 │ Rejection            │ Invalid inputs tested                      │
+  │  4 │ Interface            │ Outputs match spec contracts               │
+  │  5 │ Configuration        │ Configurable params covered                │
+  │  6 │ Observability        │ Logging requirements addressed             │
+  │  7 │ Integration Points   │ Cross-spec dependencies mapped             │
+  │  8 │ Invariants           │ Always-true properties enforced            │
+  │  9 │ Edge Cases           │ Boundary conditions tested                 │
+  │ 10 │ Testing Criteria     │ All tests mapped to plan items             │
+  │ 11 │ Dependencies & Format│ DAG valid, schema compliant                │
   └────┴──────────────────────┴────────────────────────────────────────────┘
 
 
@@ -125,15 +145,15 @@
   ═══════════════════════════════════════════════════════════════════════════
 
   ┌────┬──────────────────────┬────────────────────────────────────────────┐
-  │  # │ Criterion             │ What the evaluator checks                 │
+  │  # │ Criterion            │ What the evaluator checks                  │
   ├────┼──────────────────────┼────────────────────────────────────────────┤
-  │  1 │ Completeness          │ All steps implemented, all files present  │
-  │  2 │ Correctness           │ Implementation matches spec contract      │
-  │  3 │ Test Coverage         │ Each acceptance criterion satisfied       │
-  │  4 │ Rejection Handling    │ Invalid inputs rejected as specified      │
-  │  5 │ Edge Cases            │ Boundary conditions handled               │
-  │  6 │ Code Quality          │ Clean, idiomatic, maintainable            │
-  │  7 │ Integration           │ Works correctly with dependencies         │
+  │  1 │ Completeness         │ All steps implemented, all files present   │
+  │  2 │ Correctness          │ Implementation matches spec contract       │
+  │  3 │ Test Coverage        │ Each acceptance criterion satisfied        │
+  │  4 │ Rejection Handling   │ Invalid inputs rejected as specified       │
+  │  5 │ Edge Cases           │ Boundary conditions handled                │
+  │  6 │ Code Quality         │ Clean, idiomatic, maintainable             │
+  │  7 │ Integration          │ Works correctly with dependencies          │
   └────┴──────────────────────┴────────────────────────────────────────────┘
 
 
@@ -144,8 +164,8 @@
   Each batch passes three sequential gates. Each gate is an instance of the
   GENERIC EVALUATION LOOP above, with its own counter and its own budget.
 
-    IMPLEMENT(s) ─► [ LOOP 1: code ] ─► [ LOOP 2: qa ] ─► [ LOOP 3: e2e ] ─► COMMIT
-                     eval_round           qa_round          e2e_round
+    IMPLEMENT(s) ─► [ LOOP 1: code ] ─► [ LOOP 2: qa ] ─► [ LOOP 3: e2e ] ─► batch
+                     eval_round           qa_round          e2e_round      terminal
                      impl-eval.md         ui-qa-eval.md     ui-e2e-eval.md
                      EVALUATE             QA_TEST ⟲         E2E_AUTHOR →
                      (verdict)            UI_REFINE         E2E_VERIFY ⟲ E2E_REMEDIATE
@@ -158,26 +178,30 @@
   ACCEPT vs force-accept work exactly as the DECISION MATRIX above, but PER LOOP:
   a loop terminates on PASS at >= its min, or force-accepts on FAIL at >= its max.
   An item is "passed" only if ALL THREE loops passed within budget; if ANY loop
-  force-accepted, the item is "failed". Status is decided at COMMIT.
+  force-accepted, the item is "failed". Status is decided at the batch-terminal
+  boundary — the COMMIT state when enable_commits: false, or the inline
+  auto-commit on the terminal E2E_VERIFY advance when enable_commits: true
+  (COMMIT is skipped in that case). The implementing phase's equivalent boundary
+  is the terminal EVALUATE advance.
 
   QA EVALUATION CRITERIA  (ui-qa-eval.md — drives the Playwright MCP)
   ┌────┬──────────────────────┬────────────────────────────────────────────┐
-  │  # │ Criterion             │ What the QA sub-agent checks              │
+  │  # │ Criterion            │ What the QA sub-agent checks               │
   ├────┼──────────────────────┼────────────────────────────────────────────┤
-  │  1 │ Placement             │ Layout/structure via accessibility snapshot│
-  │  2 │ Controls              │ Each control click/type/fill/select works  │
-  │  3 │ Runtime health        │ Console free of errors while exercising UI │
-  │  4 │ Reachability          │ App launches and serves at the configured url│
-  │  5 │ Step-list output      │ Emits e2e scenarios (always written)       │
+  │  1 │ Placement            │ Layout/structure via accessibility snapshot│
+  │  2 │ Controls             │ Each control click/type/fill/select works  │
+  │  3 │ Runtime health       │ Console free of errors while exercising UI │
+  │  4 │ Reachability         │ App launches and serves at the given url   │
+  │  5 │ Step-list output     │ Emits e2e scenarios (always written)       │
   └────┴──────────────────────┴────────────────────────────────────────────┘
 
   E2E VERIFICATION CRITERIA  (ui-e2e-eval.md — Playwright test runner)
   ┌────┬──────────────────────┬────────────────────────────────────────────┐
-  │  # │ Criterion             │ What the e2e sub-agent checks             │
+  │  # │ Criterion            │ What the e2e sub-agent checks              │
   ├────┼──────────────────────┼────────────────────────────────────────────┤
-  │  1 │ Tests run             │ Authored Playwright tests execute          │
-  │  2 │ Tests pass            │ The suite passes via the test command      │
-  │  3 │ Coverage              │ Tests cover the QA step-list scenarios     │
+  │  1 │ Tests run            │ Authored Playwright tests execute          │
+  │  2 │ Tests pass           │ The suite passes via the test command      │
+  │  3 │ Coverage             │ Tests cover the QA step-list scenarios     │
   └────┴──────────────────────┴────────────────────────────────────────────┘
   (Zero-scenario step list → E2E_VERIFY verdict PASS, vacuously.)
 
@@ -218,6 +242,13 @@
   - REFINE output says: "Review unstaged changes from the evaluator (git diff)"
   - forgectl advance requires only --verdict (no --eval-report)
   - No report file; the sub-agent edits the files in place
+  - Implementation phases re-enter EVALUATE, not IMPLEMENT. In implementing and
+    in ui_implementing's code-eval loop, a FAIL below max_rounds or a PASS below
+    min_rounds loops EVALUATE → EVALUATE; IMPLEMENT runs exactly once per batch.
+    The self-loop increments the round counter itself, so max_rounds is still
+    reached and the force-accept still fires. Specifying and planning are
+    unaffected — they continue to route through REFINE — and ui_implementing's
+    QA and e2e loops keep UI_REFINE and E2E_REMEDIATE in every mode.
 
   eval_mode: "conversational"
   ───────────────────────────

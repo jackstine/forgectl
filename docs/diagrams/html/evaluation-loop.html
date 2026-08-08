@@ -136,6 +136,23 @@
           <span style="color: var(--ember-hot); font-size: 11px;">forced — cap reached</span>
         </div>
       </div>
+
+      <div class="note-box reveal" style="margin-top: 18px;">
+        <b>REFINE here is the generic "go fix it" step.</b> Which concrete state that is depends on the phase and, in the implementation phases, on <code>eval_mode</code>:
+        <table class="path-table" style="margin-top:10px">
+          <thead><tr><th>Loop</th><th>Non-terminal target</th><th>When</th></tr></thead>
+          <tbody>
+            <tr><td class="td-loop">specifying / planning</td><td class="td-path">REFINE</td><td>every eval_mode</td></tr>
+            <tr><td class="td-loop">implementing</td><td class="td-path">IMPLEMENT (round 2+)</td><td>report, conversational</td></tr>
+            <tr><td class="td-loop">implementing</td><td class="td-path">EVALUATE (self-loop)</td><td><code>direct</code></td></tr>
+            <tr><td class="td-loop">ui_implementing · code</td><td class="td-path">IMPLEMENT (round 2+)</td><td>report, conversational</td></tr>
+            <tr><td class="td-loop">ui_implementing · code</td><td class="td-path">EVALUATE (self-loop)</td><td><code>direct</code></td></tr>
+            <tr><td class="td-loop">ui_implementing · qa</td><td class="td-path">UI_REFINE</td><td>every eval_mode</td></tr>
+            <tr><td class="td-loop">ui_implementing · e2e</td><td class="td-path">E2E_REMEDIATE</td><td>every eval_mode</td></tr>
+          </tbody>
+        </table>
+        <div style="margin-top:10px">Under <code>direct</code> the evaluator has already corrected the files, so an IMPLEMENT round would have nothing to do — the batch re-enters EVALUATE and IMPLEMENT runs exactly once per batch. The self-loop carries the round increment the IMPLEMENT→EVALUATE transition would otherwise have applied, so the counter still climbs toward <code>max_rounds</code> and a repeatedly failing batch force-accepts rather than looping forever. The QA and e2e loops keep their own refine states in every mode: their evaluators drive a browser and a test suite, so there is always non-evaluator work to hand back.</div>
+      </div>
     </div>
 
     <!-- ── DECISION MATRIX ── -->
@@ -389,7 +406,10 @@
         the generic evaluation loop with its own <code>rounds</code> counter and its own
         <code>min_rounds</code> / <code>max_rounds</code> budget. An item is "passed" only if all three
         loops passed within budget; if <em>any</em> loop force-accepted, the item is marked "failed" at
-        <code>COMMIT</code>.
+        the <strong>batch-terminal boundary</strong> — the <code>COMMIT</code> state when
+        <code>enable_commits: false</code>, or the inline auto-commit on the terminal
+        <code>E2E_VERIFY</code> advance when <code>enable_commits: true</code> (COMMIT is skipped in that
+        case). The implementing phase's equivalent boundary is the terminal <code>EVALUATE</code> advance.
       </p>
 
       <div class="track-label reveal">Batch pipeline</div>
@@ -408,7 +428,7 @@
         <span class="arrow loopback">⟲</span>
         <span class="state loop">E2E_REMEDIATE</span>
         <span class="arrow">→</span>
-        <span class="state terminal">COMMIT</span>
+        <span class="state terminal">batch terminal <span class="sub">COMMIT, or inline auto-commit</span></span>
       </div>
     </div>
 
@@ -550,6 +570,7 @@
             <li><code>forgectl advance</code> requires only <code>--verdict</code></li>
             <li>REFINE output says: "Review unstaged changes (git diff)"</li>
             <li>No report file written</li>
+            <li><b style="color:var(--text)">Implementation phases re-enter EVALUATE, not IMPLEMENT.</b> In implementing and in ui_implementing's code-eval loop, a FAIL below <code>max_rounds</code> or a PASS below <code>min_rounds</code> loops EVALUATE → EVALUATE; IMPLEMENT runs exactly once per batch. The self-loop increments the round counter itself, so <code>max_rounds</code> is still reached and the force-accept still fires. Specifying and planning still route through REFINE; QA and e2e keep UI_REFINE and E2E_REMEDIATE.</li>
           </ul>
         </div>
 

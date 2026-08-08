@@ -182,6 +182,11 @@
           <b>PHASE_SHIFT</b>: consumes queue, transitions to planning ORIENT.&nbsp;
           This entire phase can be skipped: <code>forgectl advance --from &lt;file&gt;</code> at specifying PHASE_SHIFT.
         </div>
+        <div class="note-box" style="margin-top:12px">
+          <b>Planning readiness gate.</b> Both routes into planning — this PHASE_SHIFT and the <code>--from</code> skip above — are <b>cold-start</b> entries and are gated, as is <code>init --phase planning</code>. Every domain in the incoming plan queue must have an empty <code>&lt;domain-path&gt;/&lt;workspace_dir&gt;/</code>; any regular file at any depth (even a lone <code>.gitkeep</code>) blocks it. A blocked shift mutates nothing — the session stays in generate_planning_queue and the dirty domains are printed with the workspace close-out remediation. Ask ahead of time with <code>forgectl preflight</code>. The gate is stateless and stores nothing.
+          <br><br>
+          <b>Not gated:</b> intra-session domain boundaries back into planning ORIENT (<code>planning</code>→<code>planning</code>, <code>implementing</code>/<code>ui_implementing</code>→<code>planning</code>). Cold start already inspected every domain in this cycle's queue; re-gating would false-block the multi-domain continuation, whose earlier domains now legitimately hold a full workspace.
+        </div>
       </div>
 
       <div class="reveal" style="margin-top:12px">
@@ -297,14 +302,26 @@
             <span class="state eval" style="font-size:11px;padding:5px 9px">EVALUATE</span>
             <span class="arrow loopback">⟲</span>
             <span class="state loop" style="font-size:11px;padding:5px 9px">IMPLEMENT <span class="sub">round 2+</span></span><span class="arrow">→</span>
-            <span class="state terminal" style="font-size:11px;padding:5px 9px">COMMIT</span><span class="arrow">→</span>
+            <span class="state terminal" style="font-size:11px;padding:5px 9px">COMMIT <span class="sub">enable_commits: false only</span></span><span class="arrow">→</span>
             <span class="state terminal" style="font-size:11px;padding:5px 9px">DONE</span>
           </div>
 
           <div class="branch" style="margin-top:10px">
-            <div class="bln"><span class="verdict pass">PASS ≥ min · or FAIL ≥ max</span> → <span class="state terminal" style="padding:3px 7px;font-size:10.5px">COMMIT</span></div>
-            <div class="bln"><span class="verdict fail">FAIL &lt; max</span> → <span class="state loop" style="padding:3px 7px;font-size:10.5px">IMPLEMENT</span> round 2+ → back to <span class="state eval" style="padding:3px 7px;font-size:10.5px">EVALUATE</span></div>
+            <div class="bln"><span class="verdict pass">PASS ≥ min · or FAIL ≥ max</span> → batch terminal, branching on <code>enable_commits</code></div>
+            <div class="bln" style="margin-left:14px"><b style="color:var(--text)">true</b> → the batch auto-commits <b>inline on this same advance</b> (message synthesized from the batch's item descriptions) → straight to <span class="state" style="padding:3px 7px;font-size:10.5px">ORIENT</span> / <span class="state terminal" style="padding:3px 7px;font-size:10.5px">DONE</span>. COMMIT never appears.</div>
+            <div class="bln" style="margin-left:14px"><b style="color:var(--text)">false</b> → <span class="state terminal" style="padding:3px 7px;font-size:10.5px">COMMIT</span>, a bookkeeping state with no git operation</div>
+            <div class="bln"><span class="verdict fail">FAIL &lt; max · or PASS &lt; min</span> → non-terminal, branching on <code>eval_mode</code></div>
+            <div class="bln" style="margin-left:14px"><b style="color:var(--text)">report / conversational</b> → <span class="state loop" style="padding:3px 7px;font-size:10.5px">IMPLEMENT</span> round 2+ → back to <span class="state eval" style="padding:3px 7px;font-size:10.5px">EVALUATE</span></div>
+            <div class="bln" style="margin-left:14px"><b style="color:var(--text)">direct</b> → <span class="state eval" style="padding:3px 7px;font-size:10.5px">EVALUATE</span> self-loop — the evaluator already corrected the files, so IMPLEMENT runs once per batch</div>
             <div class="bln" style="color:var(--muted-2)">More batches → loop back to ORIENT &nbsp;·&nbsp; All done → DONE</div>
+          </div>
+
+          <div class="note-box" style="margin-top:12px">
+            <b>Every IMPLEMENT round</b> auto-commits its item when <code>enable_commits: true</code> — first round and every round after a FAIL alike. <code>--message</code> is optional and appended to the synthesized message, never required.
+          </div>
+
+          <div class="note-box" style="margin-top:12px">
+            <b>direct-mode round counting:</b> the EVALUATE self-loop carries the round increment the IMPLEMENT→EVALUATE transition would otherwise have applied, so a repeatedly failing batch still climbs to <code>max_rounds</code> and force-accepts instead of looping forever.
           </div>
 
           <div class="note-box" style="margin-top:12px">
@@ -326,6 +343,10 @@
             <span class="state eval" style="font-size:11px;padding:5px 9px">EVALUATE</span>
             <span class="arrow loopback">⟲</span>
             <span class="state loop" style="font-size:11px;padding:5px 9px">IMPLEMENT <span class="sub">r2+</span></span>
+          </div>
+          <div class="branch" style="margin-top:8px">
+            <div class="bln"><b style="color:var(--text)">report / conversational</b> → <span class="state loop" style="padding:3px 7px;font-size:10.5px">IMPLEMENT</span> round 2+ &nbsp;·&nbsp; <b style="color:var(--text)">direct</b> → <span class="state eval" style="padding:3px 7px;font-size:10.5px">EVALUATE</span> self-loop (IMPLEMENT runs once per batch)</div>
+            <div class="bln" style="color:var(--muted-2)">Each item auto-commits on every IMPLEMENT round when <code>enable_commits: true</code>. Loops 2 and 3 keep UI_REFINE and E2E_REMEDIATE in <em>every</em> eval_mode — their evaluators drive a browser and a test suite, so there is always non-evaluator work to hand back.</div>
           </div>
 
           <div class="track-label" style="margin-top:18px;color:var(--steel)">Loop 2 — QA (Playwright MCP)</div>
@@ -353,17 +374,21 @@
             <span class="state loop" style="font-size:11px;padding:5px 9px">E2E_REMEDIATE</span>
           </div>
           <div class="branch" style="margin-top:8px">
-            <div class="bln"><span class="verdict pass">PASS ≥ min · or FAIL ≥ max</span> → <span class="state terminal" style="padding:3px 7px;font-size:10.5px">COMMIT</span></div>
+            <div class="bln"><span class="verdict pass">PASS ≥ min · or FAIL ≥ max</span> → batch terminal (see Commit &amp; exit)</div>
             <div class="bln"><span class="verdict fail">FAIL &lt; max</span> → <span class="state loop" style="padding:3px 7px;font-size:10.5px">E2E_REMEDIATE</span> (fix tests or UI) → back to <span class="state gate" style="padding:3px 7px;font-size:10.5px">E2E_VERIFY</span></div>
           </div>
 
           <div class="track-label" style="margin-top:18px;color:var(--steel)">Commit &amp; exit</div>
-          <div class="track">
-            <span class="state terminal" style="font-size:11px;padding:5px 9px">COMMIT</span><span class="arrow">→</span>
+          <div class="track" style="flex-wrap:wrap">
+            <span class="state terminal" style="font-size:11px;padding:5px 9px">COMMIT <span class="sub">enable_commits: false only</span></span><span class="arrow">→</span>
             <span class="state terminal" style="font-size:11px;padding:5px 9px">DONE</span>
           </div>
+          <div class="branch" style="margin-top:8px">
+            <div class="bln"><b style="color:var(--text)">enable_commits: true</b> → the batch auto-commits <b>inline on the terminal E2E_VERIFY advance</b> → straight to <span class="state" style="padding:3px 7px;font-size:10.5px">ORIENT</span> / <span class="state terminal" style="padding:3px 7px;font-size:10.5px">DONE</span>. COMMIT is skipped.</div>
+            <div class="bln"><b style="color:var(--text)">enable_commits: false</b> → <span class="state terminal" style="padding:3px 7px;font-size:10.5px">COMMIT</span>, no git operation.</div>
+          </div>
           <div class="note-box" style="margin-top:10px">
-            <b>COMMIT status:</b> passed if all 3 loops passed; force-accepted if any loop hit max_rounds.
+            <b>Item status</b> is decided at that batch-terminal boundary either way: passed if all 3 loops passed; force-accepted (failed) if any loop hit max_rounds.
             Three independent round budgets: <code>eval</code> / <code>qa</code> / <code>e2e</code>.
             <b>DONE exit</b> uses same routing as implementing.
           </div>
@@ -447,7 +472,7 @@
             <tr><td>IMPLEMENT</td><td class="dot-no">·</td><td class="dot-no">·</td><td class="dot-no">·</td><td class="dot-yes">✓</td><td class="dot-yes">✓</td></tr>
             <tr class="cat-header"><td colspan="6">Acceptance</td></tr>
             <tr><td>ACCEPT</td><td class="dot-yes">✓</td><td class="dot-no">·</td><td class="dot-yes">✓</td><td class="dot-no">·</td><td class="dot-no">·</td></tr>
-            <tr><td>COMMIT</td><td class="dot-no">·</td><td class="dot-no">·</td><td class="dot-no">·</td><td class="dot-yes">✓</td><td class="dot-yes">✓</td></tr>
+            <tr><td>COMMIT <span class="sub" style="color:var(--muted-2)">enable_commits: false only</span></td><td class="dot-no">·</td><td class="dot-no">·</td><td class="dot-no">·</td><td class="dot-yes">✓</td><td class="dot-yes">✓</td></tr>
             <tr class="cat-header"><td colspan="6">Terminal</td></tr>
             <tr><td>DONE</td><td class="dot-yes">✓</td><td class="dot-no">·</td><td class="dot-yes">✓ *</td><td class="dot-yes">✓</td><td class="dot-yes">✓</td></tr>
             <tr><td>COMPLETE</td><td class="dot-yes">✓</td><td class="dot-no">·</td><td class="dot-no">·</td><td class="dot-no">·</td><td class="dot-no">·</td></tr>
@@ -486,7 +511,7 @@
         </div>
         <div class="leg-item">
           <div class="sw"><span class="state terminal" style="padding:5px 9px;font-size:10px">DONE</span></div>
-          <div class="txt"><b>Terminal state</b>ACCEPT · COMMIT · COMPLETE · DONE — phase advances</div>
+          <div class="txt"><b>Terminal state</b>ACCEPT · COMMIT · COMPLETE · DONE — phase advances. COMMIT is reachable only when <code>enable_commits: false</code>; with commits enabled the batch-terminal commit runs inline on the terminal EVALUATE (implementing) or E2E_VERIFY (ui_implementing) advance and the state is never entered</div>
         </div>
         <div class="leg-item">
           <div class="sw"><span class="arrow loopback" style="font-size:18px">⟲</span></div>

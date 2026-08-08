@@ -118,6 +118,18 @@
         <span style="color:var(--muted-2)">— or</span>
         <span class="route">advance --from &lt;path&gt;</span>
       </div>
+      <div class="reveal" style="max-width:760px;margin:16px auto 0;background:var(--iron-2);border:1px solid var(--line);border-radius:12px;padding:16px 20px;font-size:13px;color:var(--muted);line-height:1.6">
+        <div style="font-family:'JetBrains Mono',monospace;font-size:11px;color:var(--ember-hot);letter-spacing:.14em;text-transform:uppercase;margin-bottom:8px">Planning readiness gate — cold-start precondition</div>
+        Every domain in the plan queue about to drive planning must have an <b style="color:var(--text)">empty</b> workspace at <code>&lt;domain-path&gt;/&lt;workspace_dir&gt;/</code> (default <code>.forge_workspace</code>). Absent, empty, or holding only empty subdirectories counts as clean; <b style="color:var(--text)">any</b> regular file at any depth — a leftover <code>plan.json</code>, an eval report, even a lone <code>.gitkeep</code> — counts as dirty, as does a directory that cannot be traversed.
+        <br><br>
+        <b style="color:var(--text)">Blocked</b> → the entry is refused, the dirty domains and their paths print with the workspace close-out remediation, exit 1. Nothing is mutated: <code>init</code> writes no state file, a phase shift performs no transition.
+        <br><br>
+        <b style="color:var(--text)">Gated</b> (the three cold-start entries): <code>init --phase planning --from &lt;queue&gt;</code> · the <code>generate_planning_queue</code> → <code>planning</code> shift · the <code>specifying</code> → <code>generate_planning_queue</code> <code>--from</code> skip.
+        <br>
+        <b style="color:var(--text)">Not gated</b> (intra-session domain boundaries): <code>planning</code> → <code>planning</code> · <code>implementing</code>/<code>ui_implementing</code> → <code>planning</code>. Cold start already inspected every domain in this cycle's queue; re-gating would false-block the multi-domain continuation, whose earlier domains now legitimately hold a full workspace.
+        <br><br>
+        Query it at any time, mutating nothing: <code>forgectl preflight [--from &lt;plan-queue.json&gt;]</code>. The gate is stateless — it records no marker and stores nothing in the state file.
+      </div>
     </div>
 
     <!-- PHASE 3 -->
@@ -193,17 +205,22 @@
         </div>
         <p class="desc reveal">
           The default code path. Implements each batch item, evaluates, and commits.
-          <strong>FAIL re-enters</strong> implement at round 2+; more batches loop back until the queue drains.
+          <strong>FAIL re-enters</strong> implement at round 2+ — or re-enters EVALUATE directly under
+          <code>eval_mode: direct</code>; more batches loop back until the queue drains.
         </p>
         <div class="track-label reveal">Batch loop</div>
         <div class="track reveal">
           <span class="state">ORIENT</span><span class="arrow">→</span>
-          <span class="state">IMPLEMENT <span class="sub">1..n</span></span><span class="arrow">→</span>
+          <span class="state">IMPLEMENT <span class="sub">1..n · auto-commits every round</span></span><span class="arrow">→</span>
           <span class="state eval">EVALUATE</span>
           <span class="arrow loopback">⟲</span>
           <span class="state loop">IMPLEMENT <span class="sub">r2+</span></span><span class="arrow">→</span>
-          <span class="state">COMMIT</span><span class="arrow">→</span>
+          <span class="state">COMMIT <span class="sub">enable_commits: false only</span></span><span class="arrow">→</span>
           <span class="state terminal">DONE</span>
+        </div>
+        <div class="branch reveal" style="margin-top:16px">
+          <div class="bln"><span class="verdict pass">terminal verdict</span> branches on <code>enable_commits</code> — <b>true</b>: the batch auto-commits <b>inline on that same advance</b> and lands straight on ORIENT / DONE, COMMIT never appears. <b>false</b>: COMMIT, a bookkeeping state with no git operation.</div>
+          <div class="bln"><span class="verdict fail">non-terminal verdict</span> branches on <code>eval_mode</code> — <b>report / conversational</b>: IMPLEMENT round 2+. <b>direct</b>: EVALUATE self-loop, since the evaluator already made the corrections; IMPLEMENT runs once per batch and the self-loop carries the round increment.</div>
         </div>
         <div class="track-label reveal" style="margin:22px 0 8px">Detailed view</div>
         <a class="crumb" href="implementing.html" style="margin-bottom:0">Open the Implementing state machine →</a>
@@ -242,12 +259,13 @@
           <span class="state gate">E2E</span>
           <span class="arrow loopback">⟲</span>
           <span class="state loop">E2E_REMEDIATE</span><span class="arrow">→</span>
-          <span class="state">COMMIT</span><span class="arrow">→</span>
+          <span class="state">COMMIT <span class="sub">enable_commits: false only</span></span><span class="arrow">→</span>
           <span class="state terminal">DONE</span>
         </div>
         <div class="branch reveal" style="margin-top:16px">
           <div class="bln"><span class="state gate">QA</span> Playwright MCP — visual + interaction (<span class="verdict pass">QA_TEST</span> / <span class="verdict fail">UI_REFINE</span>)</div>
           <div class="bln"><span class="state gate">E2E</span> Playwright test runner — authored specs (<span class="verdict pass">E2E_VERIFY</span> / <span class="verdict fail">E2E_REMEDIATE</span>)</div>
+          <div class="bln"><span class="verdict pass">batch terminal</span> same branch as implementing — <code>enable_commits: true</code> auto-commits the batch inline on the terminal <b>E2E_VERIFY</b> advance and skips COMMIT; <code>false</code> enters COMMIT with no git operation. Item status is decided at that boundary.</div>
         </div>
         <div class="track-label reveal" style="margin:22px 0 8px">Detailed view</div>
         <a class="crumb" href="ui-implementing.html" style="margin-bottom:0">Open the UI Implementing state machine →</a>
@@ -274,6 +292,9 @@
       <div class="leg-item reveal"><div class="sw"><span class="arrow loopback" style="font-size:18px">⟲</span></div><div class="txt"><b>Loop back</b>Bounded by <code>eval.min_rounds</code> / <code>max_rounds</code></div></div>
       <div class="leg-item reveal"><div class="sw"><span class="ps" style="font-family:'JetBrains Mono';font-size:10px;color:var(--ember-hot);font-weight:700">SHIFT</span></div><div class="txt"><b>PHASE_SHIFT</b>Hard stop; engineer refreshes context. Mutates plan.json (passes + rounds)</div></div>
       <div class="leg-item reveal"><div class="sw"><span style="font-family:'JetBrains Mono';font-size:10px;color:var(--spark)">kind</span></div><div class="txt"><b>Plan routing</b><span style="color:var(--spark)">code</span> → implementing · <span style="color:var(--spark)">ui</span> → ui_implementing</div></div>
+      <div class="leg-item reveal"><div class="sw"><span class="state" style="padding:5px 9px;font-size:10px">COMMIT</span></div><div class="txt"><b>COMMIT</b>Bookkeeping pause reached only when <code>enable_commits: false</code>; no git operation occurs there. With commits enabled the batch-terminal commit runs inline on the terminal EVALUATE (implementing) or E2E_VERIFY (ui_implementing) advance and COMMIT never appears</div></div>
+      <div class="leg-item reveal"><div class="sw"><span class="state gate" style="padding:5px 9px;font-size:10px">GATE</span></div><div class="txt"><b>Readiness gate</b>Cold-start precondition on entering planning: every incoming domain's workspace must be empty. Query with <code>forgectl preflight</code>; remediate with workspace close-out</div></div>
+      <div class="leg-item reveal"><div class="sw"><span style="font-family:'JetBrains Mono';font-size:10px;color:var(--steel)">mode</span></div><div class="txt"><b>eval_mode</b>Where a non-terminal verdict lands. <code>report</code>/<code>conversational</code> hand work back (REFINE, or IMPLEMENT round 2+); <code>direct</code> loops the implementation phases' EVALUATE back onto itself — the evaluator already made the corrections, so IMPLEMENT runs once per batch and the self-loop carries the round increment</div></div>
     </div>
   </section>
 

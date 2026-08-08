@@ -155,7 +155,7 @@
   ║                           │                                            ║
   ║                           ▼                                            ║
   ║  ┌────────────────────────────────────────────────────────────────┐   ║
-  ║  │  COMMIT  (batch boundary pause — only when enable_commits: false)│  ║
+  ║  │  COMMIT (batch boundary pause — only if enable_commits: false) │   ║
   ║  │                                                                │   ║
   ║  │  No git operation occurs (enable_commits is false at this      │   ║
   ║  │  point by construction — the true path skips this state).      │   ║
